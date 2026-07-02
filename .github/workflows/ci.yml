@@ -1,13 +1,15 @@
-# CI — typecheck, lint, boundary lint, test, build.
+# CI — typecheck, lint, boundary lint, boundary self-test, test, build.
 #
-# Runs on every push and every PR. Each job below is intentionally a separate
-# step so the failure surface is obvious in the Actions UI (a red "lint:boundaries"
-# step is more useful than a red "checks" step).
+# Runs on every PR (any branch) and on pushes to long-lived branches only.
+# Story branches emit a `pull_request` event via PR #17-style workflow, so
+# a story push doesn't need a duplicate `push` run.
 name: CI
 
 on:
   push:
-    branches: ['**']
+    # Only long-lived integration/deploy branches — avoids the duplicate
+    # push + pull_request runs on story branches (Delivery Guardian #3).
+    branches: [main, 'feat/**']
   pull_request:
     branches: ['**']
 
@@ -24,6 +26,10 @@ jobs:
   verify:
     name: verify (node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    # Wall-clock cap: the whole pipeline runs in ~30s today; 10 min is a
+    # generous ceiling that still contains any hung dev-server / infinite
+    # loop introduced by later stories (Delivery Guardian #2).
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -49,6 +55,12 @@ jobs:
 
       - name: Lint boundaries (dependency-cruiser)
         run: npm run lint:boundaries
+
+      - name: Boundary rule self-test
+        # Executes fixture violations against every boundary rule and
+        # asserts each one fires. Blocks CI if a rule ever silently
+        # degrades to no-op (as `includeOnly: ^src/` did in S1 review).
+        run: npm run test:boundaries
 
       - name: Test (vitest)
         run: npm run test

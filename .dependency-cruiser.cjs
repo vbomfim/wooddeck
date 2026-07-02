@@ -1,100 +1,118 @@
 /**
- * dependency-cruiser boundary rule for wooddeck.
+ * dependency-cruiser boundary rules for wooddeck.
  *
- * Enforces the layer discipline mandated by spec § NFR-011:
- *   domain      → nothing (internal); MUST NOT import react/three/DOM (NFR-010)
- *   application → domain
- *   persistence → domain
- *   state       → application + domain
- *   scene       → state + domain
- *   ui          → state + application + domain
+ * Enforces the layer discipline mandated by spec § NFR-011 as an EXACT
+ * ALLOWLIST — each `from` layer may import ONLY the modules under its
+ * declared allowed set of `^src/*` prefixes. Any `^src/...` import that
+ * falls outside the allowed set fires the rule and blocks CI.
  *
- * A violation exits `depcruise` non-zero and names the offending file.
+ * Allowlist:
+ *   domain      → only src/domain/**                 (+ external: no react/three/DOM per NFR-010)
+ *   application → only src/(application|domain)/**
+ *   persistence → only src/(persistence|domain)/**
+ *   state       → only src/(state|application|domain)/**
+ *   scene       → only src/(scene|state|domain)/**
+ *   ui          → only src/(ui|state|application|domain)/**
  *
- * The `not.path` regex on each rule is a positive allow-list expressed
- * negatively — i.e., "the module we're importing must be OUTSIDE the
- * forbidden set." Non-`src/*` imports (node_modules, node built-ins,
- * relative-within-same-layer, `src/test/`) are handled by the `from`
- * scope: rules only fire when `from.path` matches the layer.
+ * `App.tsx` and `main.tsx` are the composition root and live OUTSIDE
+ * every layer folder — so a layer that tries to reach into the root
+ * (e.g. `import '../App'`) will be flagged. That prevents accidental
+ * inverted composition.
  *
- * Each rule below has a dedicated `name` so violation output tells you
- * exactly which boundary was crossed.
+ * A **framework ban** rule ALSO forbids `domain/` from importing
+ * `react` / `react-dom` / `three` / `@react-three/*` / `@testing-library/*`
+ * / `jsdom` — belt-and-suspenders alongside the ESLint override on
+ * `src/domain/**` (see `eslint.config.js`).
+ *
+ * PRIOR BUG NOTE (fixed): the earlier config had `options.includeOnly:
+ * '^src/'`, which stripped npm packages from the graph entirely and
+ * left `domain-no-react-three-dom` as a silent no-op. The graph must
+ * INCLUDE npm edges (via `to.dependencyTypes: npm*`) for that rule
+ * to fire. `doNotFollow: node_modules` still prevents recursion.
+ *
+ * A permanent self-test harness (`scripts/boundary-selftest.mjs`)
+ * exercises every rule with fixture violations so the gate can never
+ * silently degrade again.
  */
+
+// Layer allowlist — each entry is an alternation used inside `pathNot`
+// under a `to.path: '^src/'` clause. Kept alphabetical inside the group
+// for readability.
+const ALLOWED_SRC_PATHS = {
+  domain: '^src/domain/',
+  application: '^src/(application|domain)/',
+  persistence: '^src/(persistence|domain)/',
+  state: '^src/(application|domain|state)/',
+  scene: '^src/(domain|scene|state)/',
+  ui: '^src/(application|domain|state|ui)/',
+};
+
+// NPM package prefixes that domain/ must NEVER import (spec § NFR-010).
+//
+// IMPORTANT: dep-cruiser's `to.path` matches against the RESOLVED module
+// path, not the raw import specifier. So `import 'react'` resolves to
+// `node_modules/react/index.js`, and the regex must be anchored there.
+// We keep an anchor at both the direct package dir (`node_modules/react/`)
+// and any pnpm-style nested layout (`node_modules/**/node_modules/react/`)
+// via a `(^|/)node_modules/` prefix so hoisted and nested installs both
+// fire the rule. This bug was found by the S1 review self-test harness.
+const FRAMEWORK_PACKAGES = [
+  '(^|/)node_modules/react/',
+  '(^|/)node_modules/react-dom/',
+  '(^|/)node_modules/three/',
+  '(^|/)node_modules/@react-three/',
+  '(^|/)node_modules/@testing-library/',
+  '(^|/)node_modules/jsdom/',
+  '(^|/)node_modules/@types/react/',
+  '(^|/)node_modules/@types/three/',
+].join('|');
+
+/**
+ * Build an allowlist forbidden-rule for a layer:
+ *   "if a file under src/<layer>/ imports something under src/ that is
+ *   NOT under the allowed set, flag it."
+ */
+function allowlistRule(layer, allowedRegex) {
+  return {
+    name: `${layer}-allowlist`,
+    severity: 'error',
+    comment:
+      `src/${layer}/ may import ONLY from its allowlist: ${allowedRegex}. ` +
+      `Every other src/** import is a layer-boundary violation.`,
+    from: { path: `^src/${layer}/` },
+    to: {
+      path: '^src/',
+      pathNot: allowedRegex,
+    },
+  };
+}
+
 /** @type {import('dependency-cruiser').IConfiguration} */
 module.exports = {
   forbidden: [
-    // ---- domain: pure core; imports nothing from any other src/ layer ----
-    {
-      name: 'domain-no-siblings',
-      severity: 'error',
-      comment:
-        'domain/ is the pure core. It MUST NOT import from any other src/ layer (application, persistence, state, scene, ui).',
-      from: { path: '^src/domain/' },
-      to: { path: '^src/(application|persistence|state|scene|ui)/' },
-    },
+    // ---- per-layer exact allowlists ----------------------------------------
+    allowlistRule('domain', ALLOWED_SRC_PATHS.domain),
+    allowlistRule('application', ALLOWED_SRC_PATHS.application),
+    allowlistRule('persistence', ALLOWED_SRC_PATHS.persistence),
+    allowlistRule('state', ALLOWED_SRC_PATHS.state),
+    allowlistRule('scene', ALLOWED_SRC_PATHS.scene),
+    allowlistRule('ui', ALLOWED_SRC_PATHS.ui),
+
+    // ---- framework ban (domain must stay React/Three/DOM-free) -------------
     {
       name: 'domain-no-react-three-dom',
       severity: 'error',
       comment:
-        'spec NFR-010: domain/ MUST be unit-testable with no React, Three.js, or DOM. Move framework/geometry code to scene/ or application/.',
+        'spec § NFR-010: domain/ MUST be unit-testable with no React, Three.js, DOM, or ' +
+        'test-framework helpers. Move framework/geometry code to scene/ or application/.',
       from: { path: '^src/domain/' },
       to: {
-        path:
-          '^(react|react-dom|three|@react-three/|@testing-library/|jsdom|@types/react)',
+        dependencyTypes: ['npm', 'npm-dev', 'npm-peer', 'npm-optional', 'npm-no-pkg', 'npm-unknown'],
+        path: FRAMEWORK_PACKAGES,
       },
     },
 
-    // ---- application: use-cases; may only reach into domain ----
-    {
-      name: 'application-only-domain',
-      severity: 'error',
-      comment:
-        'application/ orchestrates use-cases against domain only. It MUST NOT import from persistence, state, scene, or ui — those are adapters and consumers.',
-      from: { path: '^src/application/' },
-      to: { path: '^src/(persistence|state|scene|ui)/' },
-    },
-
-    // ---- persistence: adapter over domain; nothing else internal ----
-    {
-      name: 'persistence-only-domain',
-      severity: 'error',
-      comment:
-        'persistence/ is an adapter that reads/writes the domain model. It MUST NOT import from application, state, scene, or ui.',
-      from: { path: '^src/persistence/' },
-      to: { path: '^src/(application|state|scene|ui)/' },
-    },
-
-    // ---- state: Zustand stores wiring application + domain ----
-    {
-      name: 'state-only-application-domain',
-      severity: 'error',
-      comment:
-        'state/ (Zustand stores) may only depend on application/ and domain/. It MUST NOT import from persistence (persistence is called via application), scene, or ui.',
-      from: { path: '^src/state/' },
-      to: { path: '^src/(persistence|scene|ui)/' },
-    },
-
-    // ---- scene: r3f components consuming state + domain read models ----
-    {
-      name: 'scene-only-state-domain',
-      severity: 'error',
-      comment:
-        'scene/ consumes the Layout render-contract from state/ + domain/. It MUST NOT import from application, persistence, or ui.',
-      from: { path: '^src/scene/' },
-      to: { path: '^src/(application|persistence|ui)/' },
-    },
-
-    // ---- ui: panels consuming state + application; NO scene reach-in ----
-    {
-      name: 'ui-no-scene-no-persistence',
-      severity: 'error',
-      comment:
-        'ui/ (panels) may depend on state/, application/, and domain/. It MUST NOT reach into scene/ internals or persistence/ directly.',
-      from: { path: '^src/ui/' },
-      to: { path: '^src/(scene|persistence)/' },
-    },
-
-    // ---- generic hygiene ----
+    // ---- generic hygiene ---------------------------------------------------
     {
       name: 'no-circular',
       severity: 'error',
@@ -105,16 +123,25 @@ module.exports = {
     {
       name: 'no-orphans',
       severity: 'warn',
-      comment: 'Files not reachable from an entry point are usually dead code or misplaced tests.',
+      comment:
+        'Files not reachable from an entry point are usually dead code or misplaced tests.',
       from: {
         orphan: true,
         pathNot: [
+          // Dotfiles and package-metadata JSON
           '(^|/)\\.[^/]+\\.(js|cjs|mjs|ts|json)$',
           '\\.d\\.ts$',
           '(^|/)tsconfig\\.[^/]+\\.json$',
+          // Tooling configs
           '(^|/)(babel|webpack|rollup|vite|vitest|jest|eslint|prettier|dependency-cruiser)\\.config\\.[^/]+$',
+          // Setup & placeholder files
           '(^|/)src/test/',
           '(^|/)\\.gitkeep$',
+          // Composition root — only reachable from index.html, which
+          // isn't part of the cruise graph.
+          '^src/(App|main)\\.tsx$',
+          // Public facades — imported via directory resolution.
+          '(^|/)index\\.(ts|tsx)$',
         ],
       },
       to: {},
@@ -122,6 +149,9 @@ module.exports = {
   ],
   options: {
     doNotFollow: {
+      // Boundary rules must observe the edge into node_modules to enforce
+      // the framework ban — but recursing INTO node_modules is pointless
+      // and slow, so we cut the traversal there.
       path: ['node_modules'],
     },
     tsConfig: {
@@ -129,10 +159,13 @@ module.exports = {
     },
     tsPreCompilationDeps: true,
     combinedDependencies: false,
-    includeOnly: '^src/',
+    // Historically this was `includeOnly: '^src/'` — that was a bug: it
+    // stripped npm edges from the graph so the framework ban never
+    // matched. Now we cruise the full graph and rely on `from.path`
+    // scoping + `doNotFollow: node_modules` to keep the run fast.
     exclude: {
-      // Test files are allowed to import across layers (test doubles, fixtures).
-      // Boundary rules apply to production code.
+      // Test files may import across layers for fixtures/doubles.
+      // Boundary rules apply to production code paths only.
       path: '\\.(test|spec)\\.(ts|tsx)$',
     },
     reporterOptions: {

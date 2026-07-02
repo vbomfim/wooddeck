@@ -12,7 +12,7 @@
     "url": "git+https://github.com/vbomfim/wooddeck.git"
   },
   "engines": {
-    "node": ">=22.12.0"
+    "node": ">=22.13.0"
   },
   "scripts": {
     "dev": "vite",
@@ -22,13 +22,14 @@
     "lint": "eslint .",
     "lint:boundaries": "depcruise --config .dependency-cruiser.cjs src",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:boundaries": "node scripts/boundary-selftest.mjs"
   },
   "dependencies": {
     "@react-three/drei": "10.7.7",
     "@react-three/fiber": "9.6.1",
-    "react": "^19.2.7",
-    "react-dom": "^19.2.7",
+    "react": "~19.2.7",
+    "react-dom": "~19.2.7",
     "three": "0.185.1",
     "zundo": "^2.3.0",
     "zustand": "^5.0.14"

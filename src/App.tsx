@@ -1,3 +1,5 @@
+import type { JSX } from 'react';
+
 /**
  * Scaffold placeholder for the wooddeck app shell.
  *
@@ -8,8 +10,15 @@
  * panel). The disclaimer text is rendered from day one because spec US3
  * AC2 requires it to be present for the "duration of the session" and
  * "cannot be dismissed" — no reason to defer that guarantee.
+ *
+ * NOTE: this file lives at `src/App.tsx` — OUTSIDE all layer folders
+ * (`domain/`, `application/`, `persistence/`, `state/`, `scene/`, `ui/`).
+ * It IS the composition root. Later stories will introduce
+ * `src/ui/AppShell.tsx` and `src/scene/DeckScene`, and this root file
+ * will wire them together WITHOUT `ui/` ever importing `scene/`
+ * (see docs/ARCHITECTURE.md § "Composition root").
  */
-export function App(): React.JSX.Element {
+export function App(): JSX.Element {
   return (
     <main>
       <h1>Hello wooddeck</h1>

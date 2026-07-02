@@ -11,7 +11,7 @@ Pre-alpha. Story S1 — project scaffold, tooling & CI — is the current work i
 
 ## Requirements
 
-- **Node.js ≥ 22.12** (LTS). See [`.nvmrc`](./.nvmrc).
+- **Node.js ≥ 22.13** (LTS). See [`.nvmrc`](./.nvmrc).
 - **npm** (ships with Node). Package-manager choice is npm; see the trade-off table in the spec.
 
 ## Getting started
@@ -35,6 +35,7 @@ Then open <http://localhost:5173> — you should see "Hello wooddeck."
 | `npm run typecheck`      | Run the TypeScript project references without emitting           |
 | `npm run lint`           | Run ESLint (flat config, `@typescript-eslint`, react-hooks)      |
 | `npm run lint:boundaries`| Run `dependency-cruiser` layer-boundary rules (spec § NFR-011)   |
+| `npm run test:boundaries`| Run the boundary self-test harness — writes fixture violations, asserts each rule fires, cleans up (guards against silent gate degradation) |
 | `npm run test`           | Run Vitest once and exit (used by CI)                            |
 | `npm run test:watch`     | Vitest in watch mode for TDD                                     |
 
