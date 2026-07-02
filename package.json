@@ -42,7 +42,7 @@
     "@eslint/js": "^10.0.1",
     "@vitejs/plugin-react": "^5.0.14",
     "@vitest/coverage-v8": "^4.1.9",
-    "dependency-cruiser": "^18.0.0",
+    "dependency-cruiser": "^17.4.3",
     "eslint": "^10.6.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^7.1.1",
