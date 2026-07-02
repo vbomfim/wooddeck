@@ -1,0 +1,60 @@
+{
+  "name": "wooddeck",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Browser-only DIY wood deck designer — 3D visualization with peel-back layers and IRC-style span warnings.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Vinicius Bomfim <vbomfim@gmail.com> (@vbomfim)",
+  "homepage": "https://github.com/vbomfim/wooddeck",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vbomfim/wooddeck.git"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b --noEmit",
+    "lint": "eslint .",
+    "lint:boundaries": "depcruise --config .dependency-cruiser.cjs src",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:boundaries": "node scripts/boundary-selftest.mjs"
+  },
+  "dependencies": {
+    "@react-three/drei": "10.7.7",
+    "@react-three/fiber": "9.6.1",
+    "react": "~19.2.7",
+    "react-dom": "~19.2.7",
+    "three": "0.185.1",
+    "zundo": "^2.3.0",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.185.0",
+    "@eslint/js": "^10.0.1",
+    "@vitejs/plugin-react": "^5.0.14",
+    "@vitest/coverage-v8": "^4.1.9",
+    "dependency-cruiser": "^18.0.0",
+    "eslint": "^10.6.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "fast-check": "^4.8.0",
+    "globals": "^17.7.0",
+    "jsdom": "^29.1.1",
+    "prettier": "^3.9.4",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.62.1",
+    "vite": "^8.1.3",
+    "vitest": "^4.1.9"
+  }
+}
