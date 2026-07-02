@@ -26,6 +26,7 @@
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
 
+import { UUID_V4_PATTERN } from './id';
 import type {
   DeckDesign,
   Layout,
@@ -44,7 +45,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 const GOLDEN_DECK_DESIGN: DeckDesign = {
-  id: '018f4e7a-c1c5-7a3f-8f52-3a0f6c9d1e4b',
+  id: '018f4e7a-c1c5-4a3f-8f52-3a0f6c9d1e4b',
   createdAt: '2026-07-02T21:00:00.000Z',
   footprint: { widthMm: 3658, lengthMm: 4877, heightMm: 914 },
   joist: {
@@ -66,11 +67,47 @@ const GOLDEN_DECK_DESIGN: DeckDesign = {
 
 // ---------------------------------------------------------------------------
 // AC4 — JSON round-trip must be byte-for-byte identical.
+//
+// SCOPE OF THIS TEST — read before extending:
+//
+//   The `stringify → parse → stringify` idempotence check below is
+//   NOT a proof of universal canonical serialization. `JSON.stringify`
+//   emits properties in INSERTION ORDER, and V8 / JSC preserve
+//   insertion order across `JSON.parse` — so the second round-trip
+//   is guaranteed to match the first for any object with the same
+//   construction order. What this test really pins is:
+//
+//     (a) `DeckDesign` construction order is CANONICAL (matches the
+//         order declared in `model.ts`),
+//     (b) no field carries a non-serializable value (function,
+//         `undefined`, `symbol`) or a `toJSON` shim that would drop
+//         it on the way through JSON,
+//     (c) the parsed value is DEEP-EQUAL to the source (defends
+//         against silent field drops that would still round-trip to
+//         "{}" idempotently on both sides).
+//
+//   TRUE byte-for-byte canonical serialization — sorting keys,
+//   normalizing number formats, unicode-NFC-normalizing strings — is
+//   the responsibility of S6's `.deck` serializer. This test only
+//   guarantees stable round-trip for canonically-constructed designs;
+//   S6 must layer a canonicalizer on top for arbitrary sources.
 // ---------------------------------------------------------------------------
 describe('model — AC4 DeckDesign JSON round-trip (golden fixture)', () => {
+  it('golden fixture id is a valid RFC 4122 v4 UUID', () => {
+    // Guards against a fixture drift where the id gets edited to a
+    // v7-shaped or otherwise-non-v4 value and the test file silently
+    // starts documenting the wrong contract for `DeckDesign.id`.
+    expect(GOLDEN_DECK_DESIGN.id).toMatch(UUID_V4_PATTERN);
+  });
+
   it('stringify → parse → stringify is byte-for-byte identical', () => {
     const first = JSON.stringify(GOLDEN_DECK_DESIGN);
     const parsed = JSON.parse(first) as unknown;
+    // Deep-equal check: catches silent field drops (e.g. a `toJSON`
+    // shim that strips one branch of the tree). Without this, the
+    // second-round-trip idempotence below is a language invariant,
+    // not a data-preservation guarantee.
+    expect(parsed).toEqual(GOLDEN_DECK_DESIGN);
     const second = JSON.stringify(parsed);
     expect(second).toBe(first);
   });
@@ -81,7 +118,7 @@ describe('model — AC4 DeckDesign JSON round-trip (golden fixture)', () => {
     // first exactly. We assert against the actual expected byte string
     // so a property rename or reordered field is caught IMMEDIATELY.
     const expected =
-      '{"id":"018f4e7a-c1c5-7a3f-8f52-3a0f6c9d1e4b",' +
+      '{"id":"018f4e7a-c1c5-4a3f-8f52-3a0f6c9d1e4b",' +
       '"createdAt":"2026-07-02T21:00:00.000Z",' +
       '"footprint":{"widthMm":3658,"lengthMm":4877,"heightMm":914},' +
       '"joist":{"material":{"nominal":"2x8","species":"PT","grade":"No2"},' +
@@ -182,6 +219,10 @@ describe('model — AC4 DeckDesign JSON round-trip (property test)', () => {
       fc.property(deckDesignArb, (design) => {
         const first = JSON.stringify(design);
         const parsed = JSON.parse(first) as unknown;
+        // Deep-equal check — same rationale as the golden fixture:
+        // catches silent field drops that would still round-trip
+        // idempotently on both sides.
+        expect(parsed).toEqual(design);
         const second = JSON.stringify(parsed);
         expect(second).toBe(first);
       }),

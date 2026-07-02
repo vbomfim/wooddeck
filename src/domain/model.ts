@@ -67,11 +67,44 @@ export type LumberNominal =
   | '5/4x6';
 
 /**
- * Species / material type. `"PT"` = pressure-treated softwood (SPF or
- * Southern Pine, treated with copper azole / similar), `"Cedar"` =
- * naturally rot-resistant Western Red Cedar, `"Composite"` = wood-
- * plastic composite decking (Trex / TimberTech / Fiberon family).
+ * Species / material CATEGORY — the user-facing "what am I buying?"
+ * dimension. This is deliberately NOT the same enum span-tables key
+ * on:
+ *
+ *   - `"PT"`        = pressure-treated softwood dimension lumber.
+ *                     Typically Southern Yellow Pine (SYP) in the
+ *                     Southeastern US / Hem-Fir in the West / SPF in
+ *                     Canada. Treatment is copper azole / MCA class.
+ *   - `"Cedar"`     = naturally rot-resistant Western Red Cedar.
+ *   - `"Composite"` = wood-plastic composite decking (Trex /
+ *                     TimberTech / Fiberon family). NON-STRUCTURAL
+ *                     for MVP span purposes — composite is only used
+ *                     as decking (5/4x6, 2x6-2x12 boards), never
+ *                     framing.
+ *
  * Composite is NOT graded — it uses `Grade: "NA"` (see below).
+ *
+ * ## IRC span-table mapping — deferred to S5
+ *
+ * The IRC-2018 joist and beam span tables (Table R502.3.1(1) etc.)
+ * key on STRUCTURAL SPECIES GROUPS (SPF, SYP/Southern Pine, DF-L,
+ * Hem-Fir, Redwood, Cedars), not on the material-category enum above.
+ * The Species → structural-group mapping is INTENTIONALLY not
+ * expressed in `model.ts` because:
+ *
+ *   1. The mapping depends on region + supplier (a "PT" board in
+ *      Georgia is almost certainly SYP; in California it may be
+ *      Hem-Fir), which is UI/region context S3 has no access to.
+ *   2. The mapping is a policy decision (which structural group do
+ *      you assume when the user picks "PT"?) that belongs with the
+ *      span-check logic, not with the material catalog.
+ *
+ * Consequently S5 (`span-check`) owns the `Species → structural
+ * species group` translation used at span-lookup time. Do NOT add
+ * that mapping to this file.
+ *
+ * @todo S5: implement `Species → IRC structural species group` for
+ *       span-table lookups. See `.github/tickets/05-span-check.md`.
  */
 export type Species = 'PT' | 'Cedar' | 'Composite';
 
@@ -115,6 +148,27 @@ export interface MaterialRef {
 }
 
 // ==========================================================
+// Shared geometry helpers
+// ==========================================================
+
+/**
+ * Overall extent of a rectangular volume in millimeters — the shape
+ * shared by `DeckDesign.footprint` (design intent) and `Layout.bounds`
+ * (actual axis-aligned bounding box of the produced layout).
+ *
+ * Field names use the DECK-DIMENSION vocabulary (width / length /
+ * height) rather than raw axis labels (x / y / z) so the design-time
+ * entity reads naturally regardless of the coordinate frame the
+ * layout engine renders in. See "LAYOUT COORDINATE FRAME" below for
+ * the axis mapping the render side commits to.
+ */
+export interface Dimensions3D {
+  readonly widthMm: Mm;
+  readonly lengthMm: Mm;
+  readonly heightMm: Mm;
+}
+
+// ==========================================================
 // Canonical design entity — the SOURCE OF TRUTH
 // ==========================================================
 
@@ -134,11 +188,7 @@ export interface MaterialRef {
 export interface DeckDesign {
   readonly id: string; // RFC 4122 v4 UUID (see id.ts)
   readonly createdAt: string; // ISO-8601 timestamp
-  readonly footprint: {
-    readonly widthMm: Mm;
-    readonly lengthMm: Mm;
-    readonly heightMm: Mm;
-  };
+  readonly footprint: Dimensions3D;
   readonly joist: {
     readonly material: MaterialRef;
     readonly spacingMm: Mm; // e.g. 406 mm ≈ 16" o.c.
@@ -161,6 +211,59 @@ export interface DeckDesign {
 }
 
 // ==========================================================
+// LAYOUT COORDINATE FRAME — the binding contract for S4 & S10
+// ==========================================================
+//
+// Every `LayoutMember.position` / `.size` / `.rotation` value below
+// is expressed in the following canonical world frame. S4 (layout
+// engine) PRODUCES values in this frame; S10 (three.js scene) and
+// S15 (2D plan view) CONSUME them unchanged. Any deviation is a
+// spec break — do not "helpfully" swap axes downstream.
+//
+// ## Axis mapping (right-handed — three.js default)
+//     +x  →  DECK WIDTH    (matches `DeckDesign.footprint.widthMm`)
+//     +y  →  UP / HEIGHT   (gravity opposes +y — matches
+//                            `DeckDesign.footprint.heightMm`)
+//     +z  →  DECK LENGTH   (matches `DeckDesign.footprint.lengthMm`)
+//
+// three.js's default camera and helpers assume this exact
+// right-handed frame with +y up, so no per-scene axis-flipping is
+// needed. Rationale for width→x rather than length→x: `x` reads as
+// the "horizontal on-screen" axis in the front elevation view, and
+// deck width is the dimension a homeowner sees when facing the
+// deck from the house.
+//
+// ## Origin
+//   `(0, 0, 0)` is the GROUND-LEVEL CENTER of the deck footprint —
+//   the point directly below the geometric middle of the deck
+//   surface, at the ground plane. Consequently:
+//     - `LayoutMember.position.x` ranges over `[-widthMm/2, +widthMm/2]`
+//     - `LayoutMember.position.z` ranges over `[-lengthMm/2, +lengthMm/2]`
+//     - `LayoutMember.position.y` ranges over `[0, footprint.heightMm]`
+//       for above-ground framing; footings extend into `-y`.
+//   Rationale for centering horizontally: camera orbit + preset
+//   views (top / front / iso) behave symmetrically with no
+//   recentering pass. Rationale for y=0 at the ground plane: it
+//   matches user intuition ("the deck sits ON the ground") and lets
+//   S9's ground plane render at y=0 with no offset.
+//
+// ## Rotation
+//   `LayoutMember.rotation` is Euler angles in RADIANS, applied in
+//   `'XYZ'` order — three.js's `Object3D.rotation` default. For MVP
+//   framing every member is axis-aligned, so all three components
+//   are typically `0`; the field is present so post-MVP diagonals /
+//   stairs / attached decks do not need a schema migration.
+//
+// ## Why this section lives in `model.ts`
+//   S4 (producer) and S10 / S15 (consumers) both need this
+//   contract. Placing it in the engine would force the scene to
+//   import from S4 (violating the domain-only import graph for
+//   scene per NFR-011). Placing it in the scene would give the
+//   engine no shared reference. It belongs at the type boundary —
+//   here.
+// ==========================================================
+
+// ==========================================================
 // Layout — the render contract (produced by S4, consumed by S10)
 // ==========================================================
 
@@ -178,17 +281,23 @@ export type MemberKind = 'joist' | 'beam' | 'post' | 'footing' | 'board';
  * The layout engine (S4) computes every field — the scene performs
  * ZERO geometry math (FR-005 + Code Review Guardian finding #3).
  *
+ * All spatial fields are expressed in the world frame documented in
+ * the "LAYOUT COORDINATE FRAME" section above (right-handed;
+ * +x=width, +y=up, +z=length; origin at ground-level center of
+ * footprint; Euler XYZ order).
+ *
  *   - `id`       is stable across a re-layout of the same design so
  *                warnings + React reconciliation stay keyed correctly.
  *   - `position` is the geometric CENTER of the member (matches
- *                three.js `Object3D.position` semantics).
- *   - `size`     is the FULL EXTENT along each axis (three.js
+ *                three.js `Object3D.position` semantics), in the
+ *                world frame above.
+ *   - `size`     is the FULL EXTENT along each world axis (three.js
  *                `BoxGeometry` uses full-extent widths, so no ×2
- *                needed in the scene).
- *   - `rotation` is radians. For MVP framing the values are usually
- *                all zero (axis-aligned members), but the field is
- *                present so post-MVP diagonals / stairs / attached
- *                decks do not need a schema change.
+ *                needed in the scene). `size.x` is thus the extent
+ *                along DECK WIDTH, `size.y` along HEIGHT, `size.z`
+ *                along DECK LENGTH.
+ *   - `rotation` is Euler radians in `'XYZ'` order — usually all
+ *                zero for MVP axis-aligned framing.
  */
 export interface LayoutMember {
   readonly id: string;
@@ -204,15 +313,16 @@ export interface LayoutMember {
  * every time the source `DeckDesign` changes. `designId` matches
  * `DeckDesign.id` so consumers can correlate warnings, tooltips,
  * and layer visibility state to the source design.
+ *
+ * `bounds` is the axis-aligned bounding box of every member in the
+ * world frame documented above. `bounds.widthMm` / `.lengthMm` /
+ * `.heightMm` therefore align with the +x / +z / +y world axes
+ * respectively (see "LAYOUT COORDINATE FRAME").
  */
 export interface Layout {
   readonly designId: string;
   readonly computedAt: string; // ISO-8601
-  readonly bounds: {
-    readonly widthMm: Mm;
-    readonly lengthMm: Mm;
-    readonly heightMm: Mm;
-  };
+  readonly bounds: Dimensions3D;
   readonly members: readonly LayoutMember[];
 }
 
