@@ -45,6 +45,7 @@ const ROOT = resolve(fileURLToPath(import.meta.url), '..', '..');
 // setup + teardown makes cross-run pollution impossible.
 const SELFTEST_DIRS = [
   resolve(ROOT, 'src', 'domain', '__selftest__'),
+  resolve(ROOT, 'src', 'domain', 'spans', '__selftest__'),
   resolve(ROOT, 'src', 'application', '__selftest__'),
   resolve(ROOT, 'src', 'persistence', '__selftest__'),
   resolve(ROOT, 'src', 'state', '__selftest__'),
@@ -175,6 +176,24 @@ export const stubSave = 'stub';
     ],
     tool: 'depcruise',
     expectedRule: 'state-allowlist',
+    mustNameFile: true,
+  },
+  {
+    // Code Review Guardian PR#24 Opus finding #1 — the layer allowlist
+    // does NOT catch intra-src/domain/spans/ imports. This fixture
+    // proves the belt-and-suspenders `span-check-no-irc-tables` rule
+    // fires when span-check imports the concrete IRC data module.
+    // (We violate the rule from a copy of span-check inside
+    // __selftest__/ so we don't have to briefly break the real
+    // production module.)
+    label: 'BLOCK-2f: span-check imports irc-2018-tables (intra-domain)',
+    path: 'src/domain/spans/__selftest__/span-check.ts',
+    contents: `// self-test fixture — MUST fail lint:boundaries (span-check-no-irc-tables)
+import { IrcSpanTable } from '../irc-2018-tables';
+export const _ = IrcSpanTable;
+`,
+    tool: 'depcruise',
+    expectedRule: 'span-check-no-irc-tables',
     mustNameFile: true,
   },
   {

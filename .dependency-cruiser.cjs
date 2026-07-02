@@ -112,6 +112,24 @@ module.exports = {
       },
     },
 
+    // ---- intra-domain dependency-inversion (Code Review Guardian PR#24 Opus#1)
+    //
+    // `src/domain/spans/span-check.ts` MUST depend on the `SpanTable`
+    // INTERFACE only — never on the concrete `irc-2018-tables.ts`
+    // module. The per-layer allowlist above does NOT catch this
+    // (both files sit under src/domain/); this rule is the second
+    // gate. A grep-based unit test in span-check.test.ts is the
+    // third (belt + suspenders — see span-check.ts module header).
+    {
+      name: 'span-check-no-irc-tables',
+      severity: 'error',
+      comment:
+        'span-check.ts must depend on the SpanTable interface only, ' +
+        'never on irc-2018-tables.ts (Code Review Guardian PR#24 finding #4).',
+      from: { path: '^src/domain/spans/(?:__selftest__/)?span-check\\.ts$' },
+      to: { path: '^src/domain/spans/irc-2018-tables' },
+    },
+
     // ---- generic hygiene ---------------------------------------------------
     {
       name: 'no-circular',
