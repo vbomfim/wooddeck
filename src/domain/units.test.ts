@@ -407,3 +407,243 @@ describe('units — AC7 round-trip property (parse(format(mm)) ≈ mm within ±1
     );
   });
 });
+
+// -------------------------------------------------------------
+// Non-finite input guards — pair-fix iteration 1 (Blocking #1).
+//
+// Two failure modes are covered here:
+//
+//   a. The PARSER can synthesize `Infinity` from a very long digit run
+//      (e.g. a 400-digit magnitude in front of a unit), because
+//      `parseFloat` returns `Infinity` past `Number.MAX_VALUE`. We
+//      require it to raise `UnitParseError` (with `.input` preserved),
+//      NOT return a poisoned `Mm`.
+//
+//   b. Public API consumers (`formatLength`, `mmToFtIn`, and the
+//      numeric inputs of the converters) MUST reject `NaN` / `±Infinity`
+//      with a prompt throw. Both reviewers found that `mmToFtIn(NaN)`
+//      and `formatLength(Infinity, "imperial")` HANG the process in the
+//      GCD loop (`NaN !== 0` is always true). The regression tests use
+//      short vitest timeouts so a re-introduced hang is caught, not a
+//      test-runner timeout.
+// -------------------------------------------------------------
+describe('units — non-finite parser magnitudes reject with UnitParseError', () => {
+  it('rejects a >310-digit numeric prefix (parseFloat overflows to Infinity)', () => {
+    const huge = '1' + '2'.repeat(400) + ' m';
+    expect(() => parseLength(huge, 'metric')).toThrow(UnitParseError);
+    try {
+      parseLength(huge, 'metric');
+      expect.fail('expected parseLength to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(UnitParseError);
+      if (err instanceof UnitParseError) {
+        expect(err.input).toBe(huge);
+      }
+    }
+  });
+
+  it('rejects a huge magnitude used with imperial feet', () => {
+    const huge = '9'.repeat(320) + ' ft';
+    expect(() => parseLength(huge, 'imperial')).toThrow(UnitParseError);
+  });
+
+  it('rejects a huge magnitude used with bare imperial default', () => {
+    const huge = '9'.repeat(320);
+    expect(() => parseLength(huge, 'imperial')).toThrow(UnitParseError);
+  });
+});
+
+describe('units — assertMm guard on public consumers (NaN / Infinity)', () => {
+  // Short timeout so a re-introduced GCD-loop hang is caught fast.
+  const FAST = 200;
+
+  it('formatLength(Infinity, "imperial") throws promptly (must not hang)', () => {
+    expect(() => formatLength(Number.POSITIVE_INFINITY, 'imperial')).toThrow(RangeError);
+  }, FAST);
+
+  it('formatLength(NaN, "imperial") throws promptly', () => {
+    expect(() => formatLength(Number.NaN, 'imperial')).toThrow(RangeError);
+  }, FAST);
+
+  it('formatLength(Infinity, "metric") throws promptly', () => {
+    expect(() => formatLength(Number.POSITIVE_INFINITY, 'metric')).toThrow(RangeError);
+  }, FAST);
+
+  it('formatLength(NaN, "metric") throws promptly', () => {
+    expect(() => formatLength(Number.NaN, 'metric')).toThrow(RangeError);
+  }, FAST);
+
+  it('mmToFtIn(NaN) throws promptly (GCD-loop hang regression)', () => {
+    expect(() => mmToFtIn(Number.NaN)).toThrow(RangeError);
+  }, FAST);
+
+  it('mmToFtIn(Infinity) throws promptly (GCD-loop hang regression)', () => {
+    expect(() => mmToFtIn(Number.POSITIVE_INFINITY)).toThrow(RangeError);
+  }, FAST);
+
+  it('mmToMeters(NaN) throws', () => {
+    expect(() => mmToMeters(Number.NaN)).toThrow(RangeError);
+  });
+
+  it('mmToMeters(Infinity) throws', () => {
+    expect(() => mmToMeters(Number.POSITIVE_INFINITY)).toThrow(RangeError);
+  });
+
+  it('ftInToMm(NaN, 0) throws', () => {
+    expect(() => ftInToMm(Number.NaN, 0)).toThrow(RangeError);
+  });
+
+  it('ftInToMm(0, Infinity) throws', () => {
+    expect(() => ftInToMm(0, Number.POSITIVE_INFINITY)).toThrow(RangeError);
+  });
+
+  it('metersToMm(NaN) throws', () => {
+    expect(() => metersToMm(Number.NaN)).toThrow(RangeError);
+  });
+});
+
+// -------------------------------------------------------------
+// Negative-`Mm` guards — pair-fix iteration 1 (Blocking #2).
+//
+// Prior to the fix, `formatLength(-100, "imperial")` silently dropped
+// the sign (`"8 1/16″"`), and `formatLength(-100, "metric")` emitted
+// `"-100 mm"` which then fails to re-parse (asymmetric). We now
+// symmetrically REJECT any negative Mm reaching the public API.
+// -------------------------------------------------------------
+describe('units — negative Mm rejection (symmetric)', () => {
+  it('formatLength(-100, "imperial") throws RangeError', () => {
+    expect(() => formatLength(-100, 'imperial')).toThrow(RangeError);
+  });
+
+  it('formatLength(-100, "metric") throws RangeError', () => {
+    expect(() => formatLength(-100, 'metric')).toThrow(RangeError);
+  });
+
+  it('formatLength(-1, "imperial") throws RangeError (small negative)', () => {
+    expect(() => formatLength(-1, 'imperial')).toThrow(RangeError);
+  });
+
+  it('mmToFtIn(-100) throws RangeError', () => {
+    expect(() => mmToFtIn(-100)).toThrow(RangeError);
+  });
+
+  it('mmToMeters(-100) throws RangeError', () => {
+    expect(() => mmToMeters(-100)).toThrow(RangeError);
+  });
+
+  it('ftInToMm(-1, 0) throws RangeError', () => {
+    expect(() => ftInToMm(-1, 0)).toThrow(RangeError);
+  });
+
+  it('ftInToMm(0, -1) throws RangeError', () => {
+    expect(() => ftInToMm(0, -1)).toThrow(RangeError);
+  });
+
+  it('metersToMm(-1) throws RangeError', () => {
+    expect(() => metersToMm(-1)).toThrow(RangeError);
+  });
+});
+
+// -------------------------------------------------------------
+// Embedded-negative parser hole — pair-fix iteration 1 (Blocking #3).
+//
+// Previously the FT_IN_SEP regex `[\s-]*` swallowed any combination of
+// whitespace and `-` characters between feet and inches. That let
+// `"12 ft -6 in"`, `"12' -6\""`, `"12'---6\""` etc. parse as POSITIVE
+// values, silently discarding the user's `-`. The fix restricts the
+// separator to ONE of:
+//   - zero-or-more whitespace only, OR
+//   - exactly one directly-adjacent `-` (no whitespace on either side).
+//
+// The single-dash carpenter form `"12'-6\""` MUST still parse.
+// -------------------------------------------------------------
+describe('units — embedded-negative parser rejections', () => {
+  const cases: readonly string[] = [
+    '12 ft -6 in',
+    '12 ft - 6 in',
+    `12' -6"`,
+    `12' - 1/2"`,
+    `12'---6"`,
+    // Additional: dash-after-magnitude
+    `12'-  6"`,
+    `12'- 6"`,
+    `12' -6 1/2"`,
+    `12ft -6in`,
+  ];
+  for (const input of cases) {
+    it(`rejects ${JSON.stringify(input)} with UnitParseError`, () => {
+      expect(() => parseLength(input, 'imperial')).toThrow(UnitParseError);
+    });
+  }
+
+  it('still accepts the single-adjacent-dash form "12\'-6\\"" → 3810 mm', () => {
+    expect(parseLength(`12'-6"`, 'imperial')).toBe(3810);
+  });
+
+  it('still accepts single-dash with fraction "12\'-6 1/2\\"" → 3823 mm', () => {
+    expect(parseLength(`12'-6 1/2"`, 'imperial')).toBe(3823);
+  });
+});
+
+// -------------------------------------------------------------
+// safeFraction divide-by-zero across all four dispatch paths
+// (pair-fix iteration 1 — Medium #4).
+//
+// The `denominator === 0` branch existed but was untested. These
+// regression tests exercise every regex path that funnels through
+// `safeFraction`, ensuring UnitParseError fires everywhere and that
+// `.input` is preserved end-to-end.
+// -------------------------------------------------------------
+describe('units — safeFraction divide-by-zero coverage', () => {
+  const zeroCases: readonly string[] = [
+    `1/0"`, // pure fraction (IMP_IN_PURE_FRAC_RE)
+    `6 1/0"`, // inches mixed (IMP_IN_MIXED_FRAC_RE)
+    `12' 1/0"`, // ft + pure fraction (IMP_FT_FRAC_ONLY_RE)
+    `12' 6 1/0"`, // ft + inches + fraction (IMP_FT_IN_FRAC_RE)
+  ];
+
+  for (const input of zeroCases) {
+    it(`rejects ${JSON.stringify(input)} with UnitParseError (denominator zero)`, () => {
+      expect(() => parseLength(input, 'imperial')).toThrow(UnitParseError);
+      try {
+        parseLength(input, 'imperial');
+        expect.fail('expected parseLength to throw');
+      } catch (err) {
+        expect(err).toBeInstanceOf(UnitParseError);
+        if (err instanceof UnitParseError) {
+          expect(err.input).toBe(input);
+        }
+      }
+    });
+  }
+});
+
+// -------------------------------------------------------------
+// Non-integer `Mm` policy — pair-fix iteration 1 (Medium #5).
+//
+// Decision: accept non-integer Mm on the public API and ROUND them
+// internally, rather than throwing. Rationale in the units.ts header
+// (also in the PR description): rejecting would force every caller
+// that computes an Mm (e.g. `existing_mm * 0.75` for a scale factor)
+// to wrap in `Math.round`, which is boilerplate that provides no
+// additional safety. These tests LOCK IN the current rounding
+// behavior so a future change is intentional, not accidental.
+// -------------------------------------------------------------
+describe('units — non-integer Mm rounding is documented & locked-in', () => {
+  it('formatLength(3.7, "metric") === "4 mm" (rounds internally)', () => {
+    expect(formatLength(3.7, 'metric')).toBe('4 mm');
+  });
+
+  it('formatLength(3.4, "metric") === "3 mm" (rounds down)', () => {
+    expect(formatLength(3.4, 'metric')).toBe('3 mm');
+  });
+
+  it('formatLength(3500.4, "metric") preserves m precision (rounds mm)', () => {
+    // 3500.4 → treated as 3500 mm → "3.5 m".
+    expect(formatLength(3500.4, 'metric')).toBe('3.5 m');
+  });
+
+  it('mmToFtIn(3823.4) === mmToFtIn(3823) (rounds sixteenths internally)', () => {
+    expect(mmToFtIn(3823.4)).toEqual(mmToFtIn(3823));
+  });
+});

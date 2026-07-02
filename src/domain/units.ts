@@ -32,9 +32,9 @@
  *     minus sign to a naive parser.
  *
  * The parser ACCEPTS the alternative forms (`'`, `"`, `ft`, `in`, `feet`,
- * `inches`, and a `-` separator between feet and inches) so users are
- * not punished for typing what they know, but everything the app emits
- * uses the canonical `12′ 6″` style.
+ * `inches`, and a *single directly-adjacent* `-` between the feet mark
+ * and inches) so users are not punished for typing what they know, but
+ * everything the app emits uses the canonical `12′ 6″` style.
  *
  * ## Bare-number semantics
  *
@@ -56,6 +56,43 @@
  * MVP scope decision from ticket §15 — locale-aware parsing is out of
  * scope for the MVP.
  *
+ * ## Parser tolerances (case-insensitive, permissive whitespace)
+ *
+ * - All input is lower-cased before regex matching, so `12 FT`, `12 Ft`,
+ *   `3.5 M`, `350 CM` are all accepted.
+ * - The inch marker is OPTIONAL after the inches magnitude in feet+inches
+ *   combos, so `12 ft 6` and `12'6` parse as `12 ft 6 in` (mirrors
+ *   carpenter-shorthand). The inch marker is REQUIRED for inches-only
+ *   forms so a bare `6` doesn't ambiguously become 6 inches when the
+ *   `defaultSystem` is imperial (where bare = feet).
+ *
+ * ## Range & finiteness policy
+ *
+ * The public API assumes `Mm` is a **finite, non-negative `number`**.
+ * Every entry point (`formatLength`, `mmToFtIn`, `mmToMeters`,
+ * `ftInToMm`'s numeric args, `metersToMm`'s numeric arg) validates via
+ * `assertMm` / `assertNonNegativeFinite` and throws `RangeError` on
+ * `NaN` / `±Infinity` / negative input. This is a HARD requirement,
+ * not defensive fluff: without it, `NaN` propagating into the
+ * sixteenth-of-an-inch GCD loop hangs the process because
+ * `NaN !== 0` is always true (a real DoS vector).
+ *
+ * The parser applies the same rejection at the input boundary
+ * (`UnitParseError` instead of `RangeError`, since the failure mode is
+ * "user typed a bad string" rather than "programmer passed a bad
+ * number"). Concretely, a very long digit run whose `parseFloat`
+ * overflows to `Infinity` is rejected with `UnitParseError`.
+ *
+ * ## Non-integer `Mm` policy
+ *
+ * Non-integer `Mm` values ARE accepted by the public API. Formatters
+ * and converters round internally (`Math.round` for metric magnitudes,
+ * sixteenth-of-an-inch integer rounding for imperial). Rationale: many
+ * upstream computations naturally produce a `number` with sub-mm float
+ * drift (e.g. `existing_mm * 0.75`); forcing every caller to
+ * pre-`Math.round` adds boilerplate without new safety. The rounding
+ * behaviour is locked in by tests in `units.test.ts`.
+ *
  * ## Framework / DOM ban
  *
  * This file lives under `src/domain/**` and must remain framework-free
@@ -70,7 +107,9 @@
  * Parsing is regex-based (see `parseLength`). NO `eval` / `Function`
  * / dynamic-import is used. All patterns are anchored (`^…$`) so a
  * malicious input cannot cause catastrophic backtracking against
- * unbounded contexts.
+ * unbounded contexts. Length magnitudes whose numeric value overflows
+ * `Number.MAX_VALUE` (~1.8e308) are rejected — the parser cannot
+ * synthesize `Infinity` and hand it to downstream math.
  */
 
 // ==========================================================
@@ -169,22 +208,69 @@ export class UnitParseError extends Error {
 }
 
 // ==========================================================
+// Input-range guards (public-API side)
+// ==========================================================
+
+/**
+ * Reject any `Mm` value that isn't a finite, non-negative number.
+ * Non-integer values pass (see "Non-integer Mm policy" in the module
+ * header — they're rounded internally).
+ *
+ * This is the LAST line of defence against `NaN` / `±Infinity`
+ * reaching the sixteenth-of-an-inch GCD loop and hanging the process
+ * (`NaN !== 0` is always true — a real DoS vector). It runs at the
+ * top of every public API that takes an `Mm`.
+ *
+ * Throws `RangeError` rather than `UnitParseError` because the failure
+ * mode is "programmer passed a bad number", not "user typed a bad
+ * string". `RangeError` is the JS stdlib idiom for "your argument is
+ * out of the allowed domain" (cf. `Number.prototype.toString(37)`).
+ */
+function assertMm(mm: Mm, ctx: string): void {
+  if (!Number.isFinite(mm)) {
+    throw new RangeError(`${ctx}: Mm must be a finite number, got ${String(mm)}`);
+  }
+  if (mm < 0) {
+    throw new RangeError(`${ctx}: Mm must be non-negative, got ${String(mm)}`);
+  }
+}
+
+/**
+ * Same finiteness / non-negativity discipline as `assertMm`, but for
+ * plain-number arguments to the imperial and metric converters
+ * (`ftInToMm`, `metersToMm`). Kept as a separate helper so error
+ * messages can identify the specific argument by name.
+ */
+function assertNonNegativeFinite(value: number, name: string): void {
+  if (!Number.isFinite(value)) {
+    throw new RangeError(`${name}: expected a finite number, got ${String(value)}`);
+  }
+  if (value < 0) {
+    throw new RangeError(`${name}: expected a non-negative number, got ${String(value)}`);
+  }
+}
+
+// ==========================================================
 // Explicit conversion helpers.
 // ==========================================================
 
 /**
  * Convert a feet / (optional) inches pair to canonical `Mm`, rounded to
- * the nearest integer millimeter.
+ * the nearest integer millimeter. Both arguments must be finite and
+ * non-negative; throws `RangeError` otherwise.
  */
 export function ftInToMm(feet: number, inches: number = 0): Mm {
+  assertNonNegativeFinite(feet, 'ftInToMm.feet');
+  assertNonNegativeFinite(inches, 'ftInToMm.inches');
   return Math.round(feet * MM_PER_FOOT + inches * MM_PER_INCH);
 }
 
 /**
  * Convert a metric-meter value to canonical `Mm`, rounded to the
- * nearest integer millimeter.
+ * nearest integer millimeter. `m` must be finite and non-negative.
  */
 export function metersToMm(m: number): Mm {
+  assertNonNegativeFinite(m, 'metersToMm.m');
   return Math.round(m * MM_PER_METER);
 }
 
@@ -194,6 +280,7 @@ export function metersToMm(m: number): Mm {
  * precisions can format however it likes.
  */
 export function mmToMeters(mm: Mm): number {
+  assertMm(mm, 'mmToMeters');
   return mm / MM_PER_METER;
 }
 
@@ -205,6 +292,7 @@ export function mmToMeters(mm: Mm): number {
  *   16/16 inch → +1 inch,   12/12 inch → +1 foot.
  */
 export function mmToFtIn(mm: Mm): FtIn {
+  assertMm(mm, 'mmToFtIn');
   // Work in "sixteenths of an inch" as an integer so we sidestep
   // floating-point drift on the carry boundaries.
   const totalSixteenths = Math.round((mm / MM_PER_INCH) * SIXTEENTHS_PER_INCH);
@@ -330,8 +418,12 @@ function stripZeros(value: number, decimals: number): string {
 /**
  * Format an `Mm` value as a human-readable string in either unit
  * system. See `FormatOptions` for the precision knob.
+ *
+ * Throws `RangeError` if `mm` is `NaN` / `±Infinity` / negative — see
+ * "Range & finiteness policy" in the module header.
  */
 export function formatLength(mm: Mm, system: UnitSystem, opts?: FormatOptions): string {
+  assertMm(mm, 'formatLength');
   const precision = opts?.precision ?? 'fine';
   if (system === 'imperial') {
     return formatImperial(mm, precision);
@@ -354,10 +446,18 @@ const NUMBER = String.raw`\d+(?:\.\d+)?`;
 const FOOT_UNIT = String.raw`(?:ft|foot|feet|'|\u2032)`;
 const INCH_UNIT = String.raw`(?:in|inches|inch|"|\u2033)`;
 const METRIC_UNIT = String.raw`(?:millimeters|millimeter|centimeters|centimeter|meters|meter|mm|cm|m)`;
-// Separator between feet and inches: zero or more of whitespace / `-`.
-// Zero-width is required to accept the compact `12'6"` form; users who
-// want spaces or dashes can still type `12' 6"` or `12'-6"`.
-const FT_IN_SEP = String.raw`[\s-]*`;
+// Separator between the feet mark and the inches magnitude in a
+// combined ft+in form. ONE of two things is allowed:
+//   - any amount (including zero) of whitespace, with NO dash, OR
+//   - exactly one `-` character (the carpenter-notation dash, e.g.
+//     `12'-6"`), with NO whitespace on either side of it.
+//
+// This deliberately REJECTS whitespace-surrounded dashes (`12 ft -6 in`,
+// `12' -6"`) and repeated dashes (`12'---6"`), which the previous
+// `[\s-]*` pattern silently accepted by discarding the sign — a
+// prior-review-blocker (both models flagged it) because the user's
+// clear intent to write a negative was ignored.
+const FT_IN_SEP = String.raw`(?:\s*|-)`;
 
 const METRIC_RE = new RegExp(`^(${NUMBER})\\s*(${METRIC_UNIT})$`);
 const IMP_FT_IN_FRAC_RE = new RegExp(
@@ -395,23 +495,23 @@ const IMPERIAL_RULES: readonly ImperialRule[] = [
   {
     re: IMP_FT_IN_FRAC_RE,
     handle: (m, o) =>
-      imperialToMm(num(m, 1), num(m, 2) + safeFraction(str(m, 3), str(m, 4), o)),
+      ftInToMm(num(m, 1, o), num(m, 2, o) + safeFraction(str(m, 3), str(m, 4), o)),
   },
   {
     re: IMP_FT_FRAC_ONLY_RE,
-    handle: (m, o) => imperialToMm(num(m, 1), safeFraction(str(m, 2), str(m, 3), o)),
+    handle: (m, o) => ftInToMm(num(m, 1, o), safeFraction(str(m, 2), str(m, 3), o)),
   },
-  { re: IMP_FT_IN_RE, handle: (m) => imperialToMm(num(m, 1), num(m, 2)) },
-  { re: IMP_FT_ONLY_RE, handle: (m) => imperialToMm(num(m, 1), 0) },
+  { re: IMP_FT_IN_RE, handle: (m, o) => ftInToMm(num(m, 1, o), num(m, 2, o)) },
+  { re: IMP_FT_ONLY_RE, handle: (m, o) => ftInToMm(num(m, 1, o), 0) },
   {
     re: IMP_IN_MIXED_FRAC_RE,
-    handle: (m, o) => imperialToMm(0, num(m, 1) + safeFraction(str(m, 2), str(m, 3), o)),
+    handle: (m, o) => ftInToMm(0, num(m, 1, o) + safeFraction(str(m, 2), str(m, 3), o)),
   },
   {
     re: IMP_IN_PURE_FRAC_RE,
-    handle: (m, o) => imperialToMm(0, safeFraction(str(m, 1), str(m, 2), o)),
+    handle: (m, o) => ftInToMm(0, safeFraction(str(m, 1), str(m, 2), o)),
   },
-  { re: IMP_IN_DECIMAL_RE, handle: (m) => imperialToMm(0, num(m, 1)) },
+  { re: IMP_IN_DECIMAL_RE, handle: (m, o) => ftInToMm(0, num(m, 1, o)) },
 ];
 
 /**
@@ -419,8 +519,12 @@ const IMPERIAL_RULES: readonly ImperialRule[] = [
  *
  * Throws `UnitParseError` (with `.input` preserved) for:
  *   - empty / whitespace-only inputs
- *   - negative numbers
+ *   - negative numbers (leading `-` or an embedded `-` before a
+ *     fraction/inches magnitude — see FT_IN_SEP)
  *   - comma decimals (MVP scope decision — see module header)
+ *   - numeric magnitudes that overflow `Number.MAX_VALUE`
+ *     (e.g. a >~308-digit numeric prefix; `parseFloat` returns
+ *     `Infinity` in that case)
  *   - anything that doesn't match one of the accepted patterns
  *
  * See tests (`units.test.ts`) for the accepted-form matrix.
@@ -430,25 +534,41 @@ export function parseLength(input: string, defaultSystem: UnitSystem): Mm {
   const normalized = input.trim().toLowerCase();
   rejectMalformed(normalized, original);
 
-  const metric = tryMetric(normalized);
-  if (metric !== null) return metric;
+  const result =
+    tryMetric(normalized, original) ??
+    tryImperial(normalized, original) ??
+    tryBare(normalized, defaultSystem, original);
 
-  const imperial = tryImperial(normalized, original);
-  if (imperial !== null) return imperial;
-
-  const bare = BARE_NUMBER_RE.exec(normalized);
-  if (bare !== null) {
-    const value = num(bare, 1);
-    return defaultSystem === 'imperial' ? imperialToMm(value, 0) : Math.round(value);
-  }
-
-  throw new UnitParseError(
-    `Unrecognized length format: ${JSON.stringify(original)}`,
-    original,
-  );
+  return assertParsed(result, original);
 }
 
 // ---- Parser helpers ------------------------------------------------
+
+/**
+ * Post-conditions for `parseLength`'s dispatch result. Splits the
+ * "no pattern matched" and "match succeeded but produced a non-finite
+ * value" failure modes into distinct, contextful errors while keeping
+ * `parseLength` itself under the size budget.
+ */
+function assertParsed(result: Mm | null, original: string): Mm {
+  if (result === null) {
+    throw new UnitParseError(
+      `Unrecognized length format: ${JSON.stringify(original)}`,
+      original,
+    );
+  }
+  // Belt-and-suspenders: even though `num()` rejects overflowed
+  // parseFloat values, this final guard makes the "parseLength never
+  // returns non-finite" contract airtight against any future dispatch
+  // path that might sneak intermediate math past `num()`.
+  if (!Number.isFinite(result)) {
+    throw new UnitParseError(
+      `Length magnitude out of representable range: ${JSON.stringify(original)}`,
+      original,
+    );
+  }
+  return result;
+}
 
 /** Reject the input categories that never reach a pattern match. */
 function rejectMalformed(normalized: string, original: string): void {
@@ -469,10 +589,10 @@ function rejectMalformed(normalized: string, original: string): void {
   }
 }
 
-function tryMetric(normalized: string): Mm | null {
+function tryMetric(normalized: string, original: string): Mm | null {
   const match = METRIC_RE.exec(normalized);
   if (match === null) return null;
-  return metricValueToMm(num(match, 1), str(match, 2));
+  return metricValueToMm(num(match, 1, original), str(match, 2));
 }
 
 function tryImperial(normalized: string, original: string): Mm | null {
@@ -483,8 +603,11 @@ function tryImperial(normalized: string, original: string): Mm | null {
   return null;
 }
 
-function imperialToMm(feet: number, inches: number): Mm {
-  return ftInToMm(feet, inches);
+function tryBare(normalized: string, defaultSystem: UnitSystem, original: string): Mm | null {
+  const bare = BARE_NUMBER_RE.exec(normalized);
+  if (bare === null) return null;
+  const value = num(bare, 1, original);
+  return defaultSystem === 'imperial' ? ftInToMm(value, 0) : Math.round(value);
 }
 
 function metricValueToMm(value: number, unit: string): Mm {
@@ -533,7 +656,20 @@ function str(match: RegExpExecArray, index: number): string {
   return value;
 }
 
-/** Same as `str` but coerces to a finite `number` via `parseFloat`. */
-function num(match: RegExpExecArray, index: number): number {
-  return Number.parseFloat(str(match, index));
+/**
+ * Same as `str` but coerces to a finite `number` via `parseFloat`.
+ * Rejects overflow-to-`Infinity` and `NaN` with `UnitParseError` so
+ * the parser can never hand a poisoned value to the converters (which
+ * would otherwise let e.g. a >310-digit numeric prefix produce
+ * `Infinity` and eventually hang the downstream GCD math).
+ */
+function num(match: RegExpExecArray, index: number, original: string): number {
+  const value = Number.parseFloat(str(match, index));
+  if (!Number.isFinite(value)) {
+    throw new UnitParseError(
+      `Numeric magnitude in ${JSON.stringify(original)} is not a finite number`,
+      original,
+    );
+  }
+  return value;
 }
