@@ -52,11 +52,17 @@
  * Returns the exact table-row string carried on the `Warning`'s
  * `tableReference` field so the UI (S13 Warnings panel) + a code
  * inspector can find the row in the source publication. The
- * `spacingMm` parameter is the on-center spacing for `kind: "joist"`;
- * for `kind: "beam"` it is IGNORED (pass `0` by convention — see
- * `span-check.ts`). This slightly-overloaded shape matches the
- * signature the ticket dictates and keeps the interface a single
- * method rather than two.
+ * third parameter carries kind-specific context:
+ *
+ *   - `kind: "joist"` → on-center joist spacing (mm).
+ *   - `kind: "beam"`  → tributary joist span (mm), so the citation
+ *     can name the beam-table joist-span column that produced the
+ *     allowable (e.g., "…supporting 14 ft joist span"). Pass `0`
+ *     when the joist span is unknown — the implementation MUST
+ *     degrade gracefully (drop the "supporting X ft" clause).
+ *
+ * This slightly-overloaded shape matches the signature the ticket
+ * dictates and keeps the interface a single method rather than two.
  */
 
 import type { MaterialRef, MemberKind } from '../model';
@@ -90,9 +96,15 @@ export interface SpanTable {
 
   /**
    * Human-readable citation for the row a `Warning` was derived
-   * from. Named parameter shape matches ticket §2; `spacingMm` is
-   * the on-center spacing when `kind === 'joist'` and is IGNORED
-   * for `kind === 'beam'` (callers pass `0`).
+   * from. Named parameter shape matches ticket §2; the third
+   * parameter is kind-specific:
+   *
+   *   - `kind === 'joist'` → joist on-center spacing (mm).
+   *   - `kind === 'beam'`  → tributary joist span (mm), so the
+   *     citation can name the beam-table joist-span COLUMN that
+   *     produced the allowable (Code Review Guardian PR#24 GPT#2).
+   *     Pass `0` when unknown; the citation drops the "supporting
+   *     X ft" clause and remains valid.
    */
   citationFor(kind: MemberKind, material: MaterialRef, spacingMm: Mm): string;
 }

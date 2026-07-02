@@ -52,7 +52,7 @@
  *     with `species === 'Composite'` returns `0` (fail-safe). See
  *     the ticket AC4 discussion + docs/span-tables/README.md §3.
  *
- * ## Snap-up tolerance (defends the Layout round-trip)
+ * ## Snap tolerance (defends the Layout round-trip WITHOUT ever being optimistic)
  *
  * The layout engine's even-spacing algorithm (joist-layout.ts)
  * produces `actualSpacing = (widthMm - thickness) / bayCount`, which
@@ -60,18 +60,53 @@
  * (e.g., design 406 → actual ~402). Without a tolerance the table
  * lookup would always return "not covered" for compliant designs.
  *
- * Solution: for the JOIST lookup, snap the input `spacingMm` UP to
- * the nearest tabulated row within a `SPACING_TOLERANCE_MM` window
- * around each row's center. Any value FAR from a tabulated row
- * (e.g., 508 mm = 20", 700 mm) misses every window and correctly
- * fail-safes to 0 (AC4).
+ * ### Why the previous SYMMETRIC ±20 mm window was a safety hazard
  *
- * `SPACING_TOLERANCE_MM = 20 mm` was chosen so:
+ * A symmetric snap window (input `A` snaps to row `R` if
+ * `|A − R| ≤ tol`) is OPTIMISTIC when `A > R`: it would map an
+ * actual spacing sitting ABOVE a tabulated row DOWN into the
+ * more-permissive row, silently masking an over-span. This was
+ * called out by both Code Review Guardian and QA Guardian at the
+ * PR#24 review gate (GPT-HIGH / Opus-LOW#5, reconciled toward safety).
  *
- *   - `[285, 325]` → 305 mm (12" o.c.) row
- *   - `[386, 426]` → 406 mm (16" o.c.) row
- *   - `[590, 630]` → 610 mm (24" o.c.) row
- *   - `508 mm` (20"), `700 mm`, etc. → miss every window → 0
+ * ### The new ASYMMETRIC "snap-UP with downward-only tolerance" rule
+ *
+ * We keep a small DOWNWARD tolerance that ONLY accepts actual
+ * spacings **at or slightly below** a tabulated row (the drift case).
+ * Anything else fail-safes. This is provably NEVER optimistic:
+ * looking up @R for an actual `A ≤ R` always returns a CONSERVATIVE
+ * value, because the true allowable at spacing A is a monotonically
+ * DECREASING function of spacing (tighter spacing ⇒ less tributary
+ * width per joist ⇒ longer allowable). So the row-R value understates
+ * the true allowable when A < R — safe.
+ *
+ * Formally, for actual spacing `A`, snap to smallest tabulated `R`
+ * such that:
+ *
+ *     A ≤ R   AND   R − A ≤ SPACING_DOWNWARD_TOLERANCE_MM
+ *
+ * If no such R exists → fail-safe (return 0), which per AC4 produces
+ * a "not covered" warning.
+ *
+ * ### Concrete behaviour of the new rule
+ *
+ *   - `A = 402`  → snap to 406  (drift from 406 nominal — δ = 4)
+ *   - `A = 406`  → snap to 406  (exact match — δ = 0)
+ *   - `A = 407`  → FAIL-SAFE    (ABOVE the 406 row; 610 is too far)
+ *   - `A = 419`  → FAIL-SAFE    (between rows; NOT snapped down to 406)
+ *   - `A = 453`  → FAIL-SAFE    (508-nominal design lands here)
+ *   - `A = 508`  → FAIL-SAFE    (a hand-set 20″ spacing — AC4 target)
+ *   - `A = 605`  → snap to 610  (drift from 610 nominal — δ = 5)
+ *   - `A = 611`  → FAIL-SAFE    (above the largest row)
+ *
+ * ### Choice of `SPACING_DOWNWARD_TOLERANCE_MM = 25`
+ *
+ * The layout's downward drift is largest for the smallest legal deck
+ * (MIN_DECK_DIMENSION_MM = 4 ft = 1219 mm). For a 4×4 ft deck at
+ * nominal 610 mm o.c., actualSpacing = (1219 − 38) / 2 = 590.5 mm →
+ * δ = 19.5 mm. 25 mm covers this comfortably with 5 mm of headroom
+ * and still stays well below the smallest INTER-ROW gap
+ * (406 → 610 = 204 mm), so it CANNOT collide with an adjacent row.
  *
  * For the BEAM lookup, joist-span input is snapped UP to the nearest
  * whole-foot tabulated row (6/8/10/12/14/16/18 ft) because the
@@ -111,6 +146,12 @@ const SPECIES_GROUP_LABEL: Record<SpeciesGroup, string> = {
  * structural species group used by R507.5 / R507.6. Returns `null`
  * for `Composite` — composite framing is not IRC-rated and MUST
  * fail-safe at the lookup call sites.
+ *
+ * Also returns `null` in the (currently unreachable) `default` case
+ * so a future Species enum member cannot break the `spanCheck NEVER
+ * throws` contract. The `never` assignment keeps the exhaustiveness
+ * check at compile time — TypeScript's type-narrowing will still
+ * flag a missed case in review — without a runtime throw.
  */
 function speciesGroupFor(species: Species): SpeciesGroup | null {
   switch (species) {
@@ -120,10 +161,15 @@ function speciesGroupFor(species: Species): SpeciesGroup | null {
       return 'redwood-western-cedars';
     case 'Composite':
       return null;
-    /* c8 ignore next 3 */
+    /* c8 ignore next 5 */
     default: {
-      const exhaustive: never = species;
-      throw new Error(`Unhandled species: ${String(exhaustive)}`);
+      // Compile-time exhaustiveness assertion. If a new Species is
+      // added upstream, tsc fails here. We do NOT throw — the
+      // spanCheck contract mandates NEVER throwing on a missing
+      // table row; a new species without a mapping simply fail-safes.
+      const _exhaustive: never = species;
+      void _exhaustive;
+      return null;
     }
   }
 }
@@ -140,10 +186,15 @@ const JOIST_SPACING_ROWS_MM = [305, 406, 610] as const;
 type JoistSpacingRow = (typeof JOIST_SPACING_ROWS_MM)[number];
 
 /**
- * Snap-up tolerance around each tabulated joist spacing. See module
- * header for rationale.
+ * Downward-only snap tolerance around each tabulated joist spacing.
+ * See module header "Snap tolerance" section for the safety argument
+ * and choice of value. The rule is ASYMMETRIC — actual spacings
+ * ABOVE a tabulated row NEVER snap DOWN to it (that would be
+ * optimistic — a false-pass hazard called out by the PR#24 review
+ * gate). Only actual spacings AT OR BELOW a row, within this
+ * tolerance, snap to it.
  */
-const SPACING_TOLERANCE_MM = 20;
+const SPACING_DOWNWARD_TOLERANCE_MM = 25;
 
 /**
  * Joist size subset relevant to span lookup — MVP only tabulates 2x
@@ -407,13 +458,22 @@ const BEAM_MAX_SPANS: Record<SpeciesGroup, Record<BeamPly, Record<JoistSize, Bea
 // ==========================================================
 
 /**
- * Snap a raw spacingMm to the nearest tabulated joist row within
- * `SPACING_TOLERANCE_MM`. Returns `null` if the input falls outside
- * every window (i.e. no tabulated row applies — fail-safe warn).
+ * Snap a raw actual joist spacing to a tabulated row using the
+ * ASYMMETRIC downward-only rule (see module header). Returns:
+ *
+ *   - The smallest tabulated row `R` such that `A ≤ R` AND
+ *     `R − A ≤ SPACING_DOWNWARD_TOLERANCE_MM`.
+ *   - `null` otherwise (`A` is above every row, or `A` sits between
+ *     rows too far from the row above → fail-safe warn per AC4).
+ *
+ * Never snaps to a row BELOW `A` (that would be optimistic — a
+ * false pass). See the module header for the safety proof.
  */
 function snapJoistSpacing(spacingMm: Mm): JoistSpacingRow | null {
   for (const row of JOIST_SPACING_ROWS_MM) {
-    if (Math.abs(spacingMm - row) <= SPACING_TOLERANCE_MM) return row;
+    if (spacingMm <= row && row - spacingMm <= SPACING_DOWNWARD_TOLERANCE_MM) {
+      return row;
+    }
   }
   return null;
 }
@@ -482,7 +542,10 @@ export class IrcSpanTable implements SpanTable {
    *   - Composite material (not IRC-rated framing)
    *   - Non-tabulated sizes (posts / decking boards)
    *   - Non-tabulated grades (only No.2 in MVP)
-   *   - Spacings outside the ±20 mm windows around 305/406/610 mm
+   *   - Spacings that don't satisfy the asymmetric snap rule (see
+   *     module header) — i.e., above a tabulated row, or between
+   *     rows farther than `SPACING_DOWNWARD_TOLERANCE_MM` from the
+   *     next row up. Guarantees NO false-pass for over-permitted rows.
    */
   lookupJoistMaxSpan(material: MaterialRef, spacingMm: Mm): Mm {
     if (!this._isTabulatedGrade(material.grade)) return 0;
@@ -526,9 +589,10 @@ export class IrcSpanTable implements SpanTable {
 
   /**
    * Build the `Warning.tableReference` string for a member. See the
-   * `SpanTable` interface doc for the semantics of the `spacingMm`
-   * parameter (joist spacing when `kind === 'joist'`; ignored when
-   * `kind === 'beam'`).
+   * `SpanTable` interface doc for the semantics of the third
+   * parameter (joist spacing when `kind === 'joist'`; TRIBUTARY
+   * JOIST SPAN when `kind === 'beam'` — used to name the
+   * beam-table column, per Code Review Guardian PR#24 GPT#2).
    *
    * Composite hits a distinct citation flavor so the S13 Warnings
    * panel can distinguish "IRC row not covered" from "material not
@@ -554,7 +618,20 @@ export class IrcSpanTable implements SpanTable {
       );
     }
     if (kind === 'beam') {
-      return `${this.edition} Table R507.5 — ${groupLabel}${gradeLabel} 2-ply ${material.nominal}`;
+      // The third parameter is the tributary joist span in mm; snap
+      // it to the same whole-foot column that `lookupBeamMaxSpan`
+      // used so the citation names the exact row a reviewer can
+      // look up in Table R507.5. Ply-count defaults to the MVP's
+      // 2-ply — matches the plyCount `spanCheck` passes to the
+      // lookup. If the caller passed 0 (unknown joist span), drop
+      // the "supporting X ft" clause so the citation still parses.
+      const joistFt = spacingMm > 0 ? snapBeamJoistSpan(spacingMm) : null;
+      const supportingClause =
+        joistFt === null ? '' : ` supporting ${joistFt} ft joist span`;
+      return (
+        `${this.edition} Table R507.5 — ${groupLabel}${gradeLabel} 2-ply ` +
+        `${material.nominal}${supportingClause}`
+      );
     }
     // post/footing/board — no IRC deck-span row applies. The MVP
     // spanCheck never emits warnings for these kinds; the branch is

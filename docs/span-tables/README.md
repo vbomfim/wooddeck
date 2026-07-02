@@ -64,8 +64,9 @@ publication) and update this file.
 
 IRC Table R507.6 keys on structural species **groups**, not on the
 material-treatment categories (`PT`, `Cedar`, `Composite`) the wooddeck
-`DeckDesign` uses. The following mapping is baked into
-`IrcSpanTable._resolveSpeciesGroup(...)` — full rationale is in that
+`DeckDesign` uses. The following mapping is baked into the
+module-level `speciesGroupFor(...)` function in
+`src/domain/spans/irc-2018-tables.ts` — full rationale is in that
 module's header, summarised here for reviewers.
 
 | `Species` (wooddeck) | IRC-2018 R507.6 species-group column                              | Why this mapping                                                                                                                                                                                                                                                                                                                                     |

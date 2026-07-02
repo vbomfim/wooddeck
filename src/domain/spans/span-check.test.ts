@@ -319,6 +319,99 @@ describe('spanCheck — AC4 missing table row is fail-safe', () => {
       expect(w.message.toLowerCase()).toMatch(/not rated|not covered/);
     }
   });
+
+  it('Composite framing (BEAM kind, not rated by IRC) → fail-safe Warning per beam (QA-G3)', () => {
+    // Parity with the joist-Composite case above — this exercises the
+    // BEAM fail-safe path end-to-end through spanCheck (the isolated
+    // IrcSpanTable.lookupBeamMaxSpan Composite unit only proves the
+    // table returns 0; this asserts spanCheck WRAPS that 0 into a
+    // proper "not rated" beam Warning with the right tableReference).
+    const design = makeDesign({
+      widthFt: 12,
+      lengthFt: 10,
+      joistNominal: '2x10',
+      joistSpecies: 'PT',
+      beamNominal: '2x10',
+      beamSpecies: 'Composite',
+      spacingMm: 406,
+    });
+    const layout = layoutFor(design);
+    const warnings = spanCheck(layout, IRC);
+
+    const beamWarnings = warnings.filter((w) => w.kind === 'over-span-beam');
+    const beamCount = layout.members.filter((m) => m.kind === 'beam').length;
+    expect(beamWarnings.length).toBe(beamCount);
+    for (const w of beamWarnings) {
+      expect(w.allowableMm).toBe(0);
+      expect(w.message.toLowerCase()).toMatch(/not rated/);
+      expect(w.message.toLowerCase()).toMatch(/consult.*professional/);
+      // The citation must name Composite for a downstream Warnings-panel
+      // to route it to the "material choice" recovery flow, not the
+      // "resize/add-support" flow.
+      expect(w.tableReference.toLowerCase()).toMatch(/composite/);
+    }
+  });
+
+  it('a design at an ABOVE-row actual spacing DOES NOT false-pass — snap-policy fix regression (PR#24 blocking #1)', () => {
+    // Sanity end-to-end proof at the spanCheck level. Any layout whose
+    // derived actual spacing sits ABOVE a tabulated row must fail-safe
+    // rather than snap DOWN. We drive this via a hand-built layout
+    // with two joists 419 mm apart (a "20-inch nominal after layout
+    // drift" scenario) — under the OLD symmetric snap this would have
+    // returned the 16-inch (406) allowable and possibly passed;
+    // under the new asymmetric rule this must fail-safe on every joist.
+    const spacingMm = 419; // ABOVE the 406 row; between rows
+    const joistSpanMm = 3000; // Way under any allowable — proves the
+                              // fail-safe is FROM the spacing lookup,
+                              // not because we exceeded a real row.
+    const halfSpan = joistSpanMm / 2;
+    const material = { nominal: '2x10', species: 'PT', grade: 'No2' } as const;
+    const beamNear: LayoutMember = {
+      id: 'beam-near',
+      kind: 'beam',
+      material,
+      position: { x: 0, y: 500, z: -halfSpan },
+      size: { x: 2000, y: 235, z: 38 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const beamFar: LayoutMember = {
+      ...beamNear,
+      id: 'beam-far',
+      position: { x: 0, y: 500, z: +halfSpan },
+    };
+    const joist0: LayoutMember = {
+      id: 'joist-0',
+      kind: 'joist',
+      material,
+      position: { x: 0, y: 700, z: 0 },
+      size: { x: 38, y: 235, z: joistSpanMm + FOOTING_WIDTH_MM },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const joist1: LayoutMember = { ...joist0, id: 'joist-1', position: { x: spacingMm, y: 700, z: 0 } };
+    // A benign single post per beam so the beam post-to-post derivation
+    // sees < 2 posts and skips (isolates the joist snap-policy proof).
+    const posts: LayoutMember[] = [beamNear, beamFar].map((b, i) => ({
+      id: `post-${i}`,
+      kind: 'post',
+      material: { nominal: '6x6', species: 'PT', grade: 'No2' },
+      position: { x: 0, y: 250, z: b.position.z },
+      size: { x: 140, y: 500, z: 140 },
+      rotation: { x: 0, y: 0, z: 0 },
+    }));
+    const layout: Layout = {
+      designId: '00000000-0000-4000-8000-000000000000',
+      computedAt: FIXED_CLOCK(),
+      bounds: { widthMm: 2000, lengthMm: joistSpanMm + FOOTING_WIDTH_MM, heightMm: 914 },
+      members: [beamNear, beamFar, joist0, joist1, ...posts],
+    };
+    const warnings = spanCheck(layout, IRC);
+    const joistWarnings = warnings.filter((w) => w.kind === 'over-span-joist');
+    expect(joistWarnings.length).toBe(2);
+    for (const w of joistWarnings) {
+      expect(w.allowableMm).toBe(0); // fail-safe, NOT a snapped 406-row value
+      expect(w.message.toLowerCase()).toMatch(/not covered/);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -448,6 +541,319 @@ describe('spanCheck — boundary (allowable ± 1 mm)', () => {
       expect(w.allowableMm).toBeCloseTo(ALLOWABLE_MM, 5);
     }
   });
+
+  it('joist span == allowable - 1 mm → NO warning (parity with beam -1 test below)', () => {
+    const layout = boundaryLayout(ALLOWABLE_MM - 1);
+    const warnings = spanCheck(layout, IRC).filter((w) => w.kind === 'over-span-joist');
+    expect(warnings).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Beam boundary tests (QA-G2) — parity with the joist boundary tests
+// above. Uses a hand-built layout that pins the beam post-to-post span
+// to exactly the required value and drives the check through the real
+// IrcSpanTable (so the boundary constant comes from the table).
+// ---------------------------------------------------------------------------
+
+describe('spanCheck — beam boundary (allowable ± 1 mm) (QA-G2)', () => {
+  /**
+   * Build a Layout whose ONLY beam warning driver is the beam
+   * post-to-post span (joists intentionally under-allowable).
+   * The joist span is fixed at 8 ft = 2438 mm so the beam-table
+   * column is deterministic (`snapBeamJoistSpan(2438) = 8 ft`).
+   * The beam is 2x10 PT No.2 at 2-ply — allowable per R507.5 is
+   * 8 ft 9 in = 2667 mm.
+   */
+  function beamBoundaryLayout(beamPostSpanMm: Mm): Layout {
+    const JOIST_SPAN_MM = ftInToMm(8, 0);
+    const halfSpan = JOIST_SPAN_MM / 2;
+    const halfPost = beamPostSpanMm / 2;
+    const material = { nominal: '2x10', species: 'PT', grade: 'No2' } as const;
+    const joist: LayoutMember = {
+      id: 'joist-0',
+      kind: 'joist',
+      material,
+      position: { x: 0, y: 700, z: 0 },
+      size: { x: 38, y: 235, z: JOIST_SPAN_MM + FOOTING_WIDTH_MM },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const joistTwin: LayoutMember = { ...joist, id: 'joist-1', position: { x: 406, y: 700, z: 0 } };
+    const beamNear: LayoutMember = {
+      id: 'beam-near',
+      kind: 'beam',
+      material,
+      position: { x: 0, y: 500, z: -halfSpan },
+      size: { x: beamPostSpanMm + 400, y: 235, z: 38 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const beamFar: LayoutMember = { ...beamNear, id: 'beam-far', position: { x: 0, y: 500, z: +halfSpan } };
+    const posts: LayoutMember[] = [];
+    for (const beam of [beamNear, beamFar]) {
+      posts.push(
+        {
+          id: `post-${beam.id}-0`, kind: 'post',
+          material: { nominal: '6x6', species: 'PT', grade: 'No2' },
+          position: { x: -halfPost, y: 250, z: beam.position.z },
+          size: { x: 140, y: 500, z: 140 },
+          rotation: { x: 0, y: 0, z: 0 },
+        },
+        {
+          id: `post-${beam.id}-1`, kind: 'post',
+          material: { nominal: '6x6', species: 'PT', grade: 'No2' },
+          position: { x: +halfPost, y: 250, z: beam.position.z },
+          size: { x: 140, y: 500, z: 140 },
+          rotation: { x: 0, y: 0, z: 0 },
+        },
+      );
+    }
+    return {
+      designId: '00000000-0000-4000-8000-000000000000',
+      computedAt: FIXED_CLOCK(),
+      bounds: {
+        widthMm: beamPostSpanMm + 400,
+        lengthMm: JOIST_SPAN_MM + FOOTING_WIDTH_MM,
+        heightMm: 914,
+      },
+      members: [joist, joistTwin, beamNear, beamFar, ...posts],
+    };
+  }
+
+  // 2-ply Southern Pine 2x10 @ 8 ft joist span → 8'-9" = 2667 mm.
+  const BEAM_ALLOWABLE_MM = ftInToMm(8, 9);
+
+  it('beam post-to-post == allowable - 1 mm → NO warning', () => {
+    const layout = beamBoundaryLayout(BEAM_ALLOWABLE_MM - 1);
+    const warnings = spanCheck(layout, IRC).filter((w) => w.kind === 'over-span-beam');
+    expect(warnings).toEqual([]);
+  });
+
+  it('beam post-to-post == allowable → NO warning (boundary is inclusive)', () => {
+    const layout = beamBoundaryLayout(BEAM_ALLOWABLE_MM);
+    const warnings = spanCheck(layout, IRC).filter((w) => w.kind === 'over-span-beam');
+    expect(warnings).toEqual([]);
+  });
+
+  it('beam post-to-post == allowable + 1 mm → over-span-beam warning per beam', () => {
+    const layout = beamBoundaryLayout(BEAM_ALLOWABLE_MM + 1);
+    const warnings = spanCheck(layout, IRC).filter((w) => w.kind === 'over-span-beam');
+    expect(warnings.length).toBe(2); // 2 beams in the fixture
+    for (const w of warnings) {
+      expect(w.actualMm).toBeCloseTo(BEAM_ALLOWABLE_MM + 1, 5);
+      expect(w.allowableMm).toBeCloseTo(BEAM_ALLOWABLE_MM, 5);
+      // Beam citation must include the joist-span column (S9).
+      expect(w.tableReference).toMatch(/supporting 8 ft joist span/);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Hand-computed beam post-to-post over-span, driven by REAL IrcSpanTable
+// (QA-G4 + Code Review PR#24 Opus finding #10). Exercises the real beam
+// path — the previous S5 tests only exercised the beam path with a
+// MOCK table returning 500 mm. Without this test, a bug in
+// `deriveBeamPostToPostSpanMm` + `lookupBeamMaxSpan` could pass silently.
+// ---------------------------------------------------------------------------
+
+describe('spanCheck — real IRC beam over-span (QA-G4)', () => {
+  it('a beam whose post-to-post span exceeds the real 2-ply IRC allowable (>0) flags an over-span-beam warning', () => {
+    // 2-ply PT (Southern Pine) 2x10 supporting an 8-ft joist span:
+    // R507.5 says max post-to-post span = 8'-9" = 2667 mm.
+    // We construct a beam whose posts sit 3200 mm apart — clearly over.
+    const JOIST_SPAN_MM = ftInToMm(8, 0); // pins the R507.5 column at 8 ft
+    const BEAM_POST_SPAN_MM = 3200;
+    const halfJoist = JOIST_SPAN_MM / 2;
+    const halfPost = BEAM_POST_SPAN_MM / 2;
+    const material = { nominal: '2x10', species: 'PT', grade: 'No2' } as const;
+    const joist: LayoutMember = {
+      id: 'joist-0', kind: 'joist', material,
+      position: { x: 0, y: 700, z: 0 },
+      size: { x: 38, y: 235, z: JOIST_SPAN_MM + FOOTING_WIDTH_MM },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const joistTwin: LayoutMember = { ...joist, id: 'joist-1', position: { x: 406, y: 700, z: 0 } };
+    const beamNear: LayoutMember = {
+      id: 'beam-near', kind: 'beam', material,
+      position: { x: 0, y: 500, z: -halfJoist },
+      size: { x: BEAM_POST_SPAN_MM + 400, y: 235, z: 38 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const beamFar: LayoutMember = { ...beamNear, id: 'beam-far', position: { x: 0, y: 500, z: +halfJoist } };
+    const posts: LayoutMember[] = [];
+    for (const beam of [beamNear, beamFar]) {
+      posts.push(
+        {
+          id: `post-${beam.id}-0`, kind: 'post',
+          material: { nominal: '6x6', species: 'PT', grade: 'No2' },
+          position: { x: -halfPost, y: 250, z: beam.position.z },
+          size: { x: 140, y: 500, z: 140 },
+          rotation: { x: 0, y: 0, z: 0 },
+        },
+        {
+          id: `post-${beam.id}-1`, kind: 'post',
+          material: { nominal: '6x6', species: 'PT', grade: 'No2' },
+          position: { x: +halfPost, y: 250, z: beam.position.z },
+          size: { x: 140, y: 500, z: 140 },
+          rotation: { x: 0, y: 0, z: 0 },
+        },
+      );
+    }
+    const layout: Layout = {
+      designId: '00000000-0000-4000-8000-000000000000',
+      computedAt: FIXED_CLOCK(),
+      bounds: {
+        widthMm: BEAM_POST_SPAN_MM + 400,
+        lengthMm: JOIST_SPAN_MM + FOOTING_WIDTH_MM,
+        heightMm: 914,
+      },
+      members: [joist, joistTwin, beamNear, beamFar, ...posts],
+    };
+    const warnings = spanCheck(layout, IRC);
+    const beamWarnings = warnings.filter((w) => w.kind === 'over-span-beam');
+    expect(beamWarnings.length).toBe(2);
+    for (const w of beamWarnings) {
+      // Actual = the hand-computed post-to-post span (3200 mm exactly).
+      expect(w.actualMm).toBeCloseTo(BEAM_POST_SPAN_MM, 5);
+      // Allowable = REAL IRC value (2'-9" = 2667 mm), NOT a mock number.
+      expect(w.allowableMm).toBeGreaterThan(0);
+      expect(w.allowableMm).toBeCloseTo(ftInToMm(8, 9), 5);
+      // Citation must be the real R507.5 row.
+      expect(w.tableReference).toMatch(/IRC-2018 Table R507\.5/);
+      expect(w.tableReference).toMatch(/2x10/);
+      expect(w.tableReference).toMatch(/supporting 8 ft joist span/);
+      expect(w.message).toMatch(/exceeds allowable/i);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Edge tests (QA-G8/G9/G10, Code Review Opus finding #6 — float tolerance).
+// ---------------------------------------------------------------------------
+
+describe('spanCheck — beam with fewer than 2 posts is skipped without crashing (QA-G8)', () => {
+  it('a beam with 1 post is skipped (no crash / no NaN warning)', () => {
+    const material = { nominal: '2x10', species: 'PT', grade: 'No2' } as const;
+    const joist: LayoutMember = {
+      id: 'joist-0', kind: 'joist', material,
+      position: { x: 0, y: 700, z: 0 },
+      size: { x: 38, y: 235, z: 4000 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const joistTwin: LayoutMember = { ...joist, id: 'joist-1', position: { x: 406, y: 700, z: 0 } };
+    const beamNear: LayoutMember = {
+      id: 'beam-near', kind: 'beam', material,
+      position: { x: 0, y: 500, z: -1850 },
+      size: { x: 2000, y: 235, z: 38 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const beamFar: LayoutMember = { ...beamNear, id: 'beam-far', position: { x: 0, y: 500, z: +1850 } };
+    // ONLY ONE post per beam — the checker must skip these beams
+    // rather than fabricate a span.
+    const lonePost: LayoutMember = {
+      id: 'post-only', kind: 'post',
+      material: { nominal: '6x6', species: 'PT', grade: 'No2' },
+      position: { x: 0, y: 250, z: -1850 },
+      size: { x: 140, y: 500, z: 140 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const layout: Layout = {
+      designId: '00000000-0000-4000-8000-000000000000',
+      computedAt: FIXED_CLOCK(),
+      bounds: { widthMm: 2000, lengthMm: 3700 + FOOTING_WIDTH_MM, heightMm: 914 },
+      members: [joist, joistTwin, beamNear, beamFar, lonePost],
+    };
+    // Must NOT throw / must NOT return beam warnings with NaN.
+    const warnings = spanCheck(layout, IRC);
+    const beamWarnings = warnings.filter((w) => w.kind === 'over-span-beam');
+    expect(beamWarnings).toEqual([]);
+    // Sanity: joist checks still fire.
+    for (const w of warnings) {
+      expect(Number.isFinite(w.actualMm)).toBe(true);
+      expect(Number.isFinite(w.allowableMm)).toBe(true);
+    }
+  });
+});
+
+describe('spanCheck — passes plyCount = 2 to the SpanTable (QA-G9)', () => {
+  it('the third argument spanCheck passes to lookupBeamMaxSpan is exactly 2 (DEFAULT_BEAM_PLY_COUNT)', () => {
+    // Spy table records the plyCount it was called with. spanCheck
+    // MUST pass 2 (the documented DEFAULT_BEAM_PLY_COUNT) — a bug
+    // that passed undefined / 1 / 3 would silently degrade the check.
+    const design = makeDesign({ widthFt: 12, lengthFt: 10 });
+    const layout = layoutFor(design);
+    const plyCountsSeen: number[] = [];
+    const spyTable: SpanTable = {
+      edition: 'SPY',
+      lookupJoistMaxSpan: () => 100000,
+      lookupBeamMaxSpan: (_m, _js, ply) => {
+        plyCountsSeen.push(ply);
+        return 100000;
+      },
+      citationFor: () => 'SPY',
+    };
+    spanCheck(layout, spyTable);
+    expect(plyCountsSeen.length).toBeGreaterThan(0);
+    for (const p of plyCountsSeen) {
+      expect(p).toBe(2);
+    }
+  });
+});
+
+describe('spanCheck — beam-post z match uses TOLERANCE, not strict equality (Code Review PR#24 Opus #6)', () => {
+  it('ε-perturbed post z (mimicking .deck file round-trip drift) still matches its beam', () => {
+    // The post's `z` differs from the beam's by less than
+    // POST_Z_TOLERANCE_MM (0.5 mm). Strict `===` would drop the post
+    // and silently no-op the beam check. The tolerance-based match
+    // must still recognize the post-beam association.
+    const material = { nominal: '2x10', species: 'PT', grade: 'No2' } as const;
+    const joist: LayoutMember = {
+      id: 'joist-0', kind: 'joist', material,
+      position: { x: 0, y: 700, z: 0 },
+      size: { x: 38, y: 235, z: 4000 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const joistTwin: LayoutMember = { ...joist, id: 'joist-1', position: { x: 406, y: 700, z: 0 } };
+    const beamZ = -1850;
+    const beamNear: LayoutMember = {
+      id: 'beam-near', kind: 'beam', material,
+      position: { x: 0, y: 500, z: beamZ },
+      size: { x: 5000, y: 235, z: 38 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const beamFar: LayoutMember = { ...beamNear, id: 'beam-far', position: { x: 0, y: 500, z: -beamZ } };
+    // Two posts under beamNear with z ε-drifted by 0.0001 mm — the
+    // exact class of drift a JSON round-trip could introduce.
+    const eps = 0.0001;
+    const mkPost = (id: string, x: number, zBase: number): LayoutMember => ({
+      id, kind: 'post',
+      material: { nominal: '6x6', species: 'PT', grade: 'No2' },
+      position: { x, y: 250, z: zBase + eps },
+      size: { x: 140, y: 500, z: 140 },
+      rotation: { x: 0, y: 0, z: 0 },
+    });
+    const layout: Layout = {
+      designId: '00000000-0000-4000-8000-000000000000',
+      computedAt: FIXED_CLOCK(),
+      bounds: { widthMm: 5000, lengthMm: 3700 + FOOTING_WIDTH_MM, heightMm: 914 },
+      members: [
+        joist, joistTwin, beamNear, beamFar,
+        mkPost('post-near-0', -2000, beamZ),
+        mkPost('post-near-1', +2000, beamZ),
+        mkPost('post-far-0', -2000, -beamZ),
+        mkPost('post-far-1', +2000, -beamZ),
+      ],
+    };
+    // With strict `===`, the near beam would see 0 posts and be skipped
+    // → no beam warning; with the 0.5 mm tolerance, it sees 2 posts
+    // 4000 mm apart → over-span warning (well over the ~2.6 m 2x10
+    // 2-ply allowable).
+    const warnings = spanCheck(layout, IRC);
+    const beamWarnings = warnings.filter((w) => w.kind === 'over-span-beam');
+    expect(beamWarnings.length).toBe(2);
+    for (const w of beamWarnings) {
+      expect(w.actualMm).toBeCloseTo(4000, 3);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -455,10 +861,10 @@ describe('spanCheck — boundary (allowable ± 1 mm)', () => {
 // ordered by memberId").
 // ---------------------------------------------------------------------------
 
-describe('spanCheck — output ordering', () => {
-  it('warnings are returned in lexicographic memberId order', () => {
-    // Any over-span design triggers many joist warnings whose memberIds
-    // are 'joist-0', 'joist-1', ... — a good test for the sort.
+describe('spanCheck — output ordering (natural / numeric-aware, PR#24 Opus #3 + QA-G7)', () => {
+  it('warnings on a small deck (<10 joists) match plain lex order', () => {
+    // For memberIds with a single-digit trailing number, natural and
+    // lex orders coincide — this test is the compatibility check.
     const design = makeDesign({
       widthFt: 12,
       lengthMm: 16 * MM_PER_FOOT,
@@ -474,6 +880,74 @@ describe('spanCheck — output ordering', () => {
     const ids = warnings.map((w) => w.memberId);
     const sorted = [...ids].sort();
     expect(ids).toEqual(sorted);
+  });
+
+  it('warnings on a LARGE deck (>10 joists) are in NATURAL order — joist-2 precedes joist-10, not the reverse', () => {
+    // A 20-ft-wide deck at 305 mm o.c. yields ~21 joists, so memberIds
+    // 'joist-2' and 'joist-10' both exist. Under a plain lex sort,
+    // 'joist-10' would incorrectly precede 'joist-2' (because '1' < '2'
+    // lexicographically). Natural order (Intl.Collator numeric: true)
+    // fixes this.
+    const design = makeDesign({
+      widthMm: 6100, // ~20 ft
+      lengthMm: 16 * MM_PER_FOOT,
+      joistNominal: '2x6',
+      joistSpecies: 'PT',
+      beamNominal: '2x10',
+      beamSpecies: 'PT',
+      spacingMm: 305, // 12" o.c. => most joists
+    });
+    const layout = layoutFor(design);
+    const warnings = spanCheck(layout, IRC);
+    const ids = warnings.map((w) => w.memberId);
+
+    // Sanity: this test only means something with >10 joist warnings.
+    expect(warnings.length).toBeGreaterThan(10);
+
+    // The joist warnings must be in natural order (joist-0, joist-1,
+    // joist-2, …, joist-9, joist-10, joist-11, …).
+    const joistIds = ids.filter((id) => id.startsWith('joist-'));
+    const joistNums = joistIds.map((id) => Number(id.slice('joist-'.length)));
+    for (let i = 1; i < joistNums.length; i++) {
+      expect(joistNums[i]).toBeGreaterThan(joistNums[i - 1]!);
+    }
+
+    // Plain lex sort would swap joist-10 vs joist-2 — assert the
+    // natural order DIFFERS from lex when the trailing index crosses
+    // the 10 boundary. (Regression proof of the fix.)
+    const lexSorted = [...ids].sort();
+    expect(ids).not.toEqual(lexSorted);
+  });
+
+  it('mixed joist + beam warning ids are naturally ordered (beam-far, beam-near, joist-0, joist-1, ...)', () => {
+    // A single mock table failing every joist AND every beam. IDs
+    // include beam-near / beam-far as well as joist-0..N. Natural
+    // order groups by the alphabetic prefix — b* before j* — then
+    // by the numeric portion (or lex portion for equal prefixes).
+    const design = makeDesign({ widthFt: 12, lengthFt: 10 });
+    const layout = layoutFor(design);
+    const failTable: SpanTable = {
+      edition: 'MOCK',
+      lookupJoistMaxSpan: () => 1,
+      lookupBeamMaxSpan: () => 1,
+      citationFor: () => 'MOCK',
+    };
+    const warnings = spanCheck(layout, failTable);
+    const ids = warnings.map((w) => w.memberId);
+
+    // beams must come before joists (b < j).
+    const firstJoistIdx = ids.findIndex((id) => id.startsWith('joist-'));
+    const lastBeamIdx = ids.map((id) => id.startsWith('beam-')).lastIndexOf(true);
+    if (firstJoistIdx !== -1 && lastBeamIdx !== -1) {
+      expect(lastBeamIdx).toBeLessThan(firstJoistIdx);
+    }
+
+    // Within the joist group, ids must be numerically ordered.
+    const joistIds = ids.filter((id) => id.startsWith('joist-'));
+    const joistNums = joistIds.map((id) => Number(id.slice('joist-'.length)));
+    for (let i = 1; i < joistNums.length; i++) {
+      expect(joistNums[i]).toBeGreaterThan(joistNums[i - 1]!);
+    }
   });
 });
 

@@ -150,12 +150,16 @@ describe('IrcSpanTable — Table R507.5 golden beam spans', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Spacing / joist-span snap-up tolerance — Layout produces
-// actualSpacing < nominal because joists are even-spaced (see
-// src/domain/layout/joist-layout.ts). Without snap-up, every compliant
-// design would trip the "not covered" fail-safe. Snap semantics:
-// smallest TABULATED row >= input, within a small tolerance window
-// so a 405-mm derived spacing is treated as the design's 406-mm intent.
+// Spacing snap tolerance — Layout produces actualSpacing < nominal
+// because joists are even-spaced (see src/domain/layout/joist-layout.ts).
+// Without a snap tolerance, every compliant design would trip the
+// "not covered" fail-safe.
+//
+// The rule is ASYMMETRIC / DOWNWARD-ONLY (see irc-2018-tables.ts
+// module header, "Snap tolerance" section) — actual spacings ABOVE
+// a tabulated row NEVER snap DOWN to it, because doing so would
+// give a LONGER allowable than the actual spacing warrants (an
+// over-permitted false pass, called out at the PR#24 review gate).
 // ---------------------------------------------------------------------------
 
 describe('IrcSpanTable — spacing snap tolerance (Layout round-trip)', () => {
@@ -182,6 +186,249 @@ describe('IrcSpanTable — spacing snap tolerance (Layout round-trip)', () => {
 
   it('returns 0 for a spacing beyond the largest tabulated row (e.g., 900 mm)', () => {
     expect(IRC.lookupJoistMaxSpan(ref('2x10', 'PT'), 900)).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Snap-policy safety regression (PR#24 blocking finding #1 — GPT-HIGH +
+// Opus-LOW #5, reconciled toward safety by the user).
+//
+// The PREVIOUS symmetric ±20 mm snap window was OPTIMISTIC when the
+// actual spacing sat ABOVE a tabulated row: an actual of 419 mm would
+// snap DOWN to 406 and return the 16-inch allowable (LONGER than
+// warranted → false pass). The new asymmetric downward-only rule
+// (module header §"Snap tolerance") must:
+//   1. NEVER map an above-row actual to that row's allowable.
+//   2. Continue to accept legitimate layout drift BELOW a row.
+//   3. Fail-safe (return 0) for any actual that sits strictly between
+//      rows (per AC4).
+//
+// These tests are the "before/after" regression for that fix.
+// ---------------------------------------------------------------------------
+
+describe('IrcSpanTable — snap-policy safety regression (never optimistic)', () => {
+  // The five actual-spacing values 407..426 mm all sit ABOVE the 406-mm
+  // row and would have snapped DOWN to it under the OLD symmetric rule.
+  // Every one MUST fail-safe under the new rule — this is the exact
+  // false-pass class the reviewer flagged as safety-blocking.
+  for (const above406 of [407, 410, 415, 419, 426]) {
+    it(`does NOT snap ${above406} mm (above the 406-mm row) DOWN to 406 → fail-safe`, () => {
+      expect(IRC.lookupJoistMaxSpan(ref('2x10', 'PT'), above406)).toBe(0);
+    });
+  }
+
+  it('exact-boundary: 406 mm (row) snaps to 406', () => {
+    // Row edge — inclusive.
+    expect(IRC.lookupJoistMaxSpan(ref('2x10', 'PT'), 406)).toBe(ftInMm(14, 0));
+  });
+
+  it('exact-boundary: 405 mm (1 mm below row) snaps to 406 (drift case)', () => {
+    expect(IRC.lookupJoistMaxSpan(ref('2x10', 'PT'), 405)).toBe(ftInMm(14, 0));
+  });
+
+  it('exact-boundary: 407 mm (1 mm above row) → fail-safe 0 (never optimistic)', () => {
+    expect(IRC.lookupJoistMaxSpan(ref('2x10', 'PT'), 407)).toBe(0);
+  });
+
+  it('exact-boundary: 381 mm (25 mm below 406) snaps to 406 (edge of drift window)', () => {
+    // SPACING_DOWNWARD_TOLERANCE_MM = 25 → 381 is the LAST value that
+    // still snaps up to 406. 380 must fail-safe.
+    expect(IRC.lookupJoistMaxSpan(ref('2x10', 'PT'), 381)).toBe(ftInMm(14, 0));
+  });
+
+  it('exact-boundary: 380 mm (26 mm below 406) → fail-safe 0 (past drift window)', () => {
+    expect(IRC.lookupJoistMaxSpan(ref('2x10', 'PT'), 380)).toBe(0);
+  });
+
+  it('between-rows: 450 mm → fail-safe (not snapped DOWN to 406, not close enough UP to 610)', () => {
+    expect(IRC.lookupJoistMaxSpan(ref('2x10', 'PT'), 450)).toBe(0);
+  });
+
+  it('between-rows: 500 mm (approx a 508-mm-nominal design after layout drift) → fail-safe', () => {
+    expect(IRC.lookupJoistMaxSpan(ref('2x10', 'PT'), 500)).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// IRC data-integrity invariants (PR#24 blocking finding #2 — QA-G1).
+//
+// Only ~8% of the 136 transcribed table cells are spot-checked by the
+// golden tests above. A wrong digit ANYWHERE in the rest would be
+// currently undetectable. These invariants exercise the ENTIRE dataset
+// as pure inequalities (no hand numbers) — a single flipped digit
+// breaks monotonicity and this suite fails.
+//
+// Physical laws being asserted:
+//   G1c  Deeper joists span farther (fixed species + spacing, 2x6<2x8<2x10<2x12).
+//   G1d  Tighter joist spacing spans farther (fixed size, @305 > @406 > @610).
+//   G1e  Shorter tributary joist span → beam spans farther (@6ft > @8ft > … > @18ft).
+//   G1f  More plies span farther (fixed size + joistSpan, 3-ply > 2-ply).
+//   Positivity/no-gap: every catalog SKU × standard spacing is either
+//     strictly > 0 (real tabulated row) OR exactly 0 (documented
+//     fail-safe) — never NaN/undefined/negative.
+// ---------------------------------------------------------------------------
+
+describe('IrcSpanTable — data-integrity invariants (QA-G1, full-table coverage)', () => {
+  const JOIST_SPECIES: MaterialRef['species'][] = ['PT', 'Cedar'];
+  const JOIST_SIZES: MaterialRef['nominal'][] = ['2x6', '2x8', '2x10', '2x12'];
+  const JOIST_SPACINGS: Mm[] = [305, 406, 610];
+  const BEAM_PLIES = [2, 3] as const;
+  // Whole-foot joist-span columns of R507.5 (avoids MM_PER_FOOT
+  // constant leak — sizes are exact integers, ftInToMm handles conversion).
+  const BEAM_JOIST_SPAN_FT: number[] = [6, 8, 10, 12, 14, 16, 18];
+
+  describe('G1c — size monotonicity (2x6 < 2x8 < 2x10 < 2x12) for every species+spacing', () => {
+    for (const species of JOIST_SPECIES) {
+      for (const spacing of JOIST_SPACINGS) {
+        it(`${species} @ ${spacing} mm: 2x6 < 2x8 < 2x10 < 2x12`, () => {
+          const spans = JOIST_SIZES.map((n) =>
+            IRC.lookupJoistMaxSpan(ref(n, species), spacing),
+          );
+          // Every value must be > 0 (this is a fully-tabulated slice).
+          for (const s of spans) {
+            expect(s).toBeGreaterThan(0);
+            expect(Number.isFinite(s)).toBe(true);
+          }
+          // Strictly increasing.
+          for (let i = 1; i < spans.length; i++) {
+            expect(spans[i]).toBeGreaterThan(spans[i - 1]!);
+          }
+        });
+      }
+    }
+  });
+
+  describe('G1d — spacing monotonicity (@305 > @406 > @610) for every species+size', () => {
+    for (const species of JOIST_SPECIES) {
+      for (const size of JOIST_SIZES) {
+        it(`${species} ${size}: @305 > @406 > @610`, () => {
+          const spans = JOIST_SPACINGS.map((s) =>
+            IRC.lookupJoistMaxSpan(ref(size, species), s),
+          );
+          for (const s of spans) {
+            expect(s).toBeGreaterThan(0);
+            expect(Number.isFinite(s)).toBe(true);
+          }
+          // Strictly DECREASING (tighter spacing → shorter tributary
+          // per joist → longer allowable → larger index = wider spacing = smaller value).
+          for (let i = 1; i < spans.length; i++) {
+            expect(spans[i]).toBeLessThan(spans[i - 1]!);
+          }
+        });
+      }
+    }
+  });
+
+  describe('G1e — beam joist-span monotonicity (@6ft > @8ft > … > @18ft) for every species+size+ply', () => {
+    for (const species of JOIST_SPECIES) {
+      for (const ply of BEAM_PLIES) {
+        for (const size of JOIST_SIZES) {
+          it(`${ply}-ply ${species} ${size}: @6ft > @8ft > @10ft > @12ft > @14ft > @16ft > @18ft`, () => {
+            const spans = BEAM_JOIST_SPAN_FT.map((ft) =>
+              IRC.lookupBeamMaxSpan(ref(size, species), ftInMm(ft, 0), ply),
+            );
+            for (const s of spans) {
+              expect(s).toBeGreaterThan(0);
+              expect(Number.isFinite(s)).toBe(true);
+            }
+            for (let i = 1; i < spans.length; i++) {
+              expect(spans[i]).toBeLessThan(spans[i - 1]!);
+            }
+          });
+        }
+      }
+    }
+  });
+
+  describe('G1f — beam ply monotonicity (3-ply > 2-ply) for every species+size+joistSpan', () => {
+    for (const species of JOIST_SPECIES) {
+      for (const size of JOIST_SIZES) {
+        for (const jsFt of BEAM_JOIST_SPAN_FT) {
+          it(`${species} ${size} @ ${jsFt}-ft joist span: 3-ply > 2-ply`, () => {
+            const twoPly = IRC.lookupBeamMaxSpan(ref(size, species), ftInMm(jsFt, 0), 2);
+            const threePly = IRC.lookupBeamMaxSpan(ref(size, species), ftInMm(jsFt, 0), 3);
+            expect(twoPly).toBeGreaterThan(0);
+            expect(threePly).toBeGreaterThan(0);
+            expect(threePly).toBeGreaterThan(twoPly);
+          });
+        }
+      }
+    }
+  });
+
+  describe('positivity / no-gap — every catalog SKU × standard spacing is > 0 OR documented fail-safe 0', () => {
+    it('joist lookups: every (rated species) × (tabulated size) × (tabulated spacing) is > 0', () => {
+      // Composite is documented fail-safe; every other combination
+      // MUST be a real tabulated cell (no unmapped gaps).
+      for (const species of JOIST_SPECIES) {
+        for (const size of JOIST_SIZES) {
+          for (const spacing of JOIST_SPACINGS) {
+            const v = IRC.lookupJoistMaxSpan(ref(size, species), spacing);
+            expect(v).toBeGreaterThan(0);
+            expect(Number.isFinite(v)).toBe(true);
+          }
+        }
+      }
+    });
+
+    it('beam lookups: every (rated species) × (tabulated size) × (tabulated ply) × (whole-ft joistSpan) is > 0', () => {
+      for (const species of JOIST_SPECIES) {
+        for (const size of JOIST_SIZES) {
+          for (const ply of BEAM_PLIES) {
+            for (const jsFt of BEAM_JOIST_SPAN_FT) {
+              const v = IRC.lookupBeamMaxSpan(ref(size, species), ftInMm(jsFt, 0), ply);
+              expect(v).toBeGreaterThan(0);
+              expect(Number.isFinite(v)).toBe(true);
+            }
+          }
+        }
+      }
+    });
+
+    it('Composite lookups: every (size) × (spacing OR joistSpan OR ply) returns exactly 0 (documented fail-safe)', () => {
+      for (const size of JOIST_SIZES) {
+        for (const spacing of JOIST_SPACINGS) {
+          expect(IRC.lookupJoistMaxSpan(ref(size, 'Composite'), spacing)).toBe(0);
+        }
+        for (const ply of BEAM_PLIES) {
+          for (const jsFt of BEAM_JOIST_SPAN_FT) {
+            expect(IRC.lookupBeamMaxSpan(ref(size, 'Composite'), ftInMm(jsFt, 0), ply)).toBe(0);
+          }
+        }
+      }
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Untabulated grades / sizes — the MVP tabulates ONLY the 'No2' grade
+// (see IrcSpanTable._isTabulatedGrade) and 2x6/2x8/2x10/2x12 sizes. Every
+// other combination MUST fail-safe rather than silently fall back to a
+// default (QA-G6, QA-G10).
+// ---------------------------------------------------------------------------
+
+describe('IrcSpanTable — untabulated grade / size fail-safe (QA-G6, QA-G10)', () => {
+  it('untabulated grade "Select" (Southern Pine) → fail-safe 0', () => {
+    const m: MaterialRef = { nominal: '2x10', species: 'PT', grade: 'Select' };
+    expect(IRC.lookupJoistMaxSpan(m, 406)).toBe(0);
+    expect(IRC.lookupBeamMaxSpan(m, ftInMm(8, 0), 2)).toBe(0);
+  });
+
+  it('untabulated grade "No1" (Cedar) → fail-safe 0', () => {
+    const m: MaterialRef = { nominal: '2x8', species: 'Cedar', grade: 'No1' };
+    expect(IRC.lookupJoistMaxSpan(m, 406)).toBe(0);
+    expect(IRC.lookupBeamMaxSpan(m, ftInMm(8, 0), 2)).toBe(0);
+  });
+
+  it('untabulated size "6x6" (a post SKU, not a joist) → fail-safe 0', () => {
+    const m: MaterialRef = { nominal: '6x6', species: 'PT', grade: 'No2' };
+    expect(IRC.lookupJoistMaxSpan(m, 406)).toBe(0);
+    expect(IRC.lookupBeamMaxSpan(m, ftInMm(8, 0), 2)).toBe(0);
+  });
+
+  it('untabulated size "5/4x6" (a decking board, not a joist) → fail-safe 0', () => {
+    const m: MaterialRef = { nominal: '5/4x6', species: 'PT', grade: 'No2' };
+    expect(IRC.lookupJoistMaxSpan(m, 406)).toBe(0);
   });
 });
 
@@ -246,11 +493,41 @@ describe('IrcSpanTable — citationFor', () => {
     expect(c).toMatch(/Redwood.*(Western )?Cedars/i);
   });
 
-  it('beam citation names R507.5 + species + size', () => {
+  it('beam citation names R507.5 + species + size (joist span omitted when 0)', () => {
+    // Passing 0 for the joist-span parameter is the "unknown" convention.
+    // The citation must degrade gracefully and NOT emit a spurious
+    // "supporting 0 ft" clause.
     const c = IRC.citationFor('beam', ref('2x10', 'PT'), 0);
     expect(c).toMatch(/IRC-2018/);
     expect(c).toMatch(/R507\.5/);
     expect(c).toMatch(/2x10/);
     expect(c).toMatch(/Southern Pine/i);
+    expect(c).not.toMatch(/supporting 0/);
+  });
+
+  it('beam citation includes the joist-span COLUMN it was looked up from (Code Review PR#24 GPT#2)', () => {
+    // A tributary joist span of 14 ft (4267 mm) must produce a
+    // citation naming the "14 ft joist span" column. This gives the
+    // homeowner an unambiguous R507.5 row to look up.
+    const c = IRC.citationFor('beam', ref('2x10', 'PT'), ftInMm(14, 0));
+    expect(c).toMatch(/R507\.5/);
+    expect(c).toMatch(/supporting 14 ft joist span/);
+  });
+
+  it('beam citation snaps the joist-span to the tabulated whole-ft column', () => {
+    // A tributary joist span of 4577 mm (~15.02 ft) is not a whole
+    // foot but snaps UP to the 16-ft R507.5 column. The citation
+    // must name the SNAPPED column so it agrees with the allowable
+    // that `lookupBeamMaxSpan` returned for the same input.
+    const c = IRC.citationFor('beam', ref('2x10', 'PT'), 4577);
+    expect(c).toMatch(/supporting 16 ft joist span/);
+  });
+
+  it('beam citation for a joist-span beyond 18 ft drops the "supporting" clause (uncovered column)', () => {
+    // 20 ft joist span is outside every tabulated column — the
+    // citation should be honest and NOT claim a bogus column.
+    const c = IRC.citationFor('beam', ref('2x10', 'PT'), ftInMm(20, 0));
+    expect(c).toMatch(/R507\.5/);
+    expect(c).not.toMatch(/supporting \d+ ft/);
   });
 });

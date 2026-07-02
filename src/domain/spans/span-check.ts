@@ -8,24 +8,33 @@
  * (any conforming implementation — `IrcSpanTable` for the MVP,
  * mocks for tests, IRC-2024 / NBC in future stories), produce zero
  * or more `Warning` records — one per over-span member, ordered by
- * `memberId`.
+ * `memberId` (natural / numeric-aware — see "Ordering" below).
  *
  * ## Dependency inversion (Code Review Guardian finding #4)
  *
- * This module MUST NOT import from `./irc-2018-tables` — it depends
- * on the `SpanTable` **interface** only. Doing so:
+ * This module MUST NOT import from the concrete IRC-2018 data module
+ * — it depends on the `SpanTable` **interface** only. Doing so:
  *
  *   - Lets AC3 (mock table swap) pass without a code change
  *   - Lets a future story add IRC-2024 without touching the checker
  *   - Prevents accidental circular data ownership (the table owns
  *     the citations; the checker just relays them)
  *
- * This rule is enforced by two independent gates:
+ * This rule is enforced by THREE independent gates (belt + suspenders
+ * per PR#24 review — Opus finding #1 noted the dep-cruiser layer
+ * allowlist does not by itself catch intra-`src/domain/spans/`
+ * imports):
  *
- *   1. `.dependency-cruiser.cjs`'s `domain-allowlist` (any src/**
- *      import from this module must be under `src/domain/`)
- *   2. A plain `readFileSync` grep in `span-check.test.ts` that
- *      fails if `irc-2018-tables` ever appears in this file's text
+ *   1. `.dependency-cruiser.cjs`'s `domain-allowlist` rule (blocks
+ *      any src/** import that is not under src/domain/).
+ *   2. `.dependency-cruiser.cjs`'s explicit `span-check-no-irc-tables`
+ *      rule (blocks `src/domain/spans/span-check.ts` from importing
+ *      `src/domain/spans/irc-2018-tables*` specifically).
+ *   3. A plain `readFileSync` grep in `span-check.test.ts` that
+ *      fails if `irc-2018-tables` appears in an
+ *      `import` / `require` / `from` clause in this file's text.
+ *      Comments discussing the rule (as this header does) are fine —
+ *      the regex is import-shaped only.
  *
  * ## Derivations from the Layout
  *
@@ -61,8 +70,10 @@
  * IS the layout's `actualSpacing`, which is <= the design's nominal
  * spacing (see `joist-layout.ts` — the even-spacing algorithm
  * always yields actualSpacing <= nominal). The `IrcSpanTable`
- * absorbs the small drift with its `SPACING_TOLERANCE_MM = 20 mm`
- * snap window.
+ * absorbs the small drift with its asymmetric, downward-only snap
+ * rule (see `irc-2018-tables.ts` module header — the previous
+ * symmetric snap was a safety hazard called out at the PR#24
+ * review gate).
  *
  * If the layout has fewer than 2 joists, the spacing derivation
  * falls back to `0` — the `SpanTable` lookup will fail-safe (no
@@ -78,7 +89,17 @@
  * center-to-center gaps, and takes the MAX (the longest gap is the
  * binding one for the beam's design).
  *
- * ### Beam ply-count (AUTONOMOUS DECISION)
+ * The "same z" match uses a small tolerance (`POST_Z_TOLERANCE_MM`)
+ * rather than strict `===` equality (Code Review Guardian PR#24
+ * Opus finding #6). Rationale: a `.deck` file round-trip could
+ * introduce ε-drift in floating-point coordinates; strict `===`
+ * would then drop ALL posts under a beam, and the beam check would
+ * silently no-op — the exact "quiet failure" mode our fail-safe
+ * discipline is designed to prevent. 0.5 mm is well below any
+ * realistic beam-inset gap (150 mm+) so it cannot conflate two
+ * different beams' posts.
+ *
+ * ### Beam ply-count (AUTONOMOUS DECISION — reconcile in S7)
  *
  * The MVP `Layout` does not carry a per-beam ply-count field. The
  * ticket §"Edge cases" mandates:
@@ -86,13 +107,23 @@
  *   > "MUST default to 2 in the layout engine so the golden tests
  *   > are realistic."
  *
- * The layout engine currently produces a single-ply beam (one
+ * The S4 layout engine currently draws a SINGLE-ply beam (one
  * board — see `beam-layout.ts` module header). This is a
  * documented S4 simplification. Rather than reach across the
- * boundary to modify S4, `spanCheck` assumes plyCount = 2 at lookup
- * time — the canonical residential-deck default. A future story that
- * enriches Layout with per-beam ply data can pass that value here.
- * See the PR body under "Autonomous decisions" for the full write-up.
+ * boundary to modify S4, `spanCheck` assumes plyCount = 2 at
+ * lookup time — the canonical residential-deck default. See the
+ * `DEFAULT_BEAM_PLY_COUNT` `@todo S7` note below for the removal
+ * plan when S7 threads a real plyCount through LayoutMember.
+ *
+ * ## Ordering
+ *
+ * Warnings are sorted by `memberId` using a NATURAL / NUMERIC-AWARE
+ * comparator (Intl.Collator with `numeric: true`) rather than a
+ * plain lexicographic sort. This produces `joist-2` before
+ * `joist-10` — the human-intuitive order (Code Review Guardian
+ * PR#24 Opus finding #3). The comparator falls back to lex ordering
+ * for equal numeric portions, so mixed-kind ids like `beam-far`
+ * and `joist-0` sort predictably.
  */
 
 import type { Layout, LayoutMember, Warning } from '../model';
@@ -103,8 +134,37 @@ import type { SpanTable } from './span-table';
 /**
  * MVP beam ply-count assumption. See module header — this is the
  * autonomous decision documented for review.
+ *
+ * @todo S7: read per-beam plyCount from LayoutMember once S7 adds
+ * it to the model; delete this default. NOTE: S4 currently DRAWS
+ * 1-ply beams (a documented simplification) but this checker
+ * evaluates them against the 2-ply IRC row — S7 must reconcile
+ * these two by (a) adding a real `plyCount` field to beam
+ * LayoutMembers, (b) defaulting new designs to 2-ply, and (c)
+ * teaching beam-layout.ts to render 2-ply visually. Track under
+ * GitHub issue for S7.
  */
 const DEFAULT_BEAM_PLY_COUNT = 2;
+
+/**
+ * Tolerance for matching posts to their supporting beam by shared
+ * `position.z` (Code Review Guardian PR#24 Opus finding #6).
+ *
+ * Strict `===` equality on float `position.z` would drop ALL posts
+ * under a beam after a `.deck` file round-trip that introduces
+ * ε-drift, silently no-opping the beam check. 0.5 mm is well below
+ * every realistic beam-to-beam gap (a MIN_DECK_DIMENSION_MM = 4 ft
+ * deck has beam-to-beam distance ≈ 919 mm) so it cannot conflate
+ * two different beams' posts.
+ */
+const POST_Z_TOLERANCE_MM = 0.5;
+
+/**
+ * Natural-order (numeric-aware) comparator for `memberId` sort. See
+ * module header "Ordering" section. `numeric: true` treats runs of
+ * digits as numbers, so `joist-10` sorts AFTER `joist-2`.
+ */
+const MEMBER_ID_COLLATOR = new Intl.Collator('en', { numeric: true, sensitivity: 'base' });
 
 /**
  * Run the span check. Pure function; no I/O, no globals, no clock.
@@ -165,8 +225,12 @@ export function spanCheck(layout: Layout, table: SpanTable): Warning[] {
         joistSpanMm,
         DEFAULT_BEAM_PLY_COUNT,
       );
-      // spacingMm parameter is ignored for beams — pass 0 by convention.
-      const citation = table.citationFor('beam', beam.material, 0);
+      // Third parameter is the tributary joist span (mm) — the
+      // IrcSpanTable citation uses this to name the R507.5 joist-span
+      // COLUMN that produced the allowable (Code Review Guardian
+      // PR#24 GPT#2). Mock tables that ignore the parameter still
+      // work — they just get an extra number they don't use.
+      const citation = table.citationFor('beam', beam.material, joistSpanMm);
       const warning = evaluateSpan({
         memberId: beam.id,
         kind: 'over-span-beam',
@@ -178,9 +242,9 @@ export function spanCheck(layout: Layout, table: SpanTable): Warning[] {
     }
   }
 
-  // ---- Order by memberId lexicographic (ticket §"one Warning per
-  // ---- member ordered by memberId")
-  warnings.sort((a, b) => (a.memberId < b.memberId ? -1 : a.memberId > b.memberId ? 1 : 0));
+  // ---- Order by memberId NATURALLY (numeric-aware, so "joist-2"
+  // ---- precedes "joist-10"). See module header "Ordering" section.
+  warnings.sort((a, b) => MEMBER_ID_COLLATOR.compare(a.memberId, b.memberId));
   return warnings;
 }
 
@@ -218,17 +282,22 @@ function deriveJoistSpacingMm(joists: readonly LayoutMember[]): Mm {
 
 /**
  * Max post-to-post distance under the given beam. Posts under a beam
- * are identified by shared `position.z` (posts are placed at their
- * parent beam's z — see `post-layout.ts`). Returns `null` if fewer
- * than 2 posts are found under the beam (a 1-post beam is not
- * physically defensible; the checker abstains rather than fabricates
- * a span).
+ * are identified by shared `position.z` — matched with a small
+ * tolerance (`POST_Z_TOLERANCE_MM`) rather than strict `===` so a
+ * float ε-drift from a `.deck` round-trip cannot silently drop all
+ * posts. See module header "Beam post-to-post span" section.
+ *
+ * Returns `null` if fewer than 2 posts are found under the beam (a
+ * 1-post beam is not physically defensible; the checker abstains
+ * rather than fabricates a span).
  */
 function deriveBeamPostToPostSpanMm(
   beam: LayoutMember,
   posts: readonly LayoutMember[],
 ): Mm | null {
-  const beamPosts = posts.filter((p) => p.position.z === beam.position.z);
+  const beamPosts = posts.filter(
+    (p) => Math.abs(p.position.z - beam.position.z) < POST_Z_TOLERANCE_MM,
+  );
   if (beamPosts.length < 2) return null;
 
   const xs = beamPosts.map((p) => p.position.x).sort((a, b) => a - b);
