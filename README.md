@@ -11,7 +11,7 @@ Pre-alpha. Story S1 — project scaffold, tooling & CI — is the current work i
 
 ## Requirements
 
-- **Node.js ≥ 20.19** (LTS). See [`.nvmrc`](./.nvmrc).
+- **Node.js ≥ 22.12** (LTS). See [`.nvmrc`](./.nvmrc).
 - **npm** (ships with Node). Package-manager choice is npm; see the trade-off table in the spec.
 
 ## Getting started

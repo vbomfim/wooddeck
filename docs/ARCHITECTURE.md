@@ -96,7 +96,7 @@ When bumping any of the three exact-pinned packages, verify the matrix (drei ↔
 
 | Tool                  | Version (major) | Config                            |
 | --------------------- | --------------- | --------------------------------- |
-| Node.js               | 20 LTS (≥20.19) | `.nvmrc`, `package.json` engines  |
+| Node.js               | 22 LTS (≥22.12) | `.nvmrc`, `package.json` engines  |
 | npm                   | 10.x            | ships with Node                   |
 | Vite                  | 8.x             | `vite.config.ts` (React plugin, manual chunks for `three` / `r3f`) |
 | TypeScript            | 6.x, strict     | `tsconfig.json` (project references → `tsconfig.app.json`, `tsconfig.node.json`) |
