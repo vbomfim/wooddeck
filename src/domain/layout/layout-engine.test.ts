@@ -3,20 +3,30 @@
  *
  * Covers:
  *   - AC6 complete render contract: every member has position, size (nonzero on
- *     all 3 axes when heightMm > 0), rotation, kind, material, id.
+ *     all 3 axes for a valid design), rotation, kind, material, id.
  *   - AC7 determinism: identical design → identical Layout (with computedAt
  *     injected to a fixed clock so the timestamp is stable).
  *   - LayoutError contract: throws for width/length below MIN_DECK_DIMENSION_MM,
- *     for negative dims, for spacing ≤ 0, and for unknown material triples.
+ *     for negative dims, for spacing < joist thickness, for height <
+ *     MIN_STRUCTURAL_HEIGHT_MM, and for unknown material triples.
  *   - `Layout.designId === design.id`, `Layout.bounds` matches footprint.
  *   - Every MemberKind is represented in the output.
+ *   - Error wrap contract (QA-Gap#3): unknown-material downstream throws
+ *     are wrapped as LayoutError with `cause`; validateDesign LayoutErrors
+ *     are NOT double-wrapped.
  */
 import { describe, expect, it } from 'vitest';
 
 import { MM_PER_FOOT } from '../units';
 import type { DeckDesign, MemberKind } from '../model';
 
-import { LayoutError, MIN_DECK_DIMENSION_MM, computeLayout } from './layout-engine';
+import {
+  LayoutError,
+  MIN_DECK_DIMENSION_MM,
+  MIN_POST_HEIGHT_MM,
+  computeLayout,
+  computeMinStructuralHeightMm,
+} from './layout-engine';
 
 function makeDesign(overrides: Partial<{
   widthMm: number;
@@ -82,8 +92,9 @@ describe('computeLayout — AC6 complete render contract', () => {
   });
 
   it('every member has non-zero size on all 3 axes for a typical design (heightMm > 0)', () => {
-    // AC6 as ticket-worded; the height=0 edge case is exercised separately in
-    // post-layout.test.ts where posts intentionally collapse to zero y-extent.
+    // AC6 as ticket-worded. Under Fix B, every VALID design produces
+    // strictly positive post size.y (posts collapse to zero only for
+    // designs rejected by validateDesign as heightMm < MIN_STRUCTURAL_HEIGHT_MM).
     const layout = computeLayout(makeDesign());
     for (const m of layout.members) {
       expect(m.size.x).toBeGreaterThan(0);
@@ -161,6 +172,35 @@ describe('computeLayout — LayoutError contract', () => {
   it('throws LayoutError when heightMm is negative', () => {
     const design = makeDesign({ heightMm: -100 });
     expect(() => computeLayout(design)).toThrow(LayoutError);
+    expect(() => computeLayout(design)).toThrow(/height/i);
+  });
+
+  it('throws LayoutError when heightMm is 0 (framing would land underground) — Fix B', () => {
+    const design = makeDesign({ heightMm: 0 });
+    expect(() => computeLayout(design)).toThrow(LayoutError);
+    expect(() => computeLayout(design)).toThrow(/height/i);
+    expect(() => computeLayout(design)).toThrow(/structural minimum/i);
+  });
+
+  it('throws LayoutError when heightMm is below MIN_STRUCTURAL_HEIGHT_MM — Fix B', () => {
+    const design = makeDesign({ heightMm: 100 });
+    expect(() => computeLayout(design)).toThrow(LayoutError);
+    // The error message must include the computed minimum so S13's UI can clamp.
+    const minHeight = computeMinStructuralHeightMm(design);
+    expect(() => computeLayout(design)).toThrow(new RegExp(`${minHeight}`));
+  });
+
+  it('accepts heightMm == MIN_STRUCTURAL_HEIGHT_MM (Fix B boundary — inclusive)', () => {
+    const proto = makeDesign();
+    const minHeight = computeMinStructuralHeightMm(proto);
+    const design = makeDesign({ heightMm: minHeight });
+    expect(() => computeLayout(design)).not.toThrow();
+    // At exactly the minimum, posts have exactly MIN_POST_HEIGHT_MM y-extent.
+    const layout = computeLayout(design);
+    const posts = layout.members.filter((m) => m.kind === 'post');
+    for (const p of posts) {
+      expect(p.size.y).toBeCloseTo(MIN_POST_HEIGHT_MM, 6);
+    }
   });
 
   it('throws LayoutError when spacingMm is zero', () => {
@@ -174,6 +214,22 @@ describe('computeLayout — LayoutError contract', () => {
     expect(() => computeLayout(design)).toThrow(LayoutError);
   });
 
+  it('throws LayoutError when spacingMm < joist thickness — Fix A', () => {
+    // 2x10 PT joist actual.widthMm = 38. spacingMm=1 would produce overlap.
+    const design = makeDesign({ spacingMm: 1 });
+    expect(() => computeLayout(design)).toThrow(LayoutError);
+    expect(() => computeLayout(design)).toThrow(/spacing/i);
+    expect(() => computeLayout(design)).toThrow(/thickness/i);
+    // Must name the minimum (the joist thickness in mm).
+    expect(() => computeLayout(design)).toThrow(/38/);
+  });
+
+  it('accepts spacingMm == joist thickness (Fix A boundary — inclusive)', () => {
+    // 2x10 PT joist thickness = 38 mm; spacingMm=38 is right at the min.
+    const design = makeDesign({ spacingMm: 38 });
+    expect(() => computeLayout(design)).not.toThrow();
+  });
+
   it('LayoutError is a subclass of Error and has name "LayoutError"', () => {
     try {
       computeLayout(makeDesign({ widthMm: 0 }));
@@ -185,11 +241,13 @@ describe('computeLayout — LayoutError contract', () => {
     }
   });
 
-  it('accepts the minimum viable 4 ft × 4 ft × 1 ft design without throwing', () => {
+  it('accepts the minimum viable 4 ft × 4 ft × 2 ft design without throwing', () => {
+    // 2 ft (609.6 mm) is above the ~520 mm structural min for the PT 2x10
+    // stack. 1 ft would fail Fix B validation (framing underground).
     const design = makeDesign({
       widthMm: 4 * MM_PER_FOOT,
       lengthMm: 4 * MM_PER_FOOT,
-      heightMm: MM_PER_FOOT,
+      heightMm: 2 * MM_PER_FOOT,
     });
     expect(() => computeLayout(design)).not.toThrow();
     // And the minimum-viable member counts are met (edge case in ticket).
@@ -200,6 +258,89 @@ describe('computeLayout — LayoutError contract', () => {
     expect(byKind('post').length).toBeGreaterThanOrEqual(4);
     expect(byKind('footing').length).toBe(byKind('post').length);
     expect(byKind('board').length).toBeGreaterThan(0);
+  });
+});
+
+describe('computeLayout — error wrap contract (QA-Gap#3)', () => {
+  it('wraps an unknown-material downstream throw as LayoutError with cause', () => {
+    const design = makeDesign();
+    // Cast through unknown to inject an unsupported joist material.
+    const bogus: DeckDesign = {
+      ...design,
+      joist: {
+        ...design.joist,
+        material: {
+          nominal: 'not-a-nominal' as DeckDesign['joist']['material']['nominal'],
+          species: 'PT',
+          grade: 'No2',
+        },
+      },
+    };
+    let caught: unknown;
+    try {
+      computeLayout(bogus);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(LayoutError);
+    const layoutErr = caught as LayoutError;
+    // Since fix A also looks up joist material in validateDesign, the
+    // wrap here goes through the "Invalid joist material" validation
+    // path — still a LayoutError with the original catalog error as
+    // `cause` (not a double-wrap of LayoutError).
+    expect(layoutErr.cause).toBeDefined();
+    expect(layoutErr.cause).toBeInstanceOf(Error);
+    expect((layoutErr.cause as Error).message).toMatch(/not-a-nominal|unknown|material/i);
+  });
+
+  it('does NOT double-wrap a validateDesign LayoutError as its own cause', () => {
+    // Width violation: caught by validateDesign, thrown as LayoutError,
+    // then MUST bubble up unchanged (not re-caught by the outer
+    // try/catch and wrapped with itself as cause).
+    const design = makeDesign({ widthMm: 100 });
+    let caught: unknown;
+    try {
+      computeLayout(design);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(LayoutError);
+    const layoutErr = caught as LayoutError;
+    // No `cause` on a raw validation error (it wasn't wrapped from a
+    // downstream throw). If we re-wrapped, `cause` would be the same
+    // LayoutError — assert that hasn't happened.
+    expect(layoutErr.cause).toBeUndefined();
+  });
+
+  it('wraps an unknown-material downstream throw during decking layout as LayoutError', () => {
+    // Bypass validateDesign's joist-material check by keeping the joist
+    // material valid but making the decking material invalid — the
+    // catalog lookup for the decking happens inside layoutDecking(),
+    // deep in the try/catch of computeLayout, exercising the
+    // "downstream throw → LayoutError wrap" path.
+    const design = makeDesign();
+    const bogus: DeckDesign = {
+      ...design,
+      decking: {
+        ...design.decking,
+        material: {
+          nominal: 'not-a-decking-nominal' as DeckDesign['decking']['material']['nominal'],
+          species: 'PT',
+          grade: 'No2',
+        },
+      },
+    };
+    let caught: unknown;
+    try {
+      computeLayout(bogus);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(LayoutError);
+    // The wrap MUST NOT be an instance of an inner LayoutError (would
+    // indicate double-wrap); it must have `cause` set to the original.
+    const layoutErr = caught as LayoutError;
+    expect(layoutErr.cause).toBeDefined();
   });
 });
 

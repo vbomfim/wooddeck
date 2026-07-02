@@ -44,8 +44,15 @@
  * unusable:
  *
  *   - `widthMm` / `lengthMm` below `MIN_DECK_DIMENSION_MM` (or ≤ 0)
- *   - `heightMm` negative (height = 0 is permitted — degenerate posts)
- *   - `joist.spacingMm` ≤ 0
+ *   - `heightMm` below `computeMinStructuralHeightMm(design)` — the
+ *     structural stack (decking + joist + beam depth + MIN_POST_HEIGHT_MM)
+ *     would land underground if we allowed less; a zero-height design
+ *     would produce zero-y-extent posts and negative-y beams. The
+ *     error message includes the computed minimum so S13's UI can
+ *     clamp its height input to a legal value.
+ *   - `joist.spacingMm` below the joist material's actual thickness
+ *     (spacings smaller than the joist thickness cause adjacent joists
+ *     to overlap, violating AC3 for a "valid" design).
  *   - any material triple not in the catalog (re-thrown from the
  *     downstream `lookupMaterial` failure — never silently partially
  *     filled)
@@ -56,12 +63,14 @@
  */
 
 import type { DeckDesign, Layout, LayoutMember } from '../model';
+import { lookupMaterial } from '../materials-catalog';
 import { MM_PER_FOOT, type Mm } from '../units';
 
 import { layoutBeams } from './beam-layout';
 import { layoutDecking } from './decking-layout';
 import { layoutJoists } from './joist-layout';
 import { layoutPostsAndFootings } from './post-layout';
+import { MIN_POST_HEIGHT_MM } from './y-stack';
 
 /**
  * Minimum viable deck dimension (both width and length must be ≥ this).
@@ -99,6 +108,66 @@ export interface ComputeLayoutOptions {
    * `() => new Date().toISOString()`.
    */
   readonly now?: () => string;
+}
+
+// Re-export `MIN_POST_HEIGHT_MM` so consumers (S13's height input) can
+// clamp their UI floor to the value the engine considers valid.
+export { MIN_POST_HEIGHT_MM } from './y-stack';
+
+/**
+ * Compute the **minimum legal `heightMm`** for a given design, i.e.
+ * the smallest deck height at which every above-ground member of the
+ * layout would still lie in `y ∈ [0, heightMm]` and every post would
+ * still have a positive y-extent.
+ *
+ * Derivation (bottom-up along the y-stack — see `y-stack.ts`):
+ *
+ *     y = 0                        ← ground plane
+ *      ↑ MIN_POST_HEIGHT_MM        ← minimum positive post extent
+ *      ↑ beamDepthMm                ← full beam depth (drop-beam)
+ *      ↑ joistDepthMm               ← full joist depth (sits on beam)
+ *      ↑ deckingThicknessMm         ← decking board thickness
+ *     y = heightMm                 ← walking surface
+ *
+ * MIN = deckingThicknessMm + joistDepthMm + beamDepthMm + MIN_POST_HEIGHT_MM
+ *
+ * Depends on the design's material triple (thicker joist ⇒ higher
+ * minimum). Exported so S13's height input can call it directly to
+ * decide its slider/spinner minimum.
+ *
+ * @throws {LayoutError} if any of the decking / joist / beam material
+ *   triples are not in the catalog (wrapped from `lookupMaterial`).
+ */
+export function computeMinStructuralHeightMm(design: DeckDesign): Mm {
+  let decking, joist, beam;
+  try {
+    decking = lookupMaterial(
+      design.decking.material.nominal,
+      design.decking.material.species,
+      design.decking.material.grade,
+    );
+    joist = lookupMaterial(
+      design.joist.material.nominal,
+      design.joist.material.species,
+      design.joist.material.grade,
+    );
+    beam = lookupMaterial(
+      design.beam.material.nominal,
+      design.beam.material.species,
+      design.beam.material.grade,
+    );
+  } catch (err) {
+    throw new LayoutError(
+      `computeMinStructuralHeightMm failed: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
+  return (
+    decking.actual.widthMm +
+    joist.actual.heightMm +
+    beam.actual.heightMm +
+    MIN_POST_HEIGHT_MM
+  );
 }
 
 /**
@@ -162,16 +231,20 @@ function defaultNow(): string {
 }
 
 /**
- * Validate the design at the layout-engine boundary. Cheap checks
- * only — the material-catalog lookup (also a validation) happens
- * downstream inside each sub-layout function.
+ * Validate the design at the layout-engine boundary. Checks:
  *
- * Every branch is exercised by `layout-engine.test.ts` — see the
- * "LayoutError contract" describe block. These are trust-boundary
- * defensive checks (per Developer Guardian rules) — they may look
- * "impossible" given the strict `DeckDesign` type, but the design
- * enters the domain through `.deck` file parsing (S6) which can hand
- * off a technically-typed-correct value with nonsensical numbers.
+ *   1. widthMm / lengthMm ≥ MIN_DECK_DIMENSION_MM
+ *   2. joist material triple in catalog + joist spacing ≥ joist thickness
+ *   3. heightMm ≥ computeMinStructuralHeightMm(design)
+ *
+ * The joist / height checks look up materials in the catalog so
+ * validation surface = "everything computeLayout can prove wrong up
+ * front" — silent partial layouts are FORBIDDEN. These are
+ * trust-boundary defensive checks (per Developer Guardian rules) —
+ * they may look "impossible" given the strict `DeckDesign` type, but
+ * the design enters the domain through `.deck` file parsing (S6)
+ * which can hand off a technically-typed-correct value with
+ * nonsensical numbers.
  */
 function validateDesign(design: DeckDesign): void {
   const { widthMm, lengthMm, heightMm } = design.footprint;
@@ -190,16 +263,50 @@ function validateDesign(design: DeckDesign): void {
         `outside the MVP layout engine's supported range.`,
     );
   }
-  if (!Number.isFinite(heightMm) || heightMm < 0) {
+
+  // Joist-spacing min: the joist material's actual thickness. Spacings
+  // smaller than the joist thickness produce OVERLAPPING joists (they
+  // are placed at ≥ actualSpacing centre-to-centre but each joist has
+  // `thickness` extent on x). Fails AC3 silently otherwise; reject
+  // loudly here so S13 can surface the min to the user. Look up the
+  // joist material via the catalog — this also validates the material
+  // triple, but if that fails we surface a specific LayoutError below.
+  let joistThicknessMm: Mm;
+  try {
+    const joistMaterial = lookupMaterial(
+      design.joist.material.nominal,
+      design.joist.material.species,
+      design.joist.material.grade,
+    );
+    joistThicknessMm = joistMaterial.actual.widthMm;
+  } catch (err) {
     throw new LayoutError(
-      `Invalid deck height: heightMm=${heightMm} must be ≥ 0. ` +
-        `Height=0 is permitted as a degenerate edge case (posts collapse to zero y-extent).`,
+      `Invalid joist material: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
     );
   }
-  if (!Number.isFinite(design.joist.spacingMm) || design.joist.spacingMm <= 0) {
+  if (!Number.isFinite(design.joist.spacingMm) || design.joist.spacingMm < joistThicknessMm) {
     throw new LayoutError(
-      `Invalid joist spacing: spacingMm=${design.joist.spacingMm} must be > 0. ` +
-        `Typical values: 305 mm (12″), 406 mm (16″), 508 mm (20″), 610 mm (24″).`,
+      `Invalid joist spacing: spacingMm=${design.joist.spacingMm} must be ≥ the joist ` +
+        `thickness of ${joistThicknessMm} mm (spacings smaller than the joist thickness ` +
+        `would produce overlapping joists). Typical values: 305 mm (12″), 406 mm (16″), ` +
+        `508 mm (20″), 610 mm (24″).`,
+    );
+  }
+
+  // Height min: the y-stack must fit above ground with strictly
+  // positive posts. See `computeMinStructuralHeightMm` for the
+  // derivation. Height=0 (and any short-height design that would push
+  // framing underground) is REJECTED here rather than silently
+  // clamping to a degenerate geometry.
+  const minStructuralHeightMm = computeMinStructuralHeightMm(design);
+  if (!Number.isFinite(heightMm) || heightMm < minStructuralHeightMm) {
+    throw new LayoutError(
+      `Invalid deck height: heightMm=${heightMm} must be ≥ ${minStructuralHeightMm} mm ` +
+        `(the structural minimum for the chosen decking/joist/beam materials plus a ` +
+        `${MIN_POST_HEIGHT_MM} mm minimum post extent). Below this, joists and beams ` +
+        `would land underground and posts would have zero y-extent. S13's UI height ` +
+        `input MUST clamp its lower bound to computeMinStructuralHeightMm(design).`,
     );
   }
 }

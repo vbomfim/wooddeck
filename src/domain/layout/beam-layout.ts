@@ -48,6 +48,30 @@ import type { DeckDesign, LayoutMember } from '../model';
 
 import { FOOTING_WIDTH_MM, computeYStack } from './y-stack';
 
+/**
+ * Stable ids for the two beams. Exported so `post-layout.ts` (and any
+ * future scene/BOM code) can look up posts under a beam by label
+ * without regex-parsing `beam.id`. Adding a third beam in v2+ would
+ * mean adding a new label here and updating the two consumers.
+ */
+export const BEAM_IDS = {
+  near: 'beam-near',
+  far: 'beam-far',
+} as const;
+
+/**
+ * Label ("near" | "far") a beam by its id — the inverse of BEAM_IDS.
+ * Returns `null` for unknown ids so the caller can fail loudly rather
+ * than fabricating a nonsense post id.
+ */
+export type BeamLabel = 'near' | 'far';
+
+export function beamLabelForId(beamId: string): BeamLabel | null {
+  if (beamId === BEAM_IDS.near) return 'near';
+  if (beamId === BEAM_IDS.far) return 'far';
+  return null;
+}
+
 export function layoutBeams(design: DeckDesign): LayoutMember[] {
   const beamMat = lookupMaterial(
     design.beam.material.nominal,
@@ -70,7 +94,7 @@ export function layoutBeams(design: DeckDesign): LayoutMember[] {
 
   return [
     {
-      id: 'beam-near',
+      id: BEAM_IDS.near,
       kind: 'beam',
       material: design.beam.material,
       position: { x: 0, y, z: nearZ },
@@ -78,7 +102,7 @@ export function layoutBeams(design: DeckDesign): LayoutMember[] {
       rotation: { x: 0, y: 0, z: 0 },
     },
     {
-      id: 'beam-far',
+      id: BEAM_IDS.far,
       kind: 'beam',
       material: design.beam.material,
       position: { x: 0, y, z: farZ },

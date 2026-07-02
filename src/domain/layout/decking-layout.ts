@@ -18,10 +18,14 @@
  *     expansion — the ubiquitous residential-deck-carpentry default
  *     (`BOARD_GAP_MM`).
  *
- *   - The LAST board carries the remainder (MVP simplification "no
- *     ripping"). Its face-width is < faceWidth if the footprint length
- *     does not accept an integer number of full boards + gaps. First
- *     board is flush with the −z (or −x, when flipped) edge.
+ *   - The LAST board is positioned so its FAR face is flush with the
+ *     footprint's far edge (`last.far === spanMm`). Its width is the
+ *     remainder after all full-width boards + gaps; in the degenerate
+ *     "the remainder happens to be exactly a full board width + one
+ *     gap" case the LAST board is slightly wider than `faceWidthMm`
+ *     (up to `faceWidthMm + BOARD_GAP_MM`), never narrower than the
+ *     remainder. Nothing is ever ripped in the MVP. First board is
+ *     flush at the −z (or −x, when flipped) near edge.
  *
  *   - Board top face is flush with `footprint.heightMm` (the y=heightMm
  *     plane is "the walking surface"). Y-position and thickness come
@@ -35,9 +39,15 @@
  *   parallel-to-length:      boards laid along +x, spanning full +z
  *                            → boardCount = ceil(widthMm / (faceWidth + gap))
  *
- * `ceil(…)` matches the "fit as many full boards as possible then one
- * remainder board" strategy: N-1 full-face-width boards plus 1 partial-
- * width remainder board equals `ceil(dim / (faceWidth + gap))`.
+ * Derivation: my `layoutBoardRows` places boards until
+ * `cursor + pitch < spanMm` fails, having advanced `cursor` by `pitch =
+ * (F + G)` each iteration. After k iterations `cursor = k*(F+G)`; the
+ * loop exits when `(k+1)*(F+G) >= spanMm`, so `k = ceil(spanMm/(F+G))
+ * − 1`. One final "remainder" board is always appended, so the total
+ * `k + 1 = ceil(spanMm/(F+G))`. In the degenerate case where spanMm is
+ * an exact multiple of pitch, the final board has width equal to the
+ * trailing gap (`spanMm − k*(F+G) = G`) — still positive, still keeping
+ * the far face flush with the footprint edge.
  */
 
 import { lookupMaterial } from '../materials-catalog';
@@ -135,19 +145,59 @@ interface BoardRow {
 }
 
 /**
- * Layout N rows of boards along a linear span. N-1 rows are full face-
- * width; the last row is the remainder (< faceWidth). Board centers are
- * spaced by (faceWidth + gap) except the last, which sits flush with the
- * far end of the span.
+ * Layout N rows of boards along a linear span. All rows except the
+ * LAST are exactly `faceWidthMm` wide, separated by `BOARD_GAP_MM`
+ * from the next row. The LAST row is positioned so its FAR face lies
+ * flush with the far edge of the span (`row.far === spanMm`), and its
+ * width is whatever remains — never larger than `faceWidthMm +
+ * BOARD_GAP_MM` (see algorithm below).
+ *
+ * ## Flush-at-both-ends contract (GPT-MED#3 fix)
+ *
+ *   - `rows[0]`'s NEAR face is at 0 (the first board starts flush at
+ *     the near edge of the span).
+ *   - `rows.at(-1)`'s FAR face is at `spanMm` (the last board ends
+ *     flush at the far edge — no perimeter gap).
+ *
+ * The previous implementation used `min(faceWidthMm, remaining)` while
+ * advancing the cursor and left up to `BOARD_GAP_MM` of empty space at
+ * the far end for spans in `(N*(F+G) - G + F, N*(F+G))`. That failure
+ * mode was caught in code review — this rewrite makes the near AND
+ * far edges of the decking flush with the footprint by design.
+ *
+ * ## Algorithm
+ *
+ *   1. Place N-1 full-width boards at pitch `(faceWidthMm + BOARD_GAP_MM)`
+ *      starting at 0, provided a full-width board plus its trailing gap
+ *      still fits inside the span. The loop guard is
+ *      `cursor + faceWidthMm + BOARD_GAP_MM < spanMm`.
+ *   2. Place a FINAL board that spans from `cursor` to `spanMm`. Its
+ *      width is `spanMm - cursor ∈ (0, faceWidthMm + BOARD_GAP_MM]`.
+ *
+ * With this construction, the gap between the (N-1)th and Nth (last)
+ * board's faces is exactly `BOARD_GAP_MM`, matching every internal
+ * gap; the LAST board simply absorbs the perimeter remainder.
  */
 function layoutBoardRows(spanMm: Mm, faceWidthMm: Mm): BoardRow[] {
   const rows: BoardRow[] = [];
-  let cursor = 0; // start of the next board along the axis
-  while (cursor < spanMm) {
-    const remaining = spanMm - cursor;
-    const width = Math.min(faceWidthMm, remaining);
-    rows.push({ faceWidth: width, center: cursor + width / 2 });
-    cursor += width + BOARD_GAP_MM;
+  const pitch = faceWidthMm + BOARD_GAP_MM;
+
+  // Guard the degenerate spanMm ≤ 0 case — layout-engine's
+  // MIN_DECK_DIMENSION_MM validator makes this unreachable, but a
+  // defensive early-out avoids an infinite loop if a future caller
+  // slips past it.
+  if (spanMm <= 0) return rows;
+
+  let cursor = 0;
+  // Place as many full-width boards as fit while still leaving room
+  // for at least one more board (of any width) after the trailing gap.
+  while (cursor + pitch < spanMm) {
+    rows.push({ faceWidth: faceWidthMm, center: cursor + faceWidthMm / 2 });
+    cursor += pitch;
   }
+  // The FINAL board fills the remainder up to spanMm — its far face
+  // lies flush with the footprint's far edge, satisfying the AC.
+  const remainderWidth = spanMm - cursor;
+  rows.push({ faceWidth: remainderWidth, center: cursor + remainderWidth / 2 });
   return rows;
 }

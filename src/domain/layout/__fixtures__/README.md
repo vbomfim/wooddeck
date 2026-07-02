@@ -41,7 +41,9 @@ so the timestamp is deterministic (see AC7).
 | large-40x40                      | 40 ft × 40 ft    | 406 mm  | perpendicular         | AC8 upper-bound benchmark shape        |
 | large-40x40-wider-spacing        | 40 ft × 40 ft    | 610 mm  | perpendicular         | Wide 24" o.c. spacing                  |
 | tall-narrow                      | 4 ft × 20 ft     | 406 mm  | parallel-to-length    | Non-square, narrow                     |
-| height-zero                      | 10 ft × 10 ft    | 406 mm  | perpendicular         | Height = 0 edge case                   |
+| min-valid-height                 | 10 ft × 10 ft    | 406 mm  | perpendicular         | heightMm == MIN_STRUCTURAL_HEIGHT_MM   |
+| extreme-narrow-4x40              | 4 ft × 40 ft     | 406 mm  | perpendicular         | Extreme aspect ratio (narrow)          |
+| extreme-wide-40x4                | 40 ft × 4 ft     | 406 mm  | perpendicular         | Extreme aspect ratio (wide)            |
 
 ## Regenerating
 
@@ -49,11 +51,18 @@ Fixture JSON files are checked in as goldens. To regenerate after an
 INTENTIONAL layout-engine behavior change:
 
 1. Update the layout engine.
-2. Run `node scripts/regenerate-layout-fixtures.mjs` (S4-post-MVP; for
-   now, temporarily add a `it.only` that logs the output and paste it
-   back into the fixture, then remove the log).
-3. Manually inspect the new geometry to confirm the change is intended.
-4. Commit the updated JSON alongside the engine change.
+2. Regenerate every fixture with the gated Vitest run:
 
-An accidental fixture drift is a REGRESSION — do NOT auto-accept
-without human review.
+   ```bash
+   export PATH="/tmp/node-v22.23.1-darwin-arm64/bin:$PATH"   # Node 22.23.1
+   REGENERATE_FIXTURES=1 npx vitest run \
+     src/domain/layout/__fixtures__/_regenerate.test.ts
+   ```
+
+   The regenerator lives at `_regenerate.test.ts` — it is `describe.runIf`-
+   gated on the `REGENERATE_FIXTURES=1` env var, so the default
+   `npm test` run leaves it skipped.
+3. `git diff src/domain/layout/__fixtures__/*.json` — MANUALLY inspect
+   the new geometry to confirm the change is intended. A drift here is
+   a regression; do NOT auto-accept without human review.
+4. Commit the updated JSON alongside the engine change.

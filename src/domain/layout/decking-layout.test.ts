@@ -99,13 +99,49 @@ describe('decking-layout — default orientation (parallel-to-width)', () => {
     }
   });
 
-  it('the last board carries the remainder (may be narrower, no ripping)', () => {
+  it('the last board carries the remainder (may be narrower or slightly wider, no ripping)', () => {
     const design = makeDesign({ lengthMm: 4880 });
     const boards = layoutDecking(design);
     const last = boards.at(-1)!;
-    // Last board's size.z is > 0 and ≤ face-width.
+    // Last board's size.z is > 0. Post Fix C the last board can be up to
+    // (faceWidth + BOARD_GAP_MM) since it absorbs the perimeter remainder
+    // to keep the far edge flush with the footprint.
     expect(last.size.z).toBeGreaterThan(0);
-    expect(last.size.z).toBeLessThanOrEqual(faceWidth);
+    expect(last.size.z).toBeLessThanOrEqual(faceWidth + BOARD_GAP_MM);
+  });
+
+  it('Fix C: FIRST board near face is at footprint near edge (-length/2)', () => {
+    const design = makeDesign({ lengthMm: 4880 });
+    const boards = layoutDecking(design);
+    const first = boards[0]!;
+    const nearFace = first.position.z - first.size.z / 2;
+    expect(nearFace).toBeCloseTo(-4880 / 2, 6);
+  });
+
+  it('Fix C: LAST board far face is FLUSH with footprint far edge (+length/2)', () => {
+    // Regression test for GPT-MED#3 — previously up to BOARD_GAP_MM was
+    // left as an air-gap at the far end. Under Fix C the last board
+    // absorbs the remainder and its far face lies at +length/2 exactly.
+    const design = makeDesign({ lengthMm: 4880 });
+    const boards = layoutDecking(design);
+    const last = boards.at(-1)!;
+    const farFace = last.position.z + last.size.z / 2;
+    expect(farFace).toBeCloseTo(4880 / 2, 6);
+  });
+
+  it('Fix C: near-face flush and far-face flush for a variety of lengths (including remainder-inducing)', () => {
+    // Includes GPT-MED#3's original repro (length 1287 previously ended at 1284).
+    // Any length ≥ MIN_DECK_DIMENSION_MM: 4 ft = 1219.2 mm.
+    for (const lengthMm of [1220, 1287, 2000, 2438, 3660, 4880, 6096, 12192]) {
+      const design = makeDesign({ lengthMm });
+      const boards = layoutDecking(design);
+      const first = boards[0]!;
+      const last = boards.at(-1)!;
+      const nearFace = first.position.z - first.size.z / 2;
+      const farFace = last.position.z + last.size.z / 2;
+      expect(nearFace, `lengthMm=${lengthMm} near face`).toBeCloseTo(-lengthMm / 2, 6);
+      expect(farFace, `lengthMm=${lengthMm} far face`).toBeCloseTo(lengthMm / 2, 6);
+    }
   });
 
   it('boards do not overlap along z', () => {
@@ -171,6 +207,37 @@ describe('decking-layout — orientation flip (parallel-to-length)', () => {
     for (let i = 1; i < boards.length - 1; i++) {
       const gap = boards[i]!.position.x - boards[i - 1]!.position.x;
       expect(gap).toBeCloseTo(faceWidth + BOARD_GAP_MM, 6);
+    }
+  });
+
+  it('Fix C: FIRST flipped board near face is at -width/2', () => {
+    const boards = layoutDecking(
+      makeDesign({ widthMm: 3660, orientation: 'parallel-to-length' }),
+    );
+    const first = boards[0]!;
+    const nearFace = first.position.x - first.size.x / 2;
+    expect(nearFace).toBeCloseTo(-3660 / 2, 6);
+  });
+
+  it('Fix C: LAST flipped board far face is FLUSH with +width/2', () => {
+    const boards = layoutDecking(
+      makeDesign({ widthMm: 3660, orientation: 'parallel-to-length' }),
+    );
+    const last = boards.at(-1)!;
+    const farFace = last.position.x + last.size.x / 2;
+    expect(farFace).toBeCloseTo(3660 / 2, 6);
+  });
+
+  it('Fix C: near/far flush across a variety of widths (flipped orientation)', () => {
+    for (const widthMm of [1220, 1287, 2000, 2438, 3660, 4880, 6096, 12192]) {
+      const design = makeDesign({ widthMm, orientation: 'parallel-to-length' });
+      const boards = layoutDecking(design);
+      const first = boards[0]!;
+      const last = boards.at(-1)!;
+      const nearFace = first.position.x - first.size.x / 2;
+      const farFace = last.position.x + last.size.x / 2;
+      expect(nearFace, `widthMm=${widthMm} near face`).toBeCloseTo(-widthMm / 2, 6);
+      expect(farFace, `widthMm=${widthMm} far face`).toBeCloseTo(widthMm / 2, 6);
     }
   });
 });

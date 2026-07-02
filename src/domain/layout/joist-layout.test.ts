@@ -172,3 +172,36 @@ describe('layoutJoists — error paths', () => {
     expect(() => layoutJoists(bad)).toThrow(/Unknown material/);
   });
 });
+
+describe('layoutJoists — bayRemainderStrategy equivalence (Fix K / MVP)', () => {
+  it("'centered' and 'extra-bay-at-end' produce identical joist arrays in MVP", () => {
+    // The MVP treats both strategies identically (even-spaced with flush
+    // end joists); see `joist-layout.ts` for the deferred TODO for the
+    // real 'centered' semantics. This test locks in the current
+    // equivalence so a future divergence is a deliberate change with a
+    // visible test-update signal, not a silent behavioural drift.
+    const proto = makeDesign();
+    const centered: DeckDesign = {
+      ...proto,
+      layout: { bayRemainderStrategy: 'centered' },
+    };
+    const extraBay: DeckDesign = {
+      ...proto,
+      layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+    };
+    expect(layoutJoists(centered)).toEqual(layoutJoists(extraBay));
+  });
+
+  it("equivalence holds for remainder-heavy 3660 × 4880 mm too", () => {
+    const proto = makeDesign({ widthMm: 3660, lengthMm: 4880 });
+    const centered: DeckDesign = {
+      ...proto,
+      layout: { bayRemainderStrategy: 'centered' },
+    };
+    const extraBay: DeckDesign = {
+      ...proto,
+      layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+    };
+    expect(layoutJoists(centered)).toEqual(layoutJoists(extraBay));
+  });
+});

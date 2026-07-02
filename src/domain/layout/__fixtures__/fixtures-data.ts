@@ -98,7 +98,7 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       createdAt: '2026-07-02T00:00:00.000Z',
       widthFt: 4,
       lengthFt: 4,
-      heightFt: 1,
+      heightFt: 2,
       spacingMm: 406,
     }),
   },
@@ -109,7 +109,7 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       createdAt: '2026-07-02T00:00:01.000Z',
       widthFt: 4,
       lengthFt: 4,
-      heightFt: 1,
+      heightFt: 2,
       spacingMm: 406,
       orientation: 'parallel-to-length',
     }),
@@ -224,15 +224,55 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
     }),
   },
   {
-    name: 'height-zero',
-    // Height 0 is a stress test — posts collapse to y-size 0 by design;
-    // footings still placed. See computeLayout / post-layout comments.
-    design: design({
+    name: 'min-valid-height',
+    // Height set to `computeMinStructuralHeightMm(design)` for the
+    // reference PT 5/4x6 decking + 2x10 joist + 2x10 beam stack:
+    //
+    //   deckingThicknessMm (25) + joistDepthMm (235) + beamDepthMm (235)
+    //   + MIN_POST_HEIGHT_MM (25) = 520 mm.
+    //
+    // This is the boundary case for Fix B: at exactly 520 mm the design
+    // is valid and posts have EXACTLY MIN_POST_HEIGHT_MM (25 mm) of
+    // y-extent. One millimetre less would throw a LayoutError. See
+    // `layout-engine.ts` `computeMinStructuralHeightMm` for the
+    // per-design derivation.
+    design: {
       id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       createdAt: '2026-07-02T00:00:11.000Z',
-      widthFt: 10,
-      lengthFt: 10,
-      heightFt: 0,
+      footprint: { widthMm: 10 * MM_PER_FOOT, lengthMm: 10 * MM_PER_FOOT, heightMm: 520 },
+      joist: { material: PT_2X10, spacingMm: 406 },
+      beam: { material: PT_2X10 },
+      post: { material: PT_6X6 },
+      decking: { material: PT_54, orientation: 'parallel-to-width' },
+      layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+    },
+  },
+  {
+    name: 'extreme-narrow-4x40',
+    // Extreme aspect ratio: 4 ft × 40 ft. Only 2 joists across width;
+    // many boards down the length. Exercises the "narrow" corner of
+    // the layout engine's numerical range (QA-Gap#4).
+    design: design({
+      id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+      createdAt: '2026-07-02T00:00:12.000Z',
+      widthFt: 4,
+      lengthFt: 40,
+      heightFt: 3,
+      spacingMm: 406,
+    }),
+  },
+  {
+    name: 'extreme-wide-40x4',
+    // Extreme aspect ratio: 40 ft × 4 ft. Many joists across width;
+    // only 2 boards down the length (short spans). Complement to
+    // extreme-narrow-4x40 (QA-Gap#4). Confirms the width/length
+    // asymmetry in joist / board counts is symmetric under swap.
+    design: design({
+      id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      createdAt: '2026-07-02T00:00:13.000Z',
+      widthFt: 40,
+      lengthFt: 4,
+      heightFt: 3,
       spacingMm: 406,
     }),
   },

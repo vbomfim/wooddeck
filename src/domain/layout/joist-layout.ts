@@ -74,6 +74,8 @@ import { lookupMaterial } from '../materials-catalog';
 import type { DeckDesign, LayoutMember } from '../model';
 import type { Mm } from '../units';
 
+import { computeYStack } from './y-stack';
+
 /**
  * Compute joist positions for a design. Every returned joist:
  *   - has `kind: 'joist'`,
@@ -98,7 +100,11 @@ export function layoutJoists(design: DeckDesign): LayoutMember[] {
   const lengthMm = design.footprint.lengthMm;
 
   const xCenters = computeJoistXCenters(widthMm, spacingMm, thicknessMm);
-  const yCenter = computeJoistYCenter(design);
+  // Delegate y-placement to the shared y-stack — the single source of
+  // truth for vertical stacking (see y-stack.ts). Keeping the lookup
+  // there guarantees joist / beam / decking y-coordinates can NEVER
+  // drift apart in this module.
+  const yCenter = computeYStack(design).joistCenterY;
 
   return xCenters.map<LayoutMember>((x, i) => ({
     id: `joist-${i}`,
@@ -146,29 +152,4 @@ function computeJoistXCenters(
     centers.push(flushLeftCenter + i * actualSpacing);
   }
   return centers;
-}
-
-/**
- * Y-position (center-of-mass) of every joist. Delegates to the shared
- * y-stack (see y-stack.ts) so joist / beam / decking y-coordinates
- * cannot drift apart.
- *
- * Inlined here (rather than importing `computeYStack` into every sub-
- * module) to keep the sub-module's dependency graph shallow — this
- * file's only import beyond types is `lookupMaterial`. The `y-stack`
- * module is used from `layout-engine.ts` and re-used via a small helper
- * to avoid three redundant catalog lookups per compute.
- */
-function computeJoistYCenter(design: DeckDesign): number {
-  const decking = lookupMaterial(
-    design.decking.material.nominal,
-    design.decking.material.species,
-    design.decking.material.grade,
-  );
-  const joist = lookupMaterial(
-    design.joist.material.nominal,
-    design.joist.material.species,
-    design.joist.material.grade,
-  );
-  return design.footprint.heightMm - decking.actual.widthMm - joist.actual.heightMm / 2;
 }

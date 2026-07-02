@@ -66,19 +66,35 @@
  * z-extent [read: y-extent in the corrected frame]; footings still
  * placed"). Footings retain their full extent.
  *
- * ## Footings
+ * ## Footings — MVP placeholder material (concrete, not lumber!)
  *
  * One footing per post, centered directly under it (same x and z). The
  * footing is a `FOOTING_WIDTH_MM × FOOTING_DEPTH_MM × FOOTING_WIDTH_MM`
  * concrete cube with its TOP at y=0 (ground plane) and its BOTTOM at
  * y = −FOOTING_DEPTH_MM. Real footings key on frost-line data; MVP
  * uses a fixed cube for visualization.
+ *
+ * **MVP simplification — the footing member carries `design.post.material`
+ * as its `material` field (which is a lumber ref like `6x6 PT No2`),
+ * even though the physical member is CONCRETE, not lumber.** This is a
+ * conscious placeholder so the S4 render contract stays uniform (every
+ * `LayoutMember` has a `material: MaterialRef`) without S4 having to
+ * invent a `Concrete` catalog entry.
+ *
+ * @todo S14/BOM: footings are concrete, not lumber. The bill-of-materials
+ *       story MUST special-case `kind === 'footing'` and NOT count it as
+ *       6×6 lumber — instead compute concrete volume from
+ *       `FOOTING_WIDTH_MM × FOOTING_DEPTH_MM × FOOTING_WIDTH_MM` per
+ *       footing and roll up to a "concrete piers" line item. See the
+ *       inline comment where `design.post.material` is assigned to the
+ *       footing below.
  */
 
 import { MM_PER_FOOT, type Mm } from '../units';
 import { lookupMaterial } from '../materials-catalog';
 import type { DeckDesign, LayoutMember } from '../model';
 
+import { BEAM_IDS, beamLabelForId, type BeamLabel } from './beam-layout';
 import { FOOTING_DEPTH_MM, FOOTING_WIDTH_MM, computeYStack } from './y-stack';
 
 // Re-export so callers (and tests) have one canonical import path.
@@ -118,7 +134,16 @@ export function layoutPostsAndFootings(
   const footings: LayoutMember[] = [];
 
   for (const beam of beams) {
-    const beamLabel = beamLabelFromId(beam.id);
+    const beamLabel = beamLabelForId(beam.id);
+    if (beamLabel === null) {
+      // Defensive: the only supported beam ids are BEAM_IDS.near/far.
+      // If we ever add intermediate beams, this branch will fire loudly
+      // instead of silently producing `post-unknown-*` ids.
+      throw new Error(
+        `layoutPostsAndFootings: unrecognized beam id ${JSON.stringify(beam.id)} — ` +
+          `expected one of ${JSON.stringify(Object.values(BEAM_IDS))}.`,
+      );
+    }
     for (let i = 0; i < postsPerBeam; i++) {
       const x = xCenters[i]!;
       const z = beam.position.z;
@@ -133,6 +158,11 @@ export function layoutPostsAndFootings(
       footings.push({
         id: `footing-${beamLabel}-${i}`,
         kind: 'footing',
+        // MVP placeholder: footings are CONCRETE, but the LayoutMember
+        // schema requires a MaterialRef. We reuse the post lumber ref
+        // here purely so the render contract stays uniform. The BOM
+        // story (S14) MUST special-case kind==='footing' and NOT count
+        // this as lumber — see the module header TODO(S14/BOM).
         material: design.post.material,
         position: { x, y: stack.footingCenterY, z },
         size: { x: FOOTING_WIDTH_MM, y: FOOTING_DEPTH_MM, z: FOOTING_WIDTH_MM },
@@ -145,20 +175,27 @@ export function layoutPostsAndFootings(
 }
 
 function computePostsPerBeam(widthMm: Mm): number {
-  // Guard against the pathological "widthMm exactly 0" — the layout
-  // engine's LayoutError check should have already rejected it, but
-  // defensive: never return < 2 posts (a beam always needs at least
-  // two end supports).
+  // A beam always needs at least two end supports; `Math.max(2, …)`
+  // guards against widths so small that `ceil(widthMm / MAX_BEAM_SPAN_MM)`
+  // rounds to 0 (impossible under the MIN_DECK_DIMENSION_MM validator
+  // in layout-engine.ts, but kept as a belt-and-braces).
   const raw = Math.ceil(widthMm / MAX_BEAM_SPAN_MM) + 1;
   return Math.max(2, raw);
 }
 
 function computePostXCenters(widthMm: Mm, count: number): number[] {
+  // MIN_DECK_DIMENSION_MM (4 ft, enforced in layout-engine.ts) guarantees
+  // `count >= 2` via `computePostsPerBeam`. We assert defensively so an
+  // erroneous internal caller trips loudly instead of returning a
+  // degenerate 1-post layout.
+  if (count < 2) {
+    throw new Error(
+      `computePostXCenters: count must be >= 2 (got ${count}) — ` +
+        `caller violated MIN_DECK_DIMENSION_MM invariant.`,
+    );
+  }
   // Posts inset from the footprint x-edges by FOOTING_WIDTH_MM/2 so the
   // corner footings (larger than posts) fit entirely inside `bounds`.
-  // With `count === 1` (impossible for a real beam but kept for safety)
-  // the single post sits at x=0.
-  if (count <= 1) return [0];
   const halfInnerX = -widthMm / 2 + FOOTING_WIDTH_MM / 2;
   const usable = widthMm - FOOTING_WIDTH_MM;
   const step = usable / (count - 1);
@@ -169,11 +206,7 @@ function computePostXCenters(widthMm: Mm, count: number): number[] {
   return centers;
 }
 
-/**
- * Extract the "near" / "far" label from a beam id (`beam-near` /
- * `beam-far`). Keeps post/footing ids readable and stable.
- */
-function beamLabelFromId(beamId: string): string {
-  const suffix = beamId.replace(/^beam-/, '');
-  return suffix || 'unknown';
-}
+// (beamLabelFromId helper removed — replaced by the imported
+// `beamLabelForId` from beam-layout.ts, which uses the shared
+// `BEAM_IDS` constant. Re-exported here for backwards compatibility.)
+export { beamLabelForId, BEAM_IDS, type BeamLabel };

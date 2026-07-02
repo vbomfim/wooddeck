@@ -8,7 +8,8 @@
  *     joists along +x — see post-layout.ts header for the reconciliation).
  *   - `MAX_BEAM_SPAN_MM = 2438` (~8 ft) conservative residential default.
  *   - One footing per post, centered directly under the post at ground level.
- *   - At `heightMm = 0` posts collapse to zero y-extent; footings still placed.
+ *   - Post height = beamBottomY, no clamping (Fix B: validateDesign at
+ *     the engine layer ensures the beam bottom stays above ground plane).
  */
 import { describe, expect, it } from 'vitest';
 
@@ -17,6 +18,8 @@ import { lookupMaterial } from '../materials-catalog';
 import type { DeckDesign, LayoutMember } from '../model';
 
 import { layoutBeams } from './beam-layout';
+import { MIN_POST_HEIGHT_MM } from './y-stack';
+import { computeMinStructuralHeightMm } from './layout-engine';
 import {
   FOOTING_DEPTH_MM,
   FOOTING_WIDTH_MM,
@@ -80,11 +83,16 @@ describe('post-layout — post count formula per beam', () => {
     expect(posts).toHaveLength(8);
   });
 
-  it('minimum 4 ft × 4 ft deck: at least 4 posts (2 per beam × 2 beams)', () => {
+  it('minimum 4 ft × 4 ft × 2 ft deck: at least 4 posts (2 per beam × 2 beams)', () => {
+    // 2 ft height chosen to satisfy Fix B MIN_STRUCTURAL_HEIGHT_MM (≈520 mm)
+    // for the 2x10 PT stack; 1 ft (304.8 mm) would fail engine validation.
+    // (post-layout itself does NOT validate, so a direct call with 1 ft
+    // would still succeed but produce underground beams — see the
+    // dedicated Fix B tests below.)
     const design = makeDesign({
       widthMm: 4 * MM_PER_FOOT,
       lengthMm: 4 * MM_PER_FOOT,
-      heightMm: MM_PER_FOOT,
+      heightMm: 2 * MM_PER_FOOT,
     });
     const { posts } = callWithBeams(design);
     expect(posts.length).toBeGreaterThanOrEqual(4);
@@ -197,15 +205,40 @@ describe('post-layout — footing geometry', () => {
   });
 });
 
-describe('post-layout — edge cases', () => {
-  it('height = 0: posts collapse to zero y-extent, footings still placed', () => {
-    const design = makeDesign({ heightMm: 0 });
-    const { posts, footings } = callWithBeams(design);
-    expect(posts.length).toBeGreaterThan(0);
-    for (const p of posts) expect(p.size.y).toBe(0);
-    // Footings still placed with their normal extent.
-    expect(footings.length).toBe(posts.length);
-    for (const f of footings) expect(f.size.y).toBe(FOOTING_DEPTH_MM);
+describe('post-layout — height boundary (Fix B / QA-Gap#5)', () => {
+  it('at heightMm == MIN_STRUCTURAL_HEIGHT_MM, post.size.y == MIN_POST_HEIGHT_MM exactly', () => {
+    const proto = makeDesign();
+    const minHeight = computeMinStructuralHeightMm(proto);
+    const design = makeDesign({ heightMm: minHeight });
+    const { posts } = callWithBeams(design);
+    for (const p of posts) {
+      expect(p.size.y).toBeCloseTo(MIN_POST_HEIGHT_MM, 6);
+    }
+  });
+
+  it('just above MIN_STRUCTURAL_HEIGHT_MM, post height grows 1:1 with heightMm', () => {
+    const proto = makeDesign();
+    const minHeight = computeMinStructuralHeightMm(proto);
+    const growth = 137;
+    const design = makeDesign({ heightMm: minHeight + growth });
+    const { posts } = callWithBeams(design);
+    for (const p of posts) {
+      expect(p.size.y).toBeCloseTo(MIN_POST_HEIGHT_MM + growth, 6);
+    }
+  });
+
+  it('at large heightMm (e.g. 3000 mm), posts have size.y ≈ heightMm - full framing stack', () => {
+    const heightMm = 3000;
+    const design = makeDesign({ heightMm });
+    const decking = lookupMaterial('5/4x6', 'PT', 'No2');
+    const joist = lookupMaterial('2x10', 'PT', 'No2');
+    const beam = lookupMaterial('2x10', 'PT', 'No2');
+    const expected =
+      heightMm - decking.actual.widthMm - joist.actual.heightMm - beam.actual.heightMm;
+    const { posts } = callWithBeams(design);
+    for (const p of posts) {
+      expect(p.size.y).toBeCloseTo(expected, 6);
+    }
   });
 
   it('is deterministic — same design + same beams yields deeply-equal arrays', () => {

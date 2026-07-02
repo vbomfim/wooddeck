@@ -17,7 +17,7 @@
  *   3. Decking BOTTOM        at y = heightMm - deckingThickness    (= joist TOP)
  *   4. Joist  CENTER         at y = deckingBottom - joistDepth/2
  *   5. Joist  BOTTOM         at y = deckingBottom - joistDepth     (= beam TOP)
- *   6. Beam   CENTER         at y = jaistBottom  - beamDepth/2
+ *   6. Beam   CENTER         at y = joistBottom  - beamDepth/2
  *   7. Beam   BOTTOM         at y = beamTop      - beamDepth        (= post TOP)
  *   8. Post   CENTER         at y = postBottom + postHeight/2
  *   9. Post   BOTTOM         at y = 0                                (= footing TOP, ground plane)
@@ -69,6 +69,24 @@ export const FOOTING_DEPTH_MM: Mm = 300;
  * as `FOOTING_DEPTH_MM` — a "one-size-fits-all" 300 mm concrete pier.
  */
 export const FOOTING_WIDTH_MM: Mm = 300;
+
+/**
+ * Minimum positive post height (y-extent) enforced by the layout engine.
+ *
+ * Rationale: at any deck height where `beamBottomY < MIN_POST_HEIGHT_MM`
+ * the framing would either land underground (violating "all above-ground
+ * members have y ∈ [0, heightMm]") or produce zero-extent posts (violating
+ * AC6 "nonzero size on all 3 axes"). Rather than clamping silently, the
+ * engine's `validateDesign` rejects such designs with a `LayoutError`
+ * that names the minimum height. `MIN_POST_HEIGHT_MM = 25` (≈ 1″) is
+ * the smallest post size that is renderable in the 3D scene without
+ * being visually degenerate — well below any realistic residential deck
+ * (a typical raised deck's posts are 300–3000 mm tall).
+ *
+ * S13 (height input UI) MUST clamp its lower bound to
+ * `computeMinStructuralHeightMm(design)` (exported from `layout-engine.ts`).
+ */
+export const MIN_POST_HEIGHT_MM: Mm = 25;
 
 export interface YStack {
   readonly deckingTopY: Mm; // = footprint.heightMm
@@ -127,9 +145,17 @@ export function computeYStack(design: DeckDesign): YStack {
   const beamBottomY = joistBottomY - beamDepthMm;
   const beamCenterY = joistBottomY - beamDepthMm / 2;
 
-  // Post height = distance from ground plane (y=0) to the underside of the
-  // beam. Clamp to 0 for the height-0 edge case (see module header).
-  const postHeightMm = Math.max(0, beamBottomY);
+  // Post height = distance from ground plane (y=0) to the underside of
+  // the beam. For a design that passed `validateDesign` this is
+  // guaranteed to be ≥ MIN_POST_HEIGHT_MM (i.e. strictly positive).
+  //
+  // The `layoutEngine`'s validator rejects any design whose heightMm
+  // would drop the beam underneath the ground plane; direct callers of
+  // this helper (i.e. tests exercising sub-layouts without going
+  // through `computeLayout`) are responsible for the same invariant.
+  // No silent clamping — the value is passed through as-is so a
+  // violation is loud and traceable.
+  const postHeightMm = beamBottomY;
   const postCenterY = postHeightMm / 2;
 
   const footingTopY = 0;
