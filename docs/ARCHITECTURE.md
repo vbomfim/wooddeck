@@ -105,7 +105,7 @@ When bumping any of the three exact-pinned packages, verify the matrix (drei ↔
 | Prettier              | 3.x             | `.prettierrc`                     |
 | dependency-cruiser    | 18.x            | `.dependency-cruiser.cjs`         |
 | fast-check            | 4.x             | staged for domain stories (S4/S5) |
-| GitHub Actions        | `actions/setup-node@v4`, `actions/checkout@v4` | `.github/workflows/ci.yml` runs typecheck + lint + boundaries + test + build |
+| GitHub Actions        | `actions/setup-node@v6`, `actions/checkout@v7` (both `node24` runtime) | `.github/workflows/ci.yml` runs typecheck + lint + boundaries + test + build |
 
 ## 6. Component ownership (post-MVP roadmap)
 
