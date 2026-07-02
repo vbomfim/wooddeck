@@ -1,0 +1,57 @@
+# CI — typecheck, lint, boundary lint, test, build.
+#
+# Runs on every push and every PR. Each job below is intentionally a separate
+# step so the failure surface is obvious in the Actions UI (a red "lint:boundaries"
+# step is more useful than a red "checks" step).
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+
+# Cancel superseded runs on the same ref — solo repo, no reason to spend CI on
+# obsolete pushes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: verify (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: 'npm'
+
+      - name: Install dependencies (npm ci)
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Lint boundaries (dependency-cruiser)
+        run: npm run lint:boundaries
+
+      - name: Test (vitest)
+        run: npm run test
+
+      - name: Build
+        run: npm run build
