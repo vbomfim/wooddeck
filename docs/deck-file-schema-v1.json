@@ -17,10 +17,11 @@
       "const": "wooddeck"
     },
     "generatorVersion": {
-      "description": "SemVer version of the producing wooddeck build (from package.json at build time).",
+      "description": "SemVer version of the producing wooddeck build (from package.json at build time). Pattern accepts MAJOR.MINOR.PATCH with an optional -prerelease and/or +build suffix (both suffix segments are folded together in the pattern for simplicity).",
       "type": "string",
       "minLength": 1,
-      "maxLength": 64
+      "maxLength": 64,
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+].+)?$"
     },
     "createdAt": {
       "description": "ISO-8601 date-time at which the file was produced.",

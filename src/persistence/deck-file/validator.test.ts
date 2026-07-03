@@ -248,3 +248,59 @@ describe('validateDeckFile — payload is not mutated', () => {
     expect(() => validateDeckFile(envelope)).not.toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// generatorVersion semver pattern (Review fix F — schema-level enforcement)
+// ---------------------------------------------------------------------------
+//
+// The JSON Schema pins `generatorVersion` to a lenient semver `pattern`
+// (`^\d+\.\d+\.\d+(?:[-+].+)?$`) — the intent was already documented in
+// the spec but the schema previously accepted any string ≤ 64 chars.
+// These tests exercise the validator layer directly (not just the
+// higher-level deserialize surface) so a rewrite that swaps schema
+// files but forgets the pattern is caught here at the closest layer.
+
+describe('validateDeckFile — generatorVersion semver pattern (F)', () => {
+  it('rejects generatorVersion="banana" — Ajv reports pattern/generatorVersion', () => {
+    const envelope = {
+      schema: 1,
+      generator: 'wooddeck',
+      generatorVersion: 'banana',
+      createdAt: '2026-07-02T21:00:00.000Z',
+      design: GOLDEN_DECK_DESIGN,
+    };
+    try {
+      validateDeckFile(envelope);
+      throw new Error('expected DeckFileError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DeckFileError);
+      const dfe = err as DeckFileError;
+      expect(dfe.code).toBe('schema-validation-failed');
+      expect(dfe.message).toMatch(/generatorVersion|pattern/i);
+    }
+  });
+
+  it('rejects generatorVersion="1.2" (missing patch component)', () => {
+    const envelope = {
+      schema: 1,
+      generator: 'wooddeck',
+      generatorVersion: '1.2',
+      createdAt: '2026-07-02T21:00:00.000Z',
+      design: GOLDEN_DECK_DESIGN,
+    };
+    expect(() => validateDeckFile(envelope)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  it('accepts a well-formed semver with prerelease + build tags', () => {
+    const envelope = {
+      schema: 1,
+      generator: 'wooddeck',
+      generatorVersion: '1.2.3-rc.4+abc.def',
+      createdAt: '2026-07-02T21:00:00.000Z',
+      design: GOLDEN_DECK_DESIGN,
+    };
+    expect(() => validateDeckFile(envelope)).not.toThrow();
+  });
+});

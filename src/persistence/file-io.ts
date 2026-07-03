@@ -18,8 +18,11 @@
  *     override / etc.). The generated shape matches AC9's frozen
  *     regex: `^wooddeck-\d{8}T\d{6}\.deck\.json$`.
  *   - **10 MB size cap on uploads** — DoS defence per ticket §4
- *     edge cases. Any File larger than that is rejected with a
- *     DeckFileError BEFORE any FileReader byte is read.
+ *     edge cases. Any File larger than that is rejected with
+ *     `DeckFileError code:"file-too-large"` BEFORE any FileReader
+ *     byte is read (see PR#26 pair-fix iter 1 — Code Review GPT#2 /
+ *     Opus#1: distinguishing this from schema-validation-failed lets
+ *     consumers render a truthful UX).
  *   - **Validation before typing** — `readDeckFile` never merges the
  *     parsed payload into another object; it hands the raw string to
  *     `deserialize`, which runs the Ajv schema check. Prototype
@@ -31,7 +34,8 @@
  *
  * `readDeckFile` is a boundary function: it accepts an untrusted
  * `File` from a user-triggered `<input type="file">`. The order
- * matters — size check FIRST (cheap, bounds resource use), then
+ * matters — size check FIRST (cheap, bounds resource use; no
+ * FileReader byte is issued until size is proven ≤ cap), then
  * text read (bounded now that size is checked), then
  * `deserialize` (which layers JSON + schema validation).
  */
@@ -44,11 +48,11 @@ import { deserialize, serialize } from './deck-file/schema-v1';
 // Constants — filename & size caps
 // ---------------------------------------------------------------------------
 
-/**
- * Frozen regex from ticket AC9. Every generated filename is
- * verified against this in the test suite; a rewrite MUST NOT drift.
- */
-const DOWNLOAD_FILENAME_PATTERN = /^wooddeck-\d{8}T\d{6}\.deck\.json$/;
+// The frozen download-filename pattern is asserted in the test file
+// (`file-io.test.ts`'s `FILENAME_PATTERN`); the generator here builds
+// a string that structurally satisfies it via `String().padStart`
+// (Security#3 hygiene — the previous belt-and-suspenders `test()`
+// self-check was removed as unreachable).
 
 /**
  * DoS defence — any upload above this size is rejected without
@@ -75,9 +79,11 @@ const DOWNLOAD_MIME = 'application/json';
  */
 export interface DownloadDeckFileOptions {
   /**
-   * Reserved for future use. Currently IGNORED — the download
-   * filename is always generated from the UTC clock. See the module
-   * header (Security) for the rationale.
+   * @deprecated Currently ignored — reserved for a future sanitized-preset
+   * override. The download filename is always generated from the UTC
+   * clock; see the module header (Security) for the rationale. IDEs
+   * will strike this through so callers know the value they pass is
+   * discarded.
    */
   readonly filename?: string;
 }
@@ -86,7 +92,10 @@ export interface DownloadDeckFileOptions {
  * Trigger a browser download containing the serialized `.deck` v1
  * envelope. Constructs a Blob, allocates a temporary object URL,
  * synthesizes an anchor element with `download=<generated>`, clicks
- * it, and revokes the URL.
+ * it, and revokes the URL. Cleanup (removing the temp anchor and
+ * revoking the object URL) runs in a `finally` block so a throwing
+ * `.click()` implementation cannot leak either resource
+ * (Code Review Opus#5).
  */
 export function downloadDeckFile(
   design: DeckDesign,
@@ -97,25 +106,28 @@ export function downloadDeckFile(
   const payload = serialize(design);
   const blob = new Blob([payload], { type: DOWNLOAD_MIME });
   const url = URL.createObjectURL(blob);
+  let anchor: HTMLAnchorElement | undefined;
   try {
-    const anchor = document.createElement('a');
+    anchor = document.createElement('a');
     anchor.href = url;
     anchor.download = filename;
     // `rel=noopener` is defensive: even though `download` prevents
     // navigation, we cannot rely on every browser behaving
     // identically. `noopener` ensures no cross-window relationship.
     anchor.rel = 'noopener';
-    // Style hidden — we do NOT append to document.body in every
-    // browser; some (older Firefox) require the element to be in the
-    // DOM for `.click()` to work. Append then remove to be safe.
+    // Style hidden — some browsers (older Firefox) require the
+    // element to be in the DOM for `.click()` to work. Appending here
+    // then removing in `finally` is the safe pattern.
     anchor.style.display = 'none';
     document.body.appendChild(anchor);
     anchor.click();
-    document.body.removeChild(anchor);
   } finally {
-    // Always release the object URL, even if `click` throws — a leak
-    // would accumulate blob URLs indefinitely for a user with a
-    // flaky browser.
+    // Cleanup MUST happen even if `click()` throws — otherwise a
+    // hostile / flaky browser could leak both the anchor and the
+    // object URL indefinitely.
+    if (anchor?.parentNode !== null && anchor !== undefined) {
+      anchor.parentNode.removeChild(anchor);
+    }
     URL.revokeObjectURL(url);
   }
 }
@@ -129,25 +141,29 @@ export function downloadDeckFile(
  * `DeckDesign` payload on success; rejects with a `DeckFileError`
  * on any failure.
  *
+ * Failure codes (see `DeckFileErrorCode`):
+ *
+ * @throws DeckFileError code=`'file-too-large'` when the File exceeds
+ *         `MAX_UPLOAD_BYTES` (DoS defence). Fires BEFORE FileReader
+ *         issues any read — verified by unit test G5.
+ * @throws DeckFileError code=`'file-read-failed'` when FileReader
+ *         emits `onerror` (permissions, network drive, unplugged
+ *         media). Nothing was parsed.
+ * @throws DeckFileError code=`'invalid-json'` on JSON parse errors
+ *         (surfaces from `deserialize`).
  * @throws DeckFileError code=`'schema-validation-failed'` when the
- *         File exceeds `MAX_UPLOAD_BYTES` (DoS defence) OR when the
- *         JSON payload does not match the v1 schema. (The former is
- *         classified as a validation failure because oversize is a
- *         shape violation of the format — there is no separate code
- *         in the ticket's DeckFileErrorCode union.)
- * @throws DeckFileError code=`'invalid-json'` on JSON parse errors.
+ *         payload's JSON structure does not match v1.
  * @throws DeckFileError code=`'unknown-schema'` when the envelope
  *         declares a version this build cannot understand.
  */
 export async function readDeckFile(file: File): Promise<DeckDesign> {
   if (file.size > MAX_UPLOAD_BYTES) {
-    // Fail fast without reading a byte. Reject with
-    // schema-validation-failed because that is the closest of the
-    // five permitted DeckFileErrorCode values — the alternative is a
-    // ticket-scope addition (`'file-too-large'`), which is out of
-    // scope for S6.
+    // Fail fast without reading a byte. `file-too-large` is the
+    // dedicated code so the UI can render a truthful error message
+    // ("This file is too large") rather than the misleading
+    // `schema-validation-failed` (validation never ran).
     throw new DeckFileError(
-      'schema-validation-failed',
+      'file-too-large',
       `.deck file rejected: ${String(file.size)} bytes exceeds the ${String(MAX_UPLOAD_BYTES)}-byte DoS cap`,
     );
   }
@@ -160,13 +176,19 @@ export async function readDeckFile(file: File): Promise<DeckDesign> {
 // ---------------------------------------------------------------------------
 
 /**
- * Produce a filename matching `DOWNLOAD_FILENAME_PATTERN`.
+ * Produce a filename matching `/^wooddeck-\d{8}T\d{6}\.deck\.json$/`.
  *
  * The stamp is derived from `new Date()` — deterministic ordering
  * across a user's downloads. Two calls in the same second collide
  * (both produce the same filename); the OS decides whether to append
  * a suffix. That is acceptable per the ticket's AC9 (the regex is
  * about SHAPE, not uniqueness).
+ *
+ * The template literal below is structurally guaranteed to match
+ * the frozen pattern — each part is a padded `String()` of a
+ * numeric value, so no runtime "belt and suspenders" self-check is
+ * needed (Security#3 hygiene: dead branch removed). The AC9 unit
+ * test asserts on the shape.
  */
 function generateDownloadFilename(): string {
   const now = new Date();
@@ -176,17 +198,7 @@ function generateDownloadFilename(): string {
   const h = String(now.getUTCHours()).padStart(2, '0');
   const mi = String(now.getUTCMinutes()).padStart(2, '0');
   const s = String(now.getUTCSeconds()).padStart(2, '0');
-  const filename = `wooddeck-${y}${mo}${d}T${h}${mi}${s}.deck.json`;
-  // Belt + suspenders: if a future refactor breaks the shape, catch
-  // it here rather than at the download prompt. The pattern is the
-  // single source of truth.
-  if (!DOWNLOAD_FILENAME_PATTERN.test(filename)) {
-    // Should be unreachable — throw so a broken rewrite is loud.
-    throw new Error(
-      `Internal error: generated filename '${filename}' does not match the frozen pattern`,
-    );
-  }
-  return filename;
+  return `wooddeck-${y}${mo}${d}T${h}${mi}${s}.deck.json`;
 }
 
 /**
@@ -196,6 +208,12 @@ function generateDownloadFilename(): string {
  * baseline we support (though wooddeck targets modern only, jsdom
  * implements it — we could switch later; kept as FileReader for
  * defensive parity with older browsers).
+ *
+ * Failure modes surface via `DeckFileError`:
+ *   - `onerror` → `'file-read-failed'` (browser couldn't read bytes)
+ *   - non-string `.result` → `'file-read-failed'` (FileReader was
+ *     misused — should never occur since we call `readAsText`, but
+ *     the branch exists as a defensive guard).
  */
 function readFileAsText(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -206,14 +224,20 @@ function readFileAsText(file: File): Promise<string> {
         resolve(result);
         return;
       }
+      // Defensive — `readAsText` always yields a string. If we ever
+      // switch to `readAsArrayBuffer` this branch would fire.
       reject(
-        new DeckFileError('invalid-json', 'FileReader returned non-string content', result),
+        new DeckFileError(
+          'file-read-failed',
+          'FileReader returned non-string content (expected UTF-8 text)',
+          result,
+        ),
       );
     };
     reader.onerror = (): void => {
       reject(
         new DeckFileError(
-          'invalid-json',
+          'file-read-failed',
           `failed to read .deck file: ${reader.error?.message ?? 'unknown FileReader error'}`,
           reader.error,
         ),

@@ -52,7 +52,15 @@ export interface SerializeOptions {
 
 /** Meta record returned by `deserialize` — mirrors the envelope minus `design`. */
 export interface DeckFileMeta {
-  readonly schema: number;
+  /**
+   * The schema version of the parsed envelope. Typed as `1 | (number & {})`
+   * so today's v1-only builds narrow `meta.schema === 1` to `true` in
+   * IDEs (Opus#6), while still admitting future values (`2`, `3`, ...)
+   * when v2 support lands without a breaking type change. `number & {}`
+   * is TypeScript's canonical pattern for preserving a literal branch
+   * against widening — plain `1 | number` would collapse to `number`.
+   */
+  readonly schema: 1 | (number & Record<never, never>);
   readonly generator: string;
   readonly generatorVersion: string;
   readonly createdAt: string;

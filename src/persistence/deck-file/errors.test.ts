@@ -63,12 +63,21 @@ describe('DeckFileError', () => {
   });
 
   it('accepts every documented `code` literal — union stays exhaustive', () => {
-    // The five allowlisted codes from ticket §2 — a rename or removal
+    // The seven allowlisted codes from ticket §2 — a rename or removal
     // is caught by TS at compile time AND by this runtime enumeration.
+    // `file-too-large` and `file-read-failed` were added in the S6
+    // review gate (PR #26); before then they were mis-mapped to
+    // `schema-validation-failed` / `invalid-json` respectively. The
+    // enumeration test is the frozen source of truth for the union
+    // shape — anyone adding an 8th code MUST update this array (which
+    // forces a ticket edit, matching the "code widening is an API
+    // change" policy).
     const codes: readonly DeckFileErrorCode[] = [
       'unknown-schema',
       'invalid-json',
       'schema-validation-failed',
+      'file-too-large',
+      'file-read-failed',
       'storage-full',
       'storage-blocked',
     ];
@@ -76,5 +85,22 @@ describe('DeckFileError', () => {
       const err = new DeckFileError(code, `test: ${code}`);
       expect(err.code).toBe(code);
     }
+    // Belt-and-suspenders: the length pin catches an accidental
+    // deletion from the array above that TS could not flag (removing
+    // an element still type-checks — but the count would drift).
+    expect(codes).toHaveLength(7);
+  });
+
+  it('rejects a value NOT in the union at compile time (documentation)', () => {
+    // This block is a compile-time assertion, not a runtime one: if
+    // the union widens to accept `'bogus-code'` a future contributor
+    // would strip the @ts-expect-error and silently pass a bad code
+    // through. Keeping the expect-error means the test file itself
+    // fails to compile if the union changes shape unexpectedly.
+    //
+    // @ts-expect-error — 'bogus-code' is not a DeckFileErrorCode
+    const err = new DeckFileError('bogus-code', 'should not compile');
+    // The runtime object is still constructed; only the type-check fails.
+    expect(err).toBeInstanceOf(DeckFileError);
   });
 });

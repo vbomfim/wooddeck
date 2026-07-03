@@ -79,16 +79,14 @@ declare const __WOODDECK_VERSION__: string;
  * globalThis fallback so the function never throws — if the Vite
  * define didn't run for some reason, downstream diagnostic logs will
  * show `'0.0.0-unknown'` rather than a `ReferenceError` stack trace.
+ *
+ * Note: `typeof` on an undeclared identifier evaluates to the string
+ * `'undefined'` WITHOUT throwing a ReferenceError, so no try/catch is
+ * needed around the check (Opus#4 hygiene: dead try/catch removed).
  */
 function getGeneratorVersion(): string {
-  try {
-    // typeof-guard against the ReferenceError that would occur if
-    // Vite didn't substitute the token AND no globalThis mirror exists.
-    if (typeof __WOODDECK_VERSION__ === 'string' && __WOODDECK_VERSION__.length > 0) {
-      return __WOODDECK_VERSION__;
-    }
-  } catch {
-    /* fall through to globalThis fallback */
+  if (typeof __WOODDECK_VERSION__ === 'string' && __WOODDECK_VERSION__.length > 0) {
+    return __WOODDECK_VERSION__;
   }
   const fallback = (globalThis as { __WOODDECK_VERSION__?: unknown }).__WOODDECK_VERSION__;
   return typeof fallback === 'string' && fallback.length > 0 ? fallback : '0.0.0-unknown';
@@ -108,10 +106,41 @@ function getGeneratorVersion(): string {
 /**
  * Wrap a `DeckDesign` in a v1 envelope and return the JSON string.
  *
+ * ## Envelope `createdAt` is FILE-GENERATION metadata, not identity
+ *
+ * `createdAt` is stamped from the current wall clock on every call.
+ * Two `serialize(D)` invocations on the same design intentionally
+ * produce DIFFERENT strings (their `createdAt` values differ). This
+ * is by design — the field records WHEN the file was written, not
+ * WHAT was written. The AC1 round-trip identity contract is stated
+ * over (a) the DESIGN payload (deep-equal) and (b) a metadata-
+ * preserving byte-identity where the caller pins `createdAt` and
+ * `generatorVersion` on the second serialize (see
+ * `schema-v1.test.ts` — "AC1 honest round-trip contract"). Callers
+ * that need byte-identity across two serializations MUST pass
+ * `opts.createdAt` / `opts.generatorVersion` explicitly on the
+ * second call — the recovered metadata is available via
+ * `deserialize(json).meta`.
+ *
+ * ## Field-order canonicality
+ *
  * The construction order MUST match `DeckFileV1` field order —
- * `JSON.stringify` preserves insertion order, and the byte-for-byte
- * round-trip test (`schema-v1.test.ts` — AC1) fails immediately if a
- * field is added, removed, or reordered.
+ * `JSON.stringify` preserves insertion order, and the metadata-
+ * preserving byte-identity test fails immediately if a field is
+ * added, removed, or reordered.
+ *
+ * ## Unknown envelope keys (v1 does NOT round-trip them)
+ *
+ * The JSON Schema is lenient at the envelope root (unknown top-level
+ * keys are accepted), but `deserialize` does not surface them and
+ * `serialize` does not re-emit them. As a result, `serialize(...)`
+ * always outputs the canonical five-field envelope; forward-compat
+ * additive metadata added by a v2+ producer is IGNORED on load and
+ * LOST on re-save through a v1 build. Round-trip preservation of
+ * extra envelope keys is a v2 consideration (see ticket §17). If
+ * you need to preserve extras today, save the raw JSON string
+ * verbatim — do NOT rely on `deserialize → serialize` to preserve
+ * them.
  */
 export function serialize(design: DeckDesign, opts: SerializeOptions = {}): string {
   const envelope: DeckFileV1 = {
@@ -139,12 +168,28 @@ const KNOWN_SCHEMA_VERSIONS = new Set<number>([1]);
  * Parse and validate a `.deck` file string. Throws `DeckFileError`
  * on any failure — no `null`s, no coerced defaults.
  *
+ * ## Unknown envelope keys are NOT preserved
+ *
+ * The JSON Schema is lenient at the envelope root so future producers
+ * can append additive metadata (`checksum`, `signature`, etc.) without
+ * a breaking schema bump. However, `deserialize` returns only the
+ * canonical five-field envelope in `meta` — unknown top-level keys are
+ * SILENTLY DROPPED on load, and `serialize` does not re-emit them. If
+ * a v1 build loads a v2 file with extras and re-saves, the extras are
+ * lost. See ticket §17 (Trade-off Decisions) for the rationale; a
+ * v2 loader may build a passthrough if needed.
+ *
  * @throws DeckFileError code=`'invalid-json'` when `JSON.parse` fails.
  * @throws DeckFileError code=`'unknown-schema'` when the envelope
- *         declares a `schema` value this build does not understand.
- *         Prechecked BEFORE Ajv validation so a v2 file loaded by a
- *         v1 build reports the correct actionable error ("upgrade
- *         wooddeck") rather than a generic "corrupted file" message.
+ *         declares a numeric INTEGER `schema` value this build does
+ *         not understand. Prechecked BEFORE Ajv validation so a v2
+ *         file loaded by a v1 build reports the correct actionable
+ *         error ("upgrade wooddeck") rather than a generic
+ *         "corrupted file" message. Non-integer / non-numeric
+ *         `schema` values (e.g. 1.5, "1", true) are NOT considered
+ *         "unknown schema versions" — they are structural failures
+ *         and fall through to Ajv, which reports
+ *         `'schema-validation-failed'`.
  * @throws DeckFileError code=`'schema-validation-failed'` when the
  *         parsed payload does not match `docs/deck-file-schema-v1.json`
  *         (missing / mistyped fields, unknown keys in `design`, etc.).
@@ -166,12 +211,19 @@ export function deserialize(json: string): { design: DeckDesign; meta: DeckFileM
   // JSON Schema pins `schema` to `const: 1`, so Ajv would otherwise
   // classify a v2 envelope as "malformed").
   //
-  // We ONLY act on the precheck when `schema` is present AND numeric
-  // AND not in the known set. Missing / non-numeric `schema` falls
-  // through to Ajv, which reports the specific structural failure.
+  // We ONLY act on the precheck when `schema` is present AND a positive
+  // INTEGER AND not in the known set. Non-integer numbers (e.g. 1.5),
+  // strings (e.g. "1"), booleans, null, or missing values fall through
+  // to Ajv, which reports the specific structural failure with the
+  // `schema-validation-failed` code (Code Review GPT#4 / QA-G3 —
+  // previously a `schema: 1.5` file wrongly reported "upgrade wooddeck").
   if (parsed !== null && typeof parsed === 'object' && 'schema' in parsed) {
     const receivedSchema = parsed.schema;
-    if (typeof receivedSchema === 'number' && !KNOWN_SCHEMA_VERSIONS.has(receivedSchema)) {
+    if (
+      typeof receivedSchema === 'number' &&
+      Number.isInteger(receivedSchema) &&
+      !KNOWN_SCHEMA_VERSIONS.has(receivedSchema)
+    ) {
       throw new DeckFileError(
         'unknown-schema',
         `unsupported .deck schema version: ${String(receivedSchema)} — this build only understands schema 1`,

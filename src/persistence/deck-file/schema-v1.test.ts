@@ -5,9 +5,25 @@
  *
  * ## Coverage map (GitHub issue #7 acceptance criteria)
  *
- *   - AC1 (round-trip identity) — golden fixture + property test.
+ *   - AC1 (round-trip identity — HONEST CONTRACT). Three invariants:
+ *       (1) design round-trips deep-equal,
+ *       (2) metadata-preserving byte-identity when the caller pins
+ *           `createdAt` + `generatorVersion` on the second serialize,
+ *       (3) design-payload JSON is byte-stable across two serializes
+ *           with the same pinned metadata.
+ *     The prior "byte-identity across two default serializes" wording
+ *     was a fake invariant — `createdAt` is stamped from the wall
+ *     clock on every call and MUST differ by design. See ticket §4
+ *     AC1 and `schema-v1.ts` module header ("Envelope `createdAt` is
+ *     FILE-GENERATION metadata, not identity") for the rationale.
  *   - AC2 (envelope contents)   — every stamped field is asserted.
- *   - AC3 (unknown schema)      — throws with `.code = 'unknown-schema'`.
+ *   - AC3 (unknown schema)      — throws with `.code = 'unknown-schema'`
+ *                                 ONLY for integer versions outside the
+ *                                 known set. Non-integer / non-numeric
+ *                                 `schema` values fall through to Ajv
+ *                                 and surface as `schema-validation-failed`
+ *                                 (structural failure, not a "version
+ *                                 we don't know" — see AC3 tests).
  *   - AC6 (invalid JSON)        — throws with `.code = 'invalid-json'`.
  *   - Prototype-pollution reject: the parsed payload must never mutate
  *     `Object.prototype` (ticket §6 Security). Belt-and-suspenders:
@@ -31,31 +47,26 @@ import { DeckFileError } from './errors';
 import { GOLDEN_DECK_DESIGN, deckDesignArb } from './__fixtures__/deck-designs';
 
 // ---------------------------------------------------------------------------
-// AC1 — round-trip identity (golden fixture + property test)
+// AC1 — honest round-trip contract (golden fixture + property test)
 // ---------------------------------------------------------------------------
+//
+// Three invariants, none of which pretend that two default serialize()
+// calls produce byte-identical output (their `createdAt` values differ
+// by design — see `schema-v1.ts` module header). The old AC1 wording,
+// `serialize(deserialize(serialize(D)).design) === serialize(D)`, was
+// only passing because tests injected a pinned `createdAt` behind the
+// scenes — a weakened variant that hid the true contract.
 
-describe('serialize/deserialize — AC1 round-trip identity', () => {
-  it('deep-equals the source design (golden fixture)', () => {
+describe('serialize/deserialize — AC1 honest round-trip contract', () => {
+  // Invariant 1: design deep-equal round-trip -------------------------------
+
+  it('invariant 1: deserialize(serialize(D)).design deep-equals D (golden fixture)', () => {
     const json = serialize(GOLDEN_DECK_DESIGN);
     const { design } = deserialize(json);
     expect(design).toEqual(GOLDEN_DECK_DESIGN);
   });
 
-  it('is byte-for-byte idempotent on a second pass (golden fixture)', () => {
-    const first = serialize(GOLDEN_DECK_DESIGN);
-    const { design } = deserialize(first);
-    // Pass an explicit `createdAt` + `generatorVersion` matching the
-    // first call so we control the envelope stamps — otherwise the
-    // ISO `createdAt` drifts and the strings differ. This proves the
-    // NORMALISED serialization is stable, which is the SC-006 promise.
-    const second = serialize(design, {
-      createdAt: extractCreatedAt(first),
-      generatorVersion: extractGeneratorVersion(first),
-    });
-    expect(second).toBe(first);
-  });
-
-  it('property: round-trip is deep-equal for every generated DeckDesign', () => {
+  it('invariant 1 (property): design deep-equal round-trips for any generated DeckDesign', () => {
     fc.assert(
       fc.property(deckDesignArb, (design) => {
         const json = serialize(design);
@@ -66,22 +77,104 @@ describe('serialize/deserialize — AC1 round-trip identity', () => {
     );
   });
 
-  it('property: second-pass serialize is byte-identical when envelope stamps are pinned', () => {
+  // Invariant 2: metadata-preserving byte-identity --------------------------
+  //
+  // `serialize(deserialize(s).design, { createdAt: meta.createdAt,
+  //                                     generatorVersion: meta.generatorVersion }) === s`
+  //
+  // This is the REAL "byte-identity" contract: it takes an envelope,
+  // recovers its meta, and re-emits with those stamps pinned. If the
+  // canonical field order or any per-design encoding drifts, this
+  // fails immediately. Envelope `createdAt` is intentionally NOT
+  // preserved through a NAKED re-serialize — that's file-generation
+  // metadata and MUST differ per save.
+
+  it('invariant 2: metadata-preserving byte-identity holds (golden fixture)', () => {
+    const s = serialize(GOLDEN_DECK_DESIGN);
+    const { design, meta } = deserialize(s);
+    const reEmitted = serialize(design, {
+      createdAt: meta.createdAt,
+      generatorVersion: meta.generatorVersion,
+    });
+    expect(reEmitted).toBe(s);
+  });
+
+  it('invariant 2 (property): metadata-preserving byte-identity for any generated DeckDesign', () => {
     fc.assert(
       fc.property(deckDesignArb, (design) => {
-        const first = serialize(design, {
-          createdAt: '2026-07-02T21:00:00.000Z',
-          generatorVersion: '0.0.0-property-test',
+        const s = serialize(design);
+        const { design: recovered, meta } = deserialize(s);
+        const reEmitted = serialize(recovered, {
+          createdAt: meta.createdAt,
+          generatorVersion: meta.generatorVersion,
         });
-        const { design: parsed } = deserialize(first);
-        const second = serialize(parsed, {
-          createdAt: '2026-07-02T21:00:00.000Z',
-          generatorVersion: '0.0.0-property-test',
-        });
-        expect(second).toBe(first);
+        expect(reEmitted).toBe(s);
       }),
       { numRuns: 100 },
     );
+  });
+
+  // Invariant 3: design-payload JSON byte-stable across same-metadata calls -
+  //
+  // Proves the design serializer itself is deterministic (independent
+  // of wall-clock drift). Two `serialize(D, opts)` calls with the same
+  // pinned `{ createdAt, generatorVersion }` produce the same string.
+
+  it('invariant 3: two serialize calls with SAME pinned metadata are byte-identical (golden fixture)', () => {
+    const opts = {
+      createdAt: '2026-07-02T21:00:00.000Z',
+      generatorVersion: '0.0.0-test',
+    };
+    const a = serialize(GOLDEN_DECK_DESIGN, opts);
+    const b = serialize(GOLDEN_DECK_DESIGN, opts);
+    expect(a).toBe(b);
+  });
+
+  it('invariant 3 (property): byte-identical for any generated DeckDesign under pinned metadata', () => {
+    const opts = {
+      createdAt: '2026-07-02T21:00:00.000Z',
+      generatorVersion: '0.0.0-property-test',
+    };
+    fc.assert(
+      fc.property(deckDesignArb, (design) => {
+        const a = serialize(design, opts);
+        const b = serialize(design, opts);
+        expect(a).toBe(b);
+      }),
+      { numRuns: 100 },
+    );
+  });
+
+  // Anti-invariant: two DEFAULT serializes intentionally differ ------------
+  //
+  // Documented so a future contributor cannot "fix" this by making
+  // createdAt monotonic or removing the wall-clock stamp — those
+  // would be silent contract changes.
+
+  it('anti-invariant: two default serializes MAY differ (createdAt drifts by design)', async () => {
+    const a = serialize(GOLDEN_DECK_DESIGN);
+    // Force a wall-clock delta larger than the ISO-8601 millisecond
+    // resolution so the two `Date.now()` calls MUST fall in different
+    // milliseconds — even under a fast test runner.
+    await new Promise((r) => setTimeout(r, 2));
+    const b = serialize(GOLDEN_DECK_DESIGN);
+    // Parse to compare createdAt structurally rather than asserting
+    // `a !== b` (which could false-negative if the timer resolution
+    // ever coarsens); either way, the assertion documents intent.
+    const createdA = (JSON.parse(a) as { createdAt: string }).createdAt;
+    const createdB = (JSON.parse(b) as { createdAt: string }).createdAt;
+    // The design payload deep-equals across the two serializations
+    // (invariant 1 already proves this), so if `a === b`, then
+    // createdA === createdB — which is exactly what we do NOT want
+    // to promise. Assert on the timestamps directly.
+    expect(Date.parse(createdB)).toBeGreaterThanOrEqual(Date.parse(createdA));
+    // And the FULL strings should also differ — proves createdAt is
+    // baked into the byte output, not stripped somewhere.
+    // (This is a "may differ" assertion — if the OS clock has 1ms
+    // resolution and both fell in the same ms, we accept equality.)
+    if (createdA !== createdB) {
+      expect(a).not.toBe(b);
+    }
   });
 });
 
@@ -192,6 +285,175 @@ describe('deserialize — AC3 unknown-schema rejection', () => {
 });
 
 // ---------------------------------------------------------------------------
+// AC3 (extension) — non-integer / non-numeric `schema` values classify
+// as `schema-validation-failed`, NOT as `unknown-schema`
+// ---------------------------------------------------------------------------
+//
+// The unknown-schema precheck in `deserialize` reserves the code for
+// integers outside the known set — a "we don't know this version" story
+// makes sense only for something that IS a version. A float, string, or
+// boolean in the `schema` slot is a STRUCTURAL failure (the envelope
+// isn't shaped right at all) and belongs to Ajv (Code Review GPT #4 —
+// previously `schema: 1.5` wrongly told the user to "upgrade wooddeck").
+
+describe('deserialize — non-integer schema falls through to Ajv (Code Review GPT #4)', () => {
+  it('classifies schema=1.5 as schema-validation-failed (NOT unknown-schema)', () => {
+    const rogue = JSON.stringify({
+      schema: 1.5,
+      generator: 'wooddeck',
+      generatorVersion: '1.0.0',
+      createdAt: '2026-07-02T21:00:00.000Z',
+      design: GOLDEN_DECK_DESIGN,
+    });
+    try {
+      deserialize(rogue);
+      throw new Error('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DeckFileError);
+      const dfe = err as DeckFileError;
+      // Explicitly pin to the STRUCTURAL code — this test would have
+      // returned 'unknown-schema' under the pre-fix behaviour.
+      expect(dfe.code).toBe('schema-validation-failed');
+      // The message must NOT falsely tell the user to upgrade wooddeck.
+      expect(dfe.message.toLowerCase()).not.toContain('upgrade');
+    }
+  });
+
+  it('classifies schema="1" (string) as schema-validation-failed', () => {
+    const rogue = JSON.stringify({
+      schema: '1', // stringy — envelope schema pins `type: integer`
+      generator: 'wooddeck',
+      generatorVersion: '1.0.0',
+      createdAt: '2026-07-02T21:00:00.000Z',
+      design: GOLDEN_DECK_DESIGN,
+    });
+    expect(() => deserialize(rogue)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  it('classifies schema=true (boolean) as schema-validation-failed', () => {
+    const rogue = JSON.stringify({
+      schema: true,
+      generator: 'wooddeck',
+      generatorVersion: '1.0.0',
+      createdAt: '2026-07-02T21:00:00.000Z',
+      design: GOLDEN_DECK_DESIGN,
+    });
+    expect(() => deserialize(rogue)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  it('classifies schema=null as schema-validation-failed', () => {
+    const rogue = JSON.stringify({
+      schema: null,
+      generator: 'wooddeck',
+      generatorVersion: '1.0.0',
+      createdAt: '2026-07-02T21:00:00.000Z',
+      design: GOLDEN_DECK_DESIGN,
+    });
+    expect(() => deserialize(rogue)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  it('KEEPS the unknown-schema path for future integers (2, 999)', () => {
+    // Regression fence — narrowing the precheck to integers must NOT
+    // break the actual "future version" case.
+    for (const version of [2, 3, 999, 12345]) {
+      const rogue = JSON.stringify({
+        schema: version,
+        generator: 'wooddeck',
+        generatorVersion: '9.9.9',
+        createdAt: '2026-07-02T21:00:00.000Z',
+        design: GOLDEN_DECK_DESIGN,
+      });
+      try {
+        deserialize(rogue);
+        throw new Error(`should have thrown for schema=${String(version)}`);
+      } catch (err) {
+        expect(err).toBeInstanceOf(DeckFileError);
+        const dfe = err as DeckFileError;
+        expect(dfe.code).toBe('unknown-schema');
+        expect(dfe.message).toContain(String(version));
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// generatorVersion — semver pattern enforced by JSON Schema (§F review)
+// ---------------------------------------------------------------------------
+//
+// The ticket calls `generatorVersion` "semver", but the schema previously
+// accepted any string ≤ 64 chars. `docs/deck-file-schema-v1.json` now
+// pins a lenient semver `pattern`:
+//     ^\d+\.\d+\.\d+(?:[-+].+)?$
+// which admits MAJOR.MINOR.PATCH with optional -prerelease and/or +build
+// tail (both folded into a single `[-+].+` suffix for schema simplicity).
+// A `.deck` file whose `generatorVersion` doesn't match must be rejected
+// as `schema-validation-failed`.
+
+describe('deserialize — generatorVersion semver pattern (review fix F)', () => {
+  it('accepts a valid semver like "1.2.3"', () => {
+    const s = JSON.stringify({
+      schema: 1,
+      generator: 'wooddeck',
+      generatorVersion: '1.2.3',
+      createdAt: '2026-07-02T21:00:00.000Z',
+      design: GOLDEN_DECK_DESIGN,
+    });
+    expect(() => deserialize(s)).not.toThrow();
+  });
+
+  it('accepts a semver with prerelease + build tag like "1.2.3-rc.1+abc"', () => {
+    const s = JSON.stringify({
+      schema: 1,
+      generator: 'wooddeck',
+      generatorVersion: '1.2.3-rc.1+abc',
+      createdAt: '2026-07-02T21:00:00.000Z',
+      design: GOLDEN_DECK_DESIGN,
+    });
+    expect(() => deserialize(s)).not.toThrow();
+  });
+
+  it('rejects a non-semver generatorVersion ("banana") with schema-validation-failed', () => {
+    const s = JSON.stringify({
+      schema: 1,
+      generator: 'wooddeck',
+      generatorVersion: 'banana', // clearly not semver
+      createdAt: '2026-07-02T21:00:00.000Z',
+      design: GOLDEN_DECK_DESIGN,
+    });
+    try {
+      deserialize(s);
+      throw new Error('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DeckFileError);
+      const dfe = err as DeckFileError;
+      expect(dfe.code).toBe('schema-validation-failed');
+      // The Ajv message should reference the generatorVersion field
+      // OR the `pattern` keyword — either surfaces the intent.
+      expect(dfe.message).toMatch(/generatorVersion|pattern/i);
+    }
+  });
+
+  it('rejects a partial version like "1.2" (missing patch)', () => {
+    const s = JSON.stringify({
+      schema: 1,
+      generator: 'wooddeck',
+      generatorVersion: '1.2',
+      createdAt: '2026-07-02T21:00:00.000Z',
+      design: GOLDEN_DECK_DESIGN,
+    });
+    expect(() => deserialize(s)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // AC6 — corrupt JSON rejected
 // ---------------------------------------------------------------------------
 
@@ -267,14 +529,3 @@ describe('deserialize — return shape', () => {
     expect(meta.createdAt).toBe('2024-11-01T00:00:00.000Z');
   });
 });
-
-// ---------------------------------------------------------------------------
-// Test-local helpers
-// ---------------------------------------------------------------------------
-
-function extractCreatedAt(envelopeJson: string): string {
-  return (JSON.parse(envelopeJson) as { createdAt: string }).createdAt;
-}
-function extractGeneratorVersion(envelopeJson: string): string {
-  return (JSON.parse(envelopeJson) as { generatorVersion: string }).generatorVersion;
-}

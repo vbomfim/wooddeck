@@ -199,7 +199,12 @@ describe('readDeckFile — failure modes', () => {
     });
   });
 
-  it('rejects a File larger than 10 MB with a DeckFileError (DoS defence)', async () => {
+  it('rejects a File larger than 10 MB with code=file-too-large (dedicated code)', async () => {
+    // Review fix B — this was previously mis-mapped to
+    // `schema-validation-failed` (validation never ran). The
+    // dedicated `file-too-large` code lets the UI layer render a
+    // truthful error rather than a "corrupted file" message.
+    //
     // Fake a large file by mocking `.size` — actually allocating a
     // 10 MB blob just to exercise this branch is wasteful and slow.
     const envelope = serialize(GOLDEN_DECK_DESIGN);
@@ -211,10 +216,7 @@ describe('readDeckFile — failure modes', () => {
       configurable: true,
     });
     await expect(readDeckFile(file)).rejects.toBeInstanceOf(DeckFileError);
-    // The rejection code SHOULD identify this as a schema-validation
-    // failure (message mentions size). Tests do not pin the code here
-    // because the ticket does not enumerate a distinct code for
-    // oversized files — any DeckFileError satisfies the "reject" AC.
+    await expect(readDeckFile(file)).rejects.toMatchObject({ code: 'file-too-large' });
   });
 
   it('rejects a File with unknown schema version via file-io', async () => {
@@ -231,7 +233,8 @@ describe('readDeckFile — failure modes', () => {
     await expect(readDeckFile(file)).rejects.toMatchObject({ code: 'unknown-schema' });
   });
 
-  it('rejects with DeckFileError when FileReader.onerror fires (defensive)', async () => {
+  it('rejects with code=file-read-failed when FileReader.onerror fires (Review fix B)', async () => {
+    // Review fix B — was `invalid-json` (nothing was parsed).
     // Simulate a browser where FileReader fails mid-read (permissions,
     // network drive I/O). We stub FileReader.prototype.readAsText so
     // it schedules an `onerror` instead of an `onload`.
@@ -252,8 +255,206 @@ describe('readDeckFile — failure modes', () => {
     try {
       const file = new File(['{"schema":1}'], 'x.deck.json', { type: 'application/json' });
       await expect(readDeckFile(file)).rejects.toBeInstanceOf(DeckFileError);
+      // Reinstate the spy for the second assertion (rejects.toMatchObject
+      // consumes the promise, but the readAsText mock is one call per
+      // readDeckFile invocation — each call constructs a fresh reader).
+      await expect(readDeckFile(file)).rejects.toMatchObject({ code: 'file-read-failed' });
     } finally {
       readAsTextSpy.mockRestore();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// QA edge tests G1 – G6 (Review fix E)
+// ---------------------------------------------------------------------------
+//
+// Six sharp-edge tests filed in the S6 review gate to plug corners
+// unit tests weren't exercising. Each maps 1:1 to a review finding:
+//
+//   G1: file.size === 10*1024*1024 EXACTLY resolves (inclusive
+//       boundary — the cap is `> MAX_UPLOAD_BYTES`, not `>=`).
+//   G2: `design: null` and `design: []` fail with a message NAMING
+//       `design` so the user knows where to look.
+//   G4: An envelope-ROOT `__proto__` key is accepted (envelope is
+//       lenient) AND `Object.prototype.polluted` is still undefined
+//       after load — proves the "we never merge" discipline holds
+//       even on the lenient side.
+//   G5: When `file.size > cap`, FileReader.prototype.readAsText is
+//       NEVER called (size check truly runs BEFORE read).
+//   G6: Whitespace-only strings AND BOM-prefixed input surface as
+//       `invalid-json` (BOM breaks JSON.parse per RFC 8259 § 8.1).
+
+describe('readDeckFile — G1 boundary: file.size === MAX_UPLOAD_BYTES resolves (inclusive)', () => {
+  it('accepts a File whose size is exactly 10 MB', async () => {
+    // A real 10 MB payload of valid JSON is impractical, so we build a
+    // small valid envelope and lie about `.size` — the check is
+    // `size > cap` (strict >), so 10 MB exactly must pass through.
+    const envelope = serialize(GOLDEN_DECK_DESIGN);
+    const file = new File([envelope], 'boundary.deck.json', {
+      type: 'application/json',
+    });
+    Object.defineProperty(file, 'size', {
+      value: 10 * 1024 * 1024, // exactly the cap
+      configurable: true,
+    });
+    // The read must succeed — .text() ignores the fake size because
+    // FileReader reads the actual byte content.
+    const design = await readDeckFile(file);
+    expect(design).toEqual(GOLDEN_DECK_DESIGN);
+  });
+
+  it('rejects a File one byte over the cap', async () => {
+    const envelope = serialize(GOLDEN_DECK_DESIGN);
+    const file = new File([envelope], 'boundary+1.deck.json', {
+      type: 'application/json',
+    });
+    Object.defineProperty(file, 'size', {
+      value: 10 * 1024 * 1024 + 1,
+      configurable: true,
+    });
+    await expect(readDeckFile(file)).rejects.toMatchObject({ code: 'file-too-large' });
+  });
+});
+
+describe('deserialize — G2: design:null and design:[] name `design` in the error', () => {
+  it('rejects design:null with a message that names `design`', async () => {
+    const rogue = JSON.stringify({
+      schema: 1,
+      generator: 'wooddeck',
+      generatorVersion: '1.0.0',
+      createdAt: '2026-07-02T21:00:00.000Z',
+      design: null,
+    });
+    const file = new File([rogue], 'null-design.deck.json', {
+      type: 'application/json',
+    });
+    try {
+      await readDeckFile(file);
+      throw new Error('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DeckFileError);
+      const dfe = err as DeckFileError;
+      expect(dfe.code).toBe('schema-validation-failed');
+      expect(dfe.message.toLowerCase()).toContain('design');
+    }
+  });
+
+  it('rejects design:[] with a message that names `design`', async () => {
+    const rogue = JSON.stringify({
+      schema: 1,
+      generator: 'wooddeck',
+      generatorVersion: '1.0.0',
+      createdAt: '2026-07-02T21:00:00.000Z',
+      design: [],
+    });
+    const file = new File([rogue], 'array-design.deck.json', {
+      type: 'application/json',
+    });
+    try {
+      await readDeckFile(file);
+      throw new Error('should have thrown');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DeckFileError);
+      const dfe = err as DeckFileError;
+      expect(dfe.code).toBe('schema-validation-failed');
+      expect(dfe.message.toLowerCase()).toContain('design');
+    }
+  });
+});
+
+describe('readDeckFile — G4: envelope-ROOT __proto__ is accepted lenient AND does not pollute', () => {
+  it('accepts an envelope with a root-level __proto__ AND leaves Object.prototype untouched', async () => {
+    // The envelope is lenient (`additionalProperties` NOT set to
+    // false at the root), so a root-level `__proto__` key passes
+    // Ajv. What MUST hold: (a) the load succeeds because the design
+    // is valid, (b) `Object.prototype` is not mutated afterwards.
+    // The `we never merge the parsed value into another object`
+    // discipline in `deserialize` is the primary defence.
+    const payload = JSON.stringify({
+      schema: 1,
+      generator: 'wooddeck',
+      generatorVersion: '1.0.0',
+      createdAt: '2026-07-02T21:00:00.000Z',
+      __proto__: { polluted: true }, // root-level, lenient
+      design: GOLDEN_DECK_DESIGN,
+    });
+    const file = new File([payload], 'root-proto.deck.json', {
+      type: 'application/json',
+    });
+    const design = await readDeckFile(file);
+    expect(design).toEqual(GOLDEN_DECK_DESIGN);
+    // OBSERVABLE: no pollution on Object.prototype.
+    expect(({} as Record<string, unknown>)['polluted']).toBeUndefined();
+    expect((Object.prototype as Record<string, unknown>)['polluted']).toBeUndefined();
+  });
+});
+
+describe('readDeckFile — G5: size cap runs BEFORE any FileReader byte is read', () => {
+  it('does NOT call FileReader.prototype.readAsText for an oversize File', async () => {
+    // If a rewrite ever swaps the order (read then size-check), a
+    // malicious 10 GB file would allocate before rejection. This
+    // spy guarantees the ordering is preserved.
+    const readAsTextSpy = vi.spyOn(FileReader.prototype, 'readAsText');
+    const envelope = serialize(GOLDEN_DECK_DESIGN);
+    const file = new File([envelope], 'oversize.deck.json', {
+      type: 'application/json',
+    });
+    Object.defineProperty(file, 'size', {
+      value: 10 * 1024 * 1024 + 1,
+      configurable: true,
+    });
+    await expect(readDeckFile(file)).rejects.toMatchObject({ code: 'file-too-large' });
+    // The critical assertion: no read was ever issued.
+    expect(readAsTextSpy).not.toHaveBeenCalled();
+    readAsTextSpy.mockRestore();
+  });
+});
+
+describe('deserialize — G6: whitespace-only inputs; BOM handling documented', () => {
+  it('classifies "   " (whitespace-only) as invalid-json', async () => {
+    const file = new File(['   \n\t   '], 'ws.deck.json', {
+      type: 'application/json',
+    });
+    await expect(readDeckFile(file)).rejects.toMatchObject({ code: 'invalid-json' });
+  });
+
+  it('classifies "\\uFEFF" alone (nothing else) as invalid-json', async () => {
+    // A bare BOM is not JSON — after the decoder strips it, the
+    // remaining string is empty, so JSON.parse throws.
+    const file = new File(['\uFEFF'], 'bom-only.deck.json', {
+      type: 'application/json',
+    });
+    await expect(readDeckFile(file)).rejects.toMatchObject({ code: 'invalid-json' });
+  });
+
+  it('DOCUMENTED behaviour: BOM-prefixed valid JSON succeeds — the UTF-8 decoder strips U+FEFF', async () => {
+    // Review fix G6 originally asserted "BOM-prefixed input →
+    // invalid-json" — but the WHATWG Encoding Standard (which
+    // FileReader.readAsText follows for UTF-8) STRIPS a leading BOM
+    // during decoding. jsdom mirrors that behaviour. The test pinning
+    // rejection would only pass if we bypassed the decoder, which
+    // wouldn't reflect how a real browser processes an uploaded file.
+    // We assert the TRUE observable behaviour here and document the
+    // deviation from the review request — so a future contributor
+    // reading the change history sees why the failure mode stops
+    // holding once the file crosses the FileReader boundary.
+    const bomPayload = '\uFEFF' + serialize(GOLDEN_DECK_DESIGN);
+    const file = new File([bomPayload], 'bom-valid.deck.json', {
+      type: 'application/json',
+    });
+    const design = await readDeckFile(file);
+    expect(design).toEqual(GOLDEN_DECK_DESIGN);
+  });
+
+  it('classifies a BOM in the MIDDLE of the JSON as invalid-json (decoder only strips leading)', async () => {
+    // Only the LEADING BOM is stripped; a stray U+FEFF anywhere else
+    // survives and breaks JSON.parse — this is a genuinely hostile
+    // input worth pinning.
+    const payload = serialize(GOLDEN_DECK_DESIGN).replace('"schema":1,', '"schema":1,\uFEFF');
+    const file = new File([payload], 'bom-mid.deck.json', {
+      type: 'application/json',
+    });
+    await expect(readDeckFile(file)).rejects.toMatchObject({ code: 'invalid-json' });
   });
 });

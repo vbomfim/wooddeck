@@ -16,7 +16,7 @@
  * Consumers (`src/state/`, `src/ui/`) need ONE type to catch. A single
  * `DeckFileError` with a discriminated `.code` gives a uniform surface
  * without proliferating class hierarchies for what are essentially
- * enum values. The five codes below are the entire enum — expansion
+ * enum values. The seven codes below are the entire enum — expansion
  * requires an API-contract change (ticket revision).
  *
  * ## Why `extends Error` with an explicit `.name` set
@@ -39,6 +39,16 @@
  *     field (e.g. `"design.footprint: required"`).
  *   - `'unknown-schema'` — the envelope's `schema` value is not one
  *     this build understands. Message includes the received value.
+ *   - `'file-too-large'` — an uploaded File exceeded the 10 MB DoS
+ *     cap. Distinguished from `schema-validation-failed` so consumers
+ *     can render an accurate UX ("this file is too large" vs "this
+ *     file is corrupted"). Introduced in PR#26 pair-fix iteration 1
+ *     after Code Review GPT#2 and Opus#1 found the previous mapping
+ *     misleading (validation never ran on an oversized file).
+ *   - `'file-read-failed'` — `FileReader` fired `.onerror` — the
+ *     browser could not read the file bytes (permissions, network
+ *     drive I/O error, unplugged USB). Distinguished from
+ *     `invalid-json` for the same reason: nothing was parsed.
  *   - `'storage-full'` — `localStorage.setItem` threw
  *     `QuotaExceededError`. Caller UX may prompt the user to download
  *     the design before further edits (S8 + S14).
@@ -50,6 +60,8 @@ export type DeckFileErrorCode =
   | 'invalid-json'
   | 'schema-validation-failed'
   | 'unknown-schema'
+  | 'file-too-large'
+  | 'file-read-failed'
   | 'storage-full'
   | 'storage-blocked';
 
