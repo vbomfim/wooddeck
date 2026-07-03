@@ -83,35 +83,57 @@
  * referential-equality comparison, forcing infinite re-renders.
  * Same discipline as `KindLayer` in the layers/ package.
  *
- * ## Missing-member defensive path (AC edge case)
+ * ## Missing-member defensive path — pure fold + dev-gated log
  *
- * If a warning references a `memberId` not present in the current
- * layout (shouldn't happen — the store contract keeps them in
- * sync — but a stale warning may survive a mid-render
- * inconsistency), we SKIP that warning silently AND log a
- * `console.warn` in dev so a developer notices the drift.
- * Idempotent: the warning is deduplicated within a single render
- * by a Set so we don't spam the console with the same memberId
- * across sibling warnings.
+ * Code Review GPT#3 (pair-fix 1): the earlier version logged
+ * `console.warn` INSIDE the `useMemo` body. That was wrong twice
+ * over:
+ *
+ *   1. `useMemo` is not a side-effect boundary — React may
+ *      re-invoke the body across concurrent renders / strict-mode
+ *      double invocation, producing duplicate logs.
+ *   2. There was no `import.meta.env.DEV` gate — the log would
+ *      fire in PRODUCTION on any stale-warning race.
+ *
+ * Fix: the fold moved to a pure helper (`warning-overlay-resolve`)
+ * that returns BOTH the resolved pairs AND the sorted deduped
+ * list of missing memberIds. The `useMemo` returns just the
+ * `pairs`; a separate `useEffect` gated on `import.meta.env.DEV`
+ * logs each missing id when the SET changes (keyed on the joined
+ * missingIds string so the effect body doesn't re-fire on renders
+ * that leave the missing set unchanged).
+ *
+ * ## Highlight key — kind-scoped to avoid future collisions
+ *
+ * Code Review Opus#1 (pair-fix 1): `key={warning.memberId}` alone
+ * assumes ≤ 1 warning per member. `spanCheck` currently emits
+ * exactly one over-span warning per member so today the invariant
+ * holds — but the `Warning` type declares no such constraint. A
+ * future warning-kind alongside `over-span-joist` (e.g. an
+ * `over-span-post` on a shared synthetic member) would collide.
+ * `${warning.kind}:${warning.memberId}` is future-proof at zero
+ * runtime cost.
  *
  * ## Boundary discipline (production imports only)
  *
  * This file imports ONLY from:
- *   - `react` (JSX type)
+ *   - `react` (JSX type + hooks)
  *   - `../domain/model` (LayoutMember + Warning types)
  *   - `../state` (barrel — the ONLY state coupling channel)
  *   - `./highlights/OverSpanHighlight` (own leaf decorator)
+ *   - `./warning-overlay-resolve` (own pure fold helper)
  *
  * NOT from `./layers/**` (forbidden by dep-cruiser), NOT from
  * `../ui/**` / `../application/**` / `../persistence/**` (scene
  * allowlist).
  */
-import { useMemo, type JSX } from 'react';
+import { useEffect, useMemo, type JSX } from 'react';
 
 import type { LayoutMember, Warning } from '../domain/model';
 import { useDesignStore } from '../state';
 
 import { OverSpanHighlight } from './highlights/OverSpanHighlight';
+import { resolveWarningsToMembers } from './warning-overlay-resolve';
 
 /**
  * Well-known key stamped onto the overlay's root `<group>` so
@@ -165,51 +187,55 @@ export function WarningOverlay(): JSX.Element {
   const warnings = useDesignStore((s) => s.bundle.warnings ?? EMPTY_WARNINGS);
   const members = useDesignStore((s) => s.bundle.layout?.members ?? EMPTY_MEMBERS);
 
-  // Resolve warnings to (warning, member) pairs OUTSIDE the
-  // selector so we don't create fresh arrays inside Zustand's
-  // equality check. `useMemo` keys on the underlying array
-  // references — a store write that leaves both references
-  // untouched reuses the previous resolved list, minimizing
-  // reconciler work.
-  const resolved = useMemo(() => {
-    if (warnings.length === 0) {
-      return [] as ReadonlyArray<{ warning: Warning; member: LayoutMember }>;
+  // PURE fold — see `warning-overlay-resolve.ts`. Returns:
+  //   { pairs, missingIds }
+  // where `pairs` drive the rendered scene graph and `missingIds`
+  // drives the dev-only diagnostic effect below. `useMemo` keys
+  // on the stable array references — a store write that leaves
+  // both untouched reuses the previous resolve result and skips
+  // the fold entirely.
+  const { pairs: resolved, missingIds } = useMemo(
+    () => resolveWarningsToMembers(warnings, members),
+    [warnings, members],
+  );
+
+  // Serialize `missingIds` to a stable primitive so the dev-log
+  // useEffect re-runs ONLY when the SET of missing ids changes,
+  // not when the resolve helper returns a new array with the same
+  // content. The helper sorts alphabetically so the joined string
+  // is content-addressed (see `warning-overlay-resolve.ts`).
+  const missingIdsKey = missingIds.join('|');
+  useEffect(() => {
+    // Two gates keep production silent:
+    //   - import.meta.env.DEV compiles to a boolean literal under
+    //     Vite's build; the whole branch is dead-code-eliminated
+    //     in a production bundle.
+    //   - empty check short-circuits the common "no missing ids"
+    //     path so a well-behaved store never triggers a re-render
+    //     dependency change (the joined key is '' both before and
+    //     after).
+    if (!import.meta.env.DEV) return;
+    if (missingIdsKey === '') return;
+    // Log each distinct missing id on its own line so a developer
+    // can grep the exact memberId in the console. The set is
+    // already deduped + sorted by the pure helper.
+    for (const id of missingIdsKey.split('|')) {
+      console.warn(
+        `[WarningOverlay] warning references unknown memberId '${id}' — skipping highlight`,
+      );
     }
-    // Build a memberId → LayoutMember lookup once per resolve so
-    // the loop below runs in O(W + M) not O(W × M) — matters as
-    // warnings scale up (§9 targets 50+ highlights).
-    const byId = new Map<string, LayoutMember>();
-    for (const m of members) {
-      byId.set(m.id, m);
-    }
-    const pairs: Array<{ warning: Warning; member: LayoutMember }> = [];
-    // Track memberIds we've already warned about so we don't spam
-    // the console with duplicate messages for the same missing
-    // reference across sibling warnings.
-    const warnedMissing = new Set<string>();
-    for (const w of warnings) {
-      const m = byId.get(w.memberId);
-      if (m === undefined) {
-        if (!warnedMissing.has(w.memberId)) {
-          warnedMissing.add(w.memberId);
-          // Dev-visible console.warn; no user-facing effect.
-          // See module header — a stale warning is a symptom of
-          // the store contract drifting.
-          console.warn(
-            `[WarningOverlay] warning references unknown memberId '${w.memberId}' — skipping highlight`,
-          );
-        }
-        continue;
-      }
-      pairs.push({ warning: w, member: m });
-    }
-    return pairs;
-  }, [warnings, members]);
+  }, [missingIdsKey]);
 
   return (
     <group userData={OVERLAY_USER_DATA}>
       {resolved.map(({ warning, member }) => (
-        <OverSpanHighlight key={warning.memberId} member={member} />
+        <OverSpanHighlight
+          // Kind-scoped key — future-proof against two warnings
+          // of different kinds for the same synthetic member.
+          // See module header (Highlight key section).
+          key={`${warning.kind}:${warning.memberId}`}
+          member={member}
+        />
       ))}
     </group>
   );

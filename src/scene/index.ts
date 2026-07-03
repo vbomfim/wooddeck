@@ -41,6 +41,8 @@
  *   function   computeZoomLimits
  *   function   materialForSpecies   — S10 shared MeshStandardMaterial
  *   function   materialForMember    — S10 material by LayoutMember
+ *   function   disposeHighlightPrimitives — S11 HMR/tooling helper
+ *                                    (do NOT call from render code)
  *   constant   DECK_LAYER_ORDER     — S10 pinned six-entry sequence
  *   constant   LAYER_USER_DATA_KEY  — S10 well-known userData key
  *                                     stamped on every layer group
@@ -139,3 +141,9 @@ export {
 
 export { OverSpanHighlight } from './highlights/OverSpanHighlight';
 export type { OverSpanHighlightProps } from './highlights/OverSpanHighlight';
+
+// HMR / tooling helper — parity with the layers-shared
+// `disposeSharedMaterials` / `disposeSharedGeometry` helpers.
+// Do NOT call from production render code (see the module header
+// of `./highlights/highlight-primitives.ts`).
+export { disposeHighlightPrimitives } from './highlights/highlight-primitives';

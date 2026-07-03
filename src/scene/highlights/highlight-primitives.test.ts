@@ -20,10 +20,11 @@
  * self-contained (identity checks + property assertions on the
  * exact instances the OverSpanHighlight binds).
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { BoxGeometry, MeshBasicMaterial } from 'three';
 
 import {
+  disposeHighlightPrimitives,
   HIGHLIGHT_BOX_GEOMETRY,
   HIGHLIGHT_COLOR_HEX,
   HIGHLIGHT_MATERIAL,
@@ -124,5 +125,53 @@ describe('highlight primitives — material (AC3 always-on-top red)', () => {
     // would explode GPU state as warnings scale up.
     const again = await import('./highlight-primitives');
     expect(again.HIGHLIGHT_MATERIAL).toBe(HIGHLIGHT_MATERIAL);
+  });
+});
+
+describe('highlight primitives — disposal (HMR/tooling helper, GPT#4 pair-fix 1)', () => {
+  it('disposeHighlightPrimitives() calls .dispose() on BOTH shared singletons exactly once', () => {
+    // Parity with the layers' `disposeSharedMaterials` /
+    // `disposeSharedGeometry` helpers. We spy on the real methods
+    // instead of invoking them so subsequent tests still hold a
+    // live geometry + material (the singletons are module-scoped
+    // — a real dispose would black-out every other highlight
+    // test's scene).
+    const geomSpy = vi
+      .spyOn(HIGHLIGHT_BOX_GEOMETRY, 'dispose')
+      .mockImplementation(() => undefined);
+    const matSpy = vi
+      .spyOn(HIGHLIGHT_MATERIAL, 'dispose')
+      .mockImplementation(() => undefined);
+    try {
+      disposeHighlightPrimitives();
+      expect(geomSpy).toHaveBeenCalledTimes(1);
+      expect(matSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      geomSpy.mockRestore();
+      matSpy.mockRestore();
+    }
+  });
+
+  it('disposeHighlightPrimitives() is IDEMPOTENT — safe to call repeatedly', () => {
+    // three.js .dispose() is a no-op on already-disposed handles,
+    // so the helper should not throw when called twice + the spy
+    // should fire twice per singleton.
+    const geomSpy = vi
+      .spyOn(HIGHLIGHT_BOX_GEOMETRY, 'dispose')
+      .mockImplementation(() => undefined);
+    const matSpy = vi
+      .spyOn(HIGHLIGHT_MATERIAL, 'dispose')
+      .mockImplementation(() => undefined);
+    try {
+      expect(() => {
+        disposeHighlightPrimitives();
+        disposeHighlightPrimitives();
+      }).not.toThrow();
+      expect(geomSpy).toHaveBeenCalledTimes(2);
+      expect(matSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      geomSpy.mockRestore();
+      matSpy.mockRestore();
+    }
   });
 });

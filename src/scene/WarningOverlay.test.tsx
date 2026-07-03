@@ -46,7 +46,7 @@
  * `useUiStore(s => s.layerVisibility.<x>)` dependency, this
  * test flips red.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import ReactThreeTestRenderer from '@react-three/test-renderer';
 import type { Group, Mesh } from 'three';
 
@@ -61,6 +61,46 @@ async function withAct(fn: () => void): Promise<void> {
     fn();
     await Promise.resolve();
   });
+}
+
+/**
+ * Type alias for a `vi.spyOn(console, 'warn')` return value. We
+ * avoid `ReturnType<typeof vi.spyOn<Console, 'warn'>>` because
+ * Vitest's generic overloads want the object type to extend
+ * `Console` (which the TS runtime `console` object literal
+ * doesn't do cleanly under strict mode). `MockInstance` is
+ * Vitest's own public export and works without extra ceremony.
+ */
+type ConsoleWarnSpy = MockInstance<(...args: unknown[]) => void>;
+
+/**
+ * Filter a console.warn spy to ONLY our overlay's diagnostic
+ * payloads. r3f + three.js emit unrelated `console.warn`s (e.g.
+ * `THREE.Clock` deprecation notices at first render) that would
+ * otherwise pollute assertions on call counts and distinct
+ * payload sets. Filtering to our namespaced prefix keeps the
+ * assertions diagnostic.
+ */
+function overlayWarnCalls(spy: ConsoleWarnSpy): string[] {
+  return spy.mock.calls
+    .map((call: unknown[]) => call.map((a) => String(a)).join(' '))
+    .filter((s: string) => s.includes('[WarningOverlay]'));
+}
+
+/**
+ * Pull every quoted memberId out of a console.warn spy's captured
+ * call payloads (filtered to our overlay's payloads only). The
+ * dev diagnostic logs match the shape
+ * `[WarningOverlay] warning references unknown memberId '<id>' — …`
+ * so a single-quoted-string regex is precise + robust.
+ */
+function extractLoggedMemberIds(spy: ConsoleWarnSpy): Set<string> {
+  const ids = new Set<string>();
+  for (const line of overlayWarnCalls(spy)) {
+    const m = /'([^']+)'/.exec(line);
+    if (m !== null) ids.add(m[1]!);
+  }
+  return ids;
 }
 
 function resetLayerVisibility(): void {
@@ -286,13 +326,24 @@ describe('<WarningOverlay /> — AC4 empty warnings → empty group', () => {
   });
 });
 
-describe('<WarningOverlay /> — AC5 reactive to warning changes', () => {
+describe('<WarningOverlay /> — AC5 reactive to warning changes (subscription-driven)', () => {
   beforeEach(() => {
     resetLayerVisibility();
     resetDesignStoreForTests();
   });
 
-  it('adding a warning increments the highlight count within one render tick', async () => {
+  // NOTE (Code Review GPT#1, pair-fix 1): these tests deliberately
+  // do NOT call `renderer.update(<WarningOverlay />)` after mutating
+  // the store. The whole point of AC5 is that the overlay
+  // SUBSCRIBES to the store and re-renders on its own — a manual
+  // `renderer.update()` would mask a broken subscription (an
+  // implementation that read the store once in `useState` and
+  // never updated would still pass). Instead, we mount once, mutate
+  // the store inside `act(...)`, and let the subscription trigger
+  // the re-render. If the subscription regresses, these tests turn
+  // red at the assertion.
+
+  it('adding a warning increments the highlight count within one render tick (subscription proof)', async () => {
     const members = [
       makeMember({ id: 'joist-r-0', kind: 'joist' }),
       makeMember({ id: 'joist-r-1', kind: 'joist' }),
@@ -302,17 +353,17 @@ describe('<WarningOverlay /> — AC5 reactive to warning changes', () => {
     const renderer = await ReactThreeTestRenderer.create(<WarningOverlay />);
     expect(renderer.scene.findAllByType('Mesh')).toHaveLength(0);
 
-    // Push one warning → the overlay grows to one mesh.
+    // Push one warning → the overlay grows to one mesh via its
+    // OWN store subscription (no renderer.update()).
     await withAct(() => {
       const cur = useDesignStore.getState().bundle;
       useDesignStore.setState({
         bundle: { ...cur, warnings: [makeWarning({ memberId: 'joist-r-0' })] },
       });
     });
-    await renderer.update(<WarningOverlay />);
     expect(renderer.scene.findAllByType('Mesh')).toHaveLength(1);
 
-    // Push a second warning → two meshes.
+    // Push a second warning → two meshes. Subscription re-fires.
     await withAct(() => {
       const cur = useDesignStore.getState().bundle;
       useDesignStore.setState({
@@ -325,13 +376,12 @@ describe('<WarningOverlay /> — AC5 reactive to warning changes', () => {
         },
       });
     });
-    await renderer.update(<WarningOverlay />);
     expect(renderer.scene.findAllByType('Mesh')).toHaveLength(2);
 
     await renderer.unmount();
   });
 
-  it('clearing a warning removes its highlight within one render tick (AC5)', async () => {
+  it('clearing a warning removes its highlight within one render tick (AC5, subscription proof)', async () => {
     const members = [
       makeMember({ id: 'joist-c-0', kind: 'joist' }),
       makeMember({ id: 'joist-c-1', kind: 'joist' }),
@@ -349,15 +399,44 @@ describe('<WarningOverlay /> — AC5 reactive to warning changes', () => {
 
     // AC5 pinned example: a joist that WAS over-span is now within
     // limits → its warning disappears from the store → the
-    // corresponding highlight vanishes.
+    // corresponding highlight vanishes. NO renderer.update() —
+    // if the overlay stops subscribing to `bundle.warnings`, this
+    // stays at 2 meshes and the test fails.
     await withAct(() => {
       const cur = useDesignStore.getState().bundle;
       useDesignStore.setState({
         bundle: { ...cur, warnings: [makeWarning({ memberId: 'joist-c-0' })] },
       });
     });
-    await renderer.update(<WarningOverlay />);
     expect(renderer.scene.findAllByType('Mesh')).toHaveLength(1);
+
+    await renderer.unmount();
+  });
+
+  it('clearing all warnings collapses the highlight set to zero (subscription proof)', async () => {
+    // A stronger AC5 form — from two down to zero via a single
+    // store mutation. If the subscription is broken this stays
+    // at 2 meshes.
+    const members = [
+      makeMember({ id: 'joist-e-0', kind: 'joist' }),
+      makeMember({ id: 'joist-e-1', kind: 'joist' }),
+    ];
+    seedBundle({
+      members,
+      warnings: [
+        makeWarning({ memberId: 'joist-e-0' }),
+        makeWarning({ memberId: 'joist-e-1' }),
+      ],
+    });
+
+    const renderer = await ReactThreeTestRenderer.create(<WarningOverlay />);
+    expect(renderer.scene.findAllByType('Mesh')).toHaveLength(2);
+
+    await withAct(() => {
+      const cur = useDesignStore.getState().bundle;
+      useDesignStore.setState({ bundle: { ...cur, warnings: [] } });
+    });
+    expect(renderer.scene.findAllByType('Mesh')).toHaveLength(0);
 
     await renderer.unmount();
   });
@@ -390,19 +469,25 @@ describe('<WarningOverlay /> — edge: warning references an unknown memberId', 
     await renderer.unmount();
   });
 
-  it('deduplicates the console.warn for repeated stale references to the same memberId (within one render)', async () => {
-    // The overlay tracks a `warnedMissing` set inside the resolve
-    // pass so the same missing memberId does not spam the console
-    // when multiple warnings reference it. In a strict-mode /
-    // double-render environment the useMemo body can run more than
-    // once — so we assert the WITHIN-PASS dedup property: no matter
-    // how many total warn calls happen, the DISTINCT memberIds
-    // warned about are exactly one. Two warnings for the same
-    // missing memberId → one unique warned id.
+  it('deduplicates the dev diagnostic — TWO warnings for the same missing memberId → ONE console.warn per commit', async () => {
+    // Code Review GPT#2 (pair-fix 1): the pure-helper test file
+    // `warning-overlay-resolve.test.ts` covers the fold-level dedup
+    // directly + diagnostically. This integration test proves the
+    // pipeline HOOKUP: the resolver's deduped `missingIds` reaches
+    // the useEffect, and the useEffect logs one line per distinct
+    // missing id — NOT one line per input warning.
+    //
+    // With THREE warnings for the same missing memberId, we assert
+    // (a) EXACTLY ONE overlay-scoped warn call, AND
+    // (b) the distinct set of extracted memberIds equals
+    //     {'joist-DUP'}.
+    // If the dedup regresses, we'd get 3 overlay-scoped calls (all
+    // for 'joist-DUP') and the ONE-call assertion below fails.
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
       const members = [makeMember({ id: 'joist-real', kind: 'joist' })];
       const warnings = [
+        makeWarning({ memberId: 'joist-DUP' }),
         makeWarning({ memberId: 'joist-DUP' }),
         makeWarning({ memberId: 'joist-DUP' }),
       ];
@@ -410,40 +495,26 @@ describe('<WarningOverlay /> — edge: warning references an unknown memberId', 
 
       const renderer = await ReactThreeTestRenderer.create(<WarningOverlay />);
       expect(renderer.scene.findAllByType('Mesh')).toHaveLength(0);
-      // Two warnings, same memberId → only one DISTINCT memberId
-      // shows up in the warn payloads. Absent the dedup, we'd see
-      // 'joist-DUP' warned twice per render pass (i.e. 2× or 4×
-      // total under double-invocation), all with the same id but
-      // that would still count as multiple emissions per pass. The
-      // set-of-distinct-ids check proves the dedup regardless of
-      // how many times React re-invokes the memo.
-      expect(warnSpy).toHaveBeenCalled();
-      const printedArgs = warnSpy.mock.calls.flat().map((a) => String(a));
-      const distinctIds = new Set(
-        printedArgs
-          .map((a) => /'([^']+)'/.exec(a)?.[1])
-          .filter((id): id is string => typeof id === 'string'),
-      );
-      expect(distinctIds).toEqual(new Set(['joist-DUP']));
-      // Belt + suspenders — under any single memo pass, dedup
-      // guarantees warnSpy is called at most ONCE per distinct id
-      // per pass. The call count is at most 2× the number of memo
-      // invocations (strict mode double-render is the extreme
-      // case); asserting ≤ 4 is a soft ceiling that would still
-      // catch a regression that removed the dedup entirely
-      // (which would produce 2 calls × N passes = 4-8 calls).
-      expect(warnSpy.mock.calls.length).toBeLessThanOrEqual(4);
+      const overlayCalls = overlayWarnCalls(warnSpy);
+      // EXACTLY one overlay-scoped call — if dedup regresses this
+      // becomes 3.
+      expect(overlayCalls).toHaveLength(1);
+      // The one call payload contains the missing id.
+      expect(overlayCalls[0]).toContain('joist-DUP');
+      // And the distinct memberId set is exactly {'joist-DUP'}.
+      expect(extractLoggedMemberIds(warnSpy)).toEqual(new Set(['joist-DUP']));
       await renderer.unmount();
     } finally {
       warnSpy.mockRestore();
     }
   });
 
-  it('logs a console.warn so a developer notices a stale reference (dev diagnostic)', async () => {
-    // The overlay can't crash on a stale memberId, but silence
-    // isn't right either — an over-time drift of "warnings
-    // reference dead members" would go unnoticed. Log via
-    // console.warn (dev-visible, no user-facing effect).
+  it('logs a console.warn so a developer notices a stale reference (dev diagnostic, useEffect)', async () => {
+    // Code Review GPT#3 (pair-fix 1): the log now lives in a
+    // dev-gated useEffect keyed on the joined missingIds string.
+    // Vitest sets `import.meta.env.DEV = true` so the effect body
+    // runs; we assert both that the warn fires AND that its
+    // payload contains the stale memberId.
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
       const members = [makeMember({ id: 'joist-real', kind: 'joist' })];
@@ -453,11 +524,45 @@ describe('<WarningOverlay /> — edge: warning references an unknown memberId', 
       const renderer = await ReactThreeTestRenderer.create(<WarningOverlay />);
       // No highlight — the reference was stale.
       expect(renderer.scene.findAllByType('Mesh')).toHaveLength(0);
-      // Warning surfaced to the dev console. We assert the memberId
-      // appears in the warning payload so the developer can spot it.
+      // The dev-gated useEffect fired and logged the stale id.
       expect(warnSpy).toHaveBeenCalled();
-      const printedArgs = warnSpy.mock.calls.flat().map((a) => String(a));
-      expect(printedArgs.some((a) => a.includes('joist-nonexistent'))).toBe(true);
+      expect(extractLoggedMemberIds(warnSpy)).toEqual(new Set(['joist-nonexistent']));
+      await renderer.unmount();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('does NOT re-log when the missing-ids set is unchanged across re-renders (useEffect key stability)', async () => {
+    // The dev-log effect keys on `missingIds.join('|')`. When a
+    // store mutation changes bundle.warnings but leaves the SET
+    // of missing memberIds the same (e.g. re-emitting an identical
+    // stale warning), the useEffect body must NOT re-fire. This
+    // proves the sort+dedup+join key is content-addressed.
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const members = [makeMember({ id: 'joist-real', kind: 'joist' })];
+      seedBundle({
+        members,
+        warnings: [makeWarning({ memberId: 'joist-STALE' })],
+      });
+
+      const renderer = await ReactThreeTestRenderer.create(<WarningOverlay />);
+      const overlayCallsAfterMount = overlayWarnCalls(warnSpy).length;
+      expect(overlayCallsAfterMount).toBe(1);
+
+      // Replace the warnings array with a NEW array containing an
+      // equivalent stale warning — same missingIds set, different
+      // input reference. Effect key `missingIdsKey = 'joist-STALE'`
+      // is unchanged → useEffect body must NOT re-fire.
+      await withAct(() => {
+        const cur = useDesignStore.getState().bundle;
+        useDesignStore.setState({
+          bundle: { ...cur, warnings: [makeWarning({ memberId: 'joist-STALE' })] },
+        });
+      });
+
+      expect(overlayWarnCalls(warnSpy).length).toBe(overlayCallsAfterMount);
       await renderer.unmount();
     } finally {
       warnSpy.mockRestore();
@@ -483,5 +588,57 @@ describe('<WarningOverlay /> — S12 composition marker', () => {
     const group = findOverlayGroup(renderer);
     expect(group.userData[WARNING_OVERLAY_USER_DATA_KEY]).toBe('warning-overlay');
     await renderer.unmount();
+  });
+});
+
+describe('<WarningOverlay /> — React key uniqueness (kind-scoped, future-proof)', () => {
+  beforeEach(() => {
+    resetLayerVisibility();
+    resetDesignStoreForTests();
+  });
+
+  it('renders TWO highlights (no React key collision) for two warnings of DIFFERENT kinds on the SAME member', async () => {
+    // Code Review Opus#1 (pair-fix 1): `key={warning.memberId}`
+    // alone assumed ≤ 1 warning per member. `spanCheck` today
+    // emits one over-span warning per member, but the `Warning`
+    // type declares no such invariant — a future warning kind
+    // (say another `over-span-*` variant on a shared synthetic
+    // member) could collide. The overlay now uses
+    // `${warning.kind}:${warning.memberId}` as the key.
+    //
+    // If a regression drops the kind prefix, React logs a
+    // "encountered two children with the same key" warning AND
+    // may skip rendering one of the highlights. We capture BOTH
+    // signals here — a `console.error` spy for the React warning
+    // AND an assertion that TWO meshes render.
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const members = [
+        makeMember({ id: 'shared-member', kind: 'joist' }),
+      ];
+      const warnings = [
+        makeWarning({ memberId: 'shared-member', kind: 'over-span-joist' }),
+        makeWarning({ memberId: 'shared-member', kind: 'over-span-beam' }),
+      ];
+      seedBundle({ members, warnings });
+
+      const renderer = await ReactThreeTestRenderer.create(<WarningOverlay />);
+      const meshes = renderer.scene.findAllByType('Mesh');
+      expect(meshes).toHaveLength(2);
+
+      // No React key-collision error surfaced. If the key ever
+      // regresses to plain memberId, React logs
+      // "Encountered two children with the same key" via
+      // console.error and this assertion fails.
+      const errorPayloads = errorSpy.mock.calls
+        .flat()
+        .map((a) => String(a))
+        .join(' ');
+      expect(errorPayloads).not.toMatch(/two children with the same key/i);
+
+      await renderer.unmount();
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });

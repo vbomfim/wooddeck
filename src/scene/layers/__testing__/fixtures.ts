@@ -17,13 +17,27 @@
  * can assert exact mesh counts and identity without stampeding
  * through 150 decking boards.
  *
- * ## Boundary discipline
+ * ## Boundary discipline (SHARED scene test fixtures)
  *
- * This file lives under `src/scene/layers/__testing__/` — it is
- * imported ONLY by `*.test.tsx` files inside `src/scene/layers/`,
- * which are excluded from the dep-cruiser cruise (see
- * `.dependency-cruiser.cjs` `exclude.path: '\\.test\\.'`). So the
- * layer files themselves never see these helpers.
+ * Despite living under `src/scene/layers/__testing__/`, this file
+ * is imported by `*.test.tsx` files across the whole scene tree:
+ *
+ *   - `src/scene/layers/**` — the original consumers (S10)
+ *   - `src/scene/WarningOverlay.test.tsx` (S11) — pulls
+ *     `makeWarning` + `makeMember` + `makeLayout`
+ *   - future scene tests that need small Layout / Warning fixtures
+ *
+ * Test files are excluded from the dep-cruiser cruise (see
+ * `.dependency-cruiser.cjs` `exclude.path: '\\.test\\.'`), so a
+ * highlight/overlay test file importing
+ * `../layers/__testing__/fixtures` is legal EVEN THOUGH the S11
+ * `warning-overlay-no-layers` production rule forbids the same
+ * import from a non-test file. The layer files themselves still
+ * never see these helpers — they're test-only.
+ *
+ * We keep the fixtures in one place rather than duplicating a
+ * `highlights/__testing__/` folder — one canonical `makeMember`
+ * / `makeLayout` / `makeWarning` avoids drift.
  *
  * ## Fields
  *

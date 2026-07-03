@@ -70,4 +70,12 @@ describe('scene barrel', () => {
     // decorator without reaching into the highlights/ folder.
     expect(typeof scene.OverSpanHighlight).toBe('function');
   });
+
+  it('exports the S11 disposeHighlightPrimitives HMR helper (GPT#4 pair-fix 1)', () => {
+    // Parity with the layers' disposeSharedMaterials /
+    // disposeSharedGeometry helpers. Used by HMR + Storybook
+    // teardown scenarios that want to release the shared
+    // BoxGeometry + MeshBasicMaterial handles explicitly.
+    expect(typeof scene.disposeHighlightPrimitives).toBe('function');
+  });
 });

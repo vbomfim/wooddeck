@@ -224,6 +224,16 @@ module.exports = {
     // A grep-based unit test at
     // `src/scene/highlights/no-geometry-math.test.ts` is the third
     // gate (belt + suspenders — matches the S10 layers pattern).
+    //
+    // MAINTENANCE NOTE — the `from.path` regex is FILENAME-SCOPED
+    // (matches `WarningOverlay.tsx` + the `highlights/` folder).
+    // If a future story renames `WarningOverlay.tsx` (e.g. to
+    // `WarningsOverlay.tsx`) OR introduces a NEW peer decorator
+    // outside `highlights/` (e.g. `overlays/SelectionOverlay.tsx`),
+    // update the regex + the BLOCK-2q fixture together. A larger
+    // future refactor might reorganize into `src/scene/overlays/`
+    // — track that separately; this comment is a reminder not a
+    // TODO for THIS story.
     {
       name: 'warning-overlay-no-layers',
       severity: 'error',

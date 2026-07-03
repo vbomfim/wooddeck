@@ -107,21 +107,40 @@ describe('highlights + WarningOverlay — no scene geometry math (S10 finding #3
     });
   }
 
-  it('does NOT import from src/scene/layers (S11 boundary rule)', () => {
+  it('does NOT import from src/scene/layers (S11 boundary rule) — RELATIVE OR ABSOLUTE/ALIAS', () => {
     // Belt + suspenders alongside the dep-cruiser
     // `warning-overlay-no-layers` rule + BLOCK-2q self-test.
     // Any file under highlights/ or WarningOverlay.tsx that imports
-    // from a path under `src/scene/layers/` (via any relative form)
-    // flips this test to red.
+    // from a path resolving to `src/scene/layers/` (via any form —
+    // relative `../layers`, project-absolute `src/scene/layers`,
+    // or aliased `@/scene/layers`, etc.) flips this test red.
+    //
+    // Code Review Opus#2 (pair-fix 1): the earlier version only
+    // matched RELATIVE specifiers. Extending to absolute / alias
+    // forms here is belt-tightening on top of dep-cruiser (which
+    // already catches these); consistent with the "belt +
+    // suspenders" claim in this test's module header.
+    //
+    // Two anchors, both tried:
+    //   1. Any relative specifier ending in `layers` or
+    //      `layers/<anything>` (matches `../layers`,
+    //      `./layers/shared/BoxMember`, `../../layers`).
+    //   2. Any specifier containing `scene/layers` at ANY position
+    //      (matches `src/scene/layers`, `@/scene/layers`,
+    //      `@app/scene/layers/shared/BoxMember`, etc.). This form
+    //      is what most path aliases resolve to today.
+    const RELATIVE_LAYERS = /from\s+['"](?:\.\.?\/)+(?:[^'"]*\/)?layers(?:\/[^'"]*)?['"]/;
+    const ABSOLUTE_OR_ALIAS_SCENE_LAYERS = /from\s+['"][^'"]*\bscene\/layers(?:\/[^'"]*)?['"]/;
     for (const file of files) {
       const source = readFileSync(file, 'utf-8');
-      // Match relative imports whose specifier ends in `layers`
-      // or `layers/<anything>` — covers `../layers`,
-      // `./layers/shared/BoxMember`, etc.
-      const importsLayers = /from\s+['"](?:\.\.?\/)+(?:[^'"]*\/)?layers(?:\/[^'"]*)?['"]/.test(
-        source,
-      );
-      expect(importsLayers, `${file}: forbidden import from src/scene/layers/`).toBe(false);
+      const relHit = RELATIVE_LAYERS.test(source);
+      const absHit = ABSOLUTE_OR_ALIAS_SCENE_LAYERS.test(source);
+      expect(
+        relHit || absHit,
+        `${file}: forbidden import from src/scene/layers/` +
+          (relHit ? ' (RELATIVE)' : '') +
+          (absHit ? ' (ABSOLUTE/ALIAS)' : ''),
+      ).toBe(false);
     }
   });
 });

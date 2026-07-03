@@ -79,9 +79,16 @@
  * Both the geometry and material are module-level singletons.
  * Their lifecycle is the tab lifetime (browser process teardown
  * reclaims the GPU handles). No explicit disposal is required in
- * production. If a future test/HMR scenario wants to prove the
- * singletons are rebuild-friendly, add a
- * `disposeHighlightPrimitives()` helper here — YAGNI for MVP.
+ * production.
+ *
+ * The exported {@link disposeHighlightPrimitives} helper (pair-fix
+ * 1, Code Review GPT#4) provides parity with the layer-shared
+ * `disposeSharedMaterials`/`disposeSharedGeometry` HMR helpers.
+ * It exists for HMR + tooling scenarios that want to trigger the
+ * three.js dispose lifecycle explicitly (e.g. Storybook HMR).
+ * **Do not call it in production render code** — the singletons
+ * are bound to live meshes and disposing them mid-frame will
+ * black-out the highlights.
  *
  * ## Boundary discipline
  *
@@ -139,3 +146,38 @@ export const HIGHLIGHT_MATERIAL: MeshBasicMaterial = new MeshBasicMaterial({
   depthWrite: false,
   side: DoubleSide,
 });
+
+/**
+ * HMR / tooling helper — releases the GPU handles held by the
+ * two module-level singletons. Parity with the layers-shared
+ * `disposeSharedMaterials` + `disposeSharedGeometry` helpers.
+ *
+ * ## When to call this
+ *
+ *   - **HMR** — when a hot-reload session replaces this module,
+ *     dispose the outgoing instances so three.js doesn't leak
+ *     WebGL buffers.
+ *   - **Storybook** — a story teardown that spins up + tears
+ *     down its own WebGL context may want to release handles.
+ *   - **Tests** — if a suite creates + destroys many highlight
+ *     scenes, call this in `afterAll` to keep the process's
+ *     GPU handle count bounded.
+ *
+ * ## When NOT to call this
+ *
+ *   - **Production render code** — the singletons are bound to
+ *     live meshes; disposing mid-frame will black-out the
+ *     highlights and log a WebGL error. Rely on tab-lifetime
+ *     cleanup instead.
+ *   - **Inside a WarningOverlay unmount effect** — the overlay
+ *     doesn't own these singletons, other tabs/components may
+ *     still need them.
+ *
+ * The three.js `.dispose()` calls are idempotent (three.js
+ * silently no-ops on already-disposed handles) so calling this
+ * repeatedly is safe.
+ */
+export function disposeHighlightPrimitives(): void {
+  HIGHLIGHT_BOX_GEOMETRY.dispose();
+  HIGHLIGHT_MATERIAL.dispose();
+}
