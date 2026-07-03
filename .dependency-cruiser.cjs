@@ -178,6 +178,33 @@ module.exports = {
       to: { path: '^src/domain/spans/irc-2018-tables' },
     },
 
+    // ---- scene: layers must not couple to the layout engine ---------------
+    //
+    // S10 issue #11 explicitly forbids scene layer components from
+    // importing `src/domain/layout/**`. Scene layers consume the
+    // PRE-COMPUTED `Layout` from the state store — they never call
+    // `computeLayout` (or any of its sub-functions). The per-layer
+    // allowlist above only stops scene from reaching into `ui/`,
+    // `application/`, `persistence/` — `domain/layout/` matches the
+    // permitted `^src/domain/` prefix and would slip through without
+    // this specific rule.
+    //
+    // A grep-based unit test in
+    // `src/scene/layers/no-geometry-math.test.ts` is the third gate
+    // (belt + suspenders — see BoxMember.tsx module header for the
+    // finding-#3 pledge).
+    {
+      name: 'scene-no-domain-layout',
+      severity: 'error',
+      comment:
+        'S10 issue #11: src/scene/** MUST NOT import from src/domain/layout/** — ' +
+        'scene layers consume the pre-computed Layout from state only. Move any ' +
+        'layout-engine coupling to state/application, then read the result via ' +
+        'useLayout / useLayoutBounds.',
+      from: { path: '^src/scene/' },
+      to: { path: '^src/domain/layout(/|$)' },
+    },
+
     // ---- generic hygiene ---------------------------------------------------
     {
       name: 'no-circular',
