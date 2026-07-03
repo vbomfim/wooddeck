@@ -25,9 +25,15 @@
  *
  * ## Boundary
  *
- * `ui/` may import from `ui/` and `state/` only — enforced by
- * `.dependency-cruiser.cjs` `ui-allowlist` and BLOCK-2d / BLOCK-2r /
- * BLOCK-2s / BLOCK-2t in `scripts/boundary-selftest.mjs`.
+ * `ui/` may import from `ui/`, `state/`, and `domain/` (excluding
+ * `domain/layout/**`) — enforced by `.dependency-cruiser.cjs`
+ * `ui-allowlist` and BLOCK-2d / BLOCK-2s / BLOCK-2t / BLOCK-2v in
+ * `scripts/boundary-selftest.mjs`. `ui/` is still FORBIDDEN from
+ * importing `scene/`, `application/`, `persistence/`, and
+ * `domain/layout/**` (S13 issue #14 Boundary Resolution §1). The
+ * `application` layer's boundary is enforced by BLOCK-2s; the
+ * `persistence` layer by BLOCK-2t; the `domain/layout` sub-tree
+ * by the dedicated `ui-no-domain-layout` rule + BLOCK-2v.
  */
 export { AppShell } from './AppShell';
 export type { AppShellProps } from './AppShell';

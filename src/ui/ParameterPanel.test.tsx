@@ -354,3 +354,288 @@ describe('<ParameterPanel /> — edges: catalog-invalid combos filtered / safe-b
     expect(optionValues).toEqual(['2x6', '2x8', '2x10', '2x12']);
   });
 });
+
+// --------------------------------------------------------------------------
+// FIX 1 (review gate) — Grade options are catalog-filtered
+// --------------------------------------------------------------------------
+//
+// Pre-fix bug: `GRADE_OPTIONS_WOOD` offered No1 / No2 / Select, but
+// MVP_SPECS stocks ONLY `No2` for PT/Cedar (and `NA` for Composite).
+// Picking No1 or Select fires applyParameters → computeLayout →
+// lookupMaterial throws → LayoutError → panel renders the error
+// inline. Violates AC1 and ticket §4 "selects blocked on invalid
+// combination → filter options via the catalog".
+//
+// Fix: derive the Grade option list from the catalog via
+// `filterGradesByCatalog(species)`. For PT / Cedar wood this
+// returns `[No2]`; for Composite it returns `[NA]`.
+
+describe('<ParameterPanel /> — FIX 1 Grade options are catalog-filtered', () => {
+  it('PT species Grade options include ONLY No2 (No1 and Select are NOT stocked)', () => {
+    render(<ParameterPanel />);
+    // Default species is PT.
+    const grade = screen.getByLabelText<HTMLSelectElement>(/^grade/i);
+    const values = Array.from(grade.options).map((o) => o.value);
+    // The catalog stocks only No2 for PT (materials-catalog.ts:129-152).
+    expect(values).toEqual(['No2']);
+    // Bug regression guard: the OLD (broken) list included these.
+    expect(values).not.toContain('No1');
+    expect(values).not.toContain('Select');
+  });
+
+  it('Cedar species Grade options include ONLY No2 (matches catalog)', async () => {
+    const user = userEvent.setup();
+    render(<ParameterPanel />);
+    const species = screen.getByLabelText(/^species/i);
+    await user.selectOptions(species, 'Cedar');
+    const grade = screen.getByLabelText<HTMLSelectElement>(/^grade/i);
+    const values = Array.from(grade.options).map((o) => o.value);
+    expect(values).toEqual(['No2']);
+  });
+
+  it('Composite species Grade options include ONLY NA (matches catalog)', async () => {
+    const user = userEvent.setup();
+    render(<ParameterPanel />);
+    const species = screen.getByLabelText(/^species/i);
+    await user.selectOptions(species, 'Composite');
+    const grade = screen.getByLabelText<HTMLSelectElement>(/^grade/i);
+    const values = Array.from(grade.options).map((o) => o.value);
+    expect(values).toEqual(['NA']);
+  });
+
+  it('selecting the stocked grade (No2) does NOT put the store into error and broadcasts to joist + beam + post (decking independent)', async () => {
+    const user = userEvent.setup();
+    render(<ParameterPanel />);
+    const grade = screen.getByLabelText<HTMLSelectElement>(/^grade/i);
+    // Ensure decking's grade is No2 too (default), so the below
+    // "decking untouched" assertion is meaningful when we later
+    // introduce a different starter grade.
+    const before = useDesignStore.getState().bundle.design;
+    expect(before.joist.material.grade).toBe('No2');
+    expect(before.decking.material.grade).toBe('No2');
+
+    // The only stocked grade for PT is No2 — re-select it.
+    await user.selectOptions(grade, 'No2');
+
+    // Store should be idle — no LayoutError since the combo is stocked.
+    expect(useDesignStore.getState().status).toBe('idle');
+    expect(useDesignStore.getState().lastError).toBeNull();
+
+    // Grade broadcast to framing members (joist / beam / post).
+    // Decking is INDEPENDENT.
+    const after = useDesignStore.getState().bundle.design;
+    expect(after.joist.material.grade).toBe('No2');
+    expect(after.beam.material.grade).toBe('No2');
+    expect(after.post.material.grade).toBe('No2');
+    expect(after.decking.material.grade).toBe('No2');
+  });
+});
+
+// --------------------------------------------------------------------------
+// FIX 2 (review gate) — unit switch is display-only for a focused,
+//   in-flight LengthField (dirty-flag + no-op-skip semantics)
+// --------------------------------------------------------------------------
+//
+// Pre-fix bug: clicking the UnitSwitcher blurs the focused input
+// BEFORE the button click fires, so LengthField's `commit()` runs
+// unconditionally and either (a) applies an in-flight edit that the
+// user meant to discard (unit switch is supposed to be display-only)
+// or (b) drifts the canonical value by round-tripping through
+// formatLength → parseLength (e.g. 3657.6 → 3658).
+//
+// Fix: track a `dirty` flag set on user keystroke. `commit()`
+// short-circuits when NOT dirty OR when the parsed mm equals the
+// current canonical `mmValue` (no-op-skip).
+
+describe('<ParameterPanel /> — FIX 2 unit switch is display-only even mid-edit', () => {
+  it('focus Width + type "16" + click Metric → widthMm UNCHANGED (in-flight edit discarded)', async () => {
+    const user = userEvent.setup();
+    render(<ParameterPanel />);
+    const bundleBefore = useDesignStore.getState().bundle;
+    const widthBefore = bundleBefore.design.footprint.widthMm;
+
+    const width = screen.getByLabelText<HTMLInputElement>(/^width$/i);
+    await user.clear(width);
+    await user.type(width, '16');
+    // At this point the field is dirty ("16") but not committed.
+
+    const metric = screen.getByRole('button', { name: /metric/i });
+    await user.click(metric);
+
+    // AC5: widthMm UNCHANGED. Referential equality on the bundle
+    // is the strongest check — no design update fired at all.
+    expect(useDesignStore.getState().bundle).toBe(bundleBefore);
+    expect(useDesignStore.getState().bundle.design.footprint.widthMm).toBe(widthBefore);
+    // And the ui-store did flip.
+    expect(useUiStore.getState().units).toBe('metric');
+  });
+
+  it('focus Width WITHOUT typing + click Metric → widthMm UNCHANGED (no-op-blur skipped)', async () => {
+    const user = userEvent.setup();
+    render(<ParameterPanel />);
+    const bundleBefore = useDesignStore.getState().bundle;
+    const widthBefore = bundleBefore.design.footprint.widthMm;
+
+    const width = screen.getByLabelText<HTMLInputElement>(/^width$/i);
+    await user.click(width); // focus, no typing
+
+    const metric = screen.getByRole('button', { name: /metric/i });
+    await user.click(metric);
+
+    // A round-trip through the formatter+parser could drift
+    // 3657.6 → 3658 pre-fix; post-fix the commit short-circuits.
+    // Referential equality on the bundle proves no update landed.
+    expect(useDesignStore.getState().bundle).toBe(bundleBefore);
+    expect(useDesignStore.getState().bundle.design.footprint.widthMm).toBe(widthBefore);
+  });
+});
+
+// --------------------------------------------------------------------------
+// FIX 4 (review gate) — every field handler wired to the correct
+//   store slice. Prior coverage exercised only Width; a mis-routed
+//   patch on any other field would have shipped green.
+// --------------------------------------------------------------------------
+
+describe('<ParameterPanel /> — FIX 4 every field applies to its own store slice', () => {
+  it('Length field applies footprint.lengthMm', async () => {
+    const user = userEvent.setup();
+    render(<ParameterPanel />);
+    const length = screen.getByLabelText<HTMLInputElement>(/^length$/i);
+    await user.clear(length);
+    await user.type(length, '20');
+    await user.tab();
+    // 20 ft × 304.8 = 6096 mm.
+    expect(useDesignStore.getState().bundle.design.footprint.lengthMm).toBe(6096);
+  });
+
+  it('Height field applies footprint.heightMm', async () => {
+    // Switch to metric so we can type a raw mm-friendly value
+    // without imperial parsing ambiguity.
+    act(() => {
+      useUiStore.setState({ units: 'metric' });
+    });
+    const user = userEvent.setup();
+    render(<ParameterPanel />);
+    const height = screen.getByLabelText<HTMLInputElement>(/height/i);
+    await user.clear(height);
+    // 1200 mm is well above the structural min (default design).
+    await user.type(height, '1200');
+    await user.tab();
+    expect(useDesignStore.getState().bundle.design.footprint.heightMm).toBe(1200);
+  });
+
+  it('Joist spacing field applies joist.spacingMm', async () => {
+    act(() => {
+      useUiStore.setState({ units: 'metric' });
+    });
+    const user = userEvent.setup();
+    render(<ParameterPanel />);
+    const spacing = screen.getByLabelText<HTMLInputElement>(/joist spacing/i);
+    await user.clear(spacing);
+    // 305 mm ≈ 12" o.c. — above the joist thickness minimum.
+    await user.type(spacing, '305');
+    await user.tab();
+    expect(useDesignStore.getState().bundle.design.joist.spacingMm).toBe(305);
+  });
+
+  it('Joist size select applies joist.material.nominal', async () => {
+    const user = userEvent.setup();
+    render(<ParameterPanel />);
+    const joistSize = screen.getByLabelText(/joist size/i);
+    await user.selectOptions(joistSize, '2x10');
+    expect(useDesignStore.getState().bundle.design.joist.material.nominal).toBe('2x10');
+    // Sibling framing sizes untouched.
+    expect(useDesignStore.getState().bundle.design.beam.material.nominal).not.toBe('2x10');
+  });
+
+  it('Beam size select applies beam.material.nominal', async () => {
+    const user = userEvent.setup();
+    render(<ParameterPanel />);
+    const beamSize = screen.getByLabelText(/beam size/i);
+    await user.selectOptions(beamSize, '2x10');
+    expect(useDesignStore.getState().bundle.design.beam.material.nominal).toBe('2x10');
+  });
+
+  it('Post size select applies post.material.nominal', async () => {
+    const user = userEvent.setup();
+    render(<ParameterPanel />);
+    const postSize = screen.getByLabelText(/post size/i);
+    await user.selectOptions(postSize, '6x6');
+    expect(useDesignStore.getState().bundle.design.post.material.nominal).toBe('6x6');
+  });
+
+  it('Decking board size select applies decking.material.nominal', async () => {
+    const user = userEvent.setup();
+    render(<ParameterPanel />);
+    const deckingSize = screen.getByLabelText(/decking board/i);
+    await user.selectOptions(deckingSize, '2x6');
+    expect(useDesignStore.getState().bundle.design.decking.material.nominal).toBe('2x6');
+  });
+
+  it('Decking orientation select applies decking.orientation', async () => {
+    const user = userEvent.setup();
+    render(<ParameterPanel />);
+    const orientation = screen.getByLabelText(/decking orientation/i);
+    await user.selectOptions(orientation, 'parallel-to-width');
+    expect(useDesignStore.getState().bundle.design.decking.orientation).toBe('parallel-to-width');
+  });
+});
+
+// --------------------------------------------------------------------------
+// FIX 7 (review gate) — aria-live consistency on the panel-level
+//   error region. `role="alert"` implies `aria-live="assertive"` —
+//   the S13 panel banner should be status/polite (a passive
+//   summary), leaving the assertive role for the per-field
+//   inline error inside LengthField.
+// --------------------------------------------------------------------------
+
+describe('<ParameterPanel /> — FIX 7 panel-level error region uses role=status + aria-live=polite', () => {
+  it('panel banner (when status=error) is findable by role="status" and has aria-live="polite"', async () => {
+    const user = userEvent.setup();
+    render(<ParameterPanel />);
+    const width = screen.getByLabelText<HTMLInputElement>(/^width$/i);
+    // Below the 4 ft floor → LayoutError.
+    await user.clear(width);
+    await user.type(width, '1');
+    await user.tab();
+
+    // The panel-level banner is a status region — passive summary.
+    const banner = screen.getByRole('status');
+    expect(banner).toHaveTextContent(/Invalid deck width/i);
+    expect(banner).toHaveAttribute('aria-live', 'polite');
+  });
+});
+
+// --------------------------------------------------------------------------
+// FIX 8 (review gate) — Composite framing informational note.
+//   When Species = Composite, the panel silently keeps posts as PT
+//   (safe-broadcast). Add a passive `<p role="note">` explaining
+//   this so the homeowner isn't surprised.
+// --------------------------------------------------------------------------
+
+describe('<ParameterPanel /> — FIX 8 Composite framing informational note', () => {
+  it('shows a role=note explanation when Species = Composite', async () => {
+    const user = userEvent.setup();
+    render(<ParameterPanel />);
+    // Not present initially (default PT).
+    expect(screen.queryByRole('note')).toBeNull();
+
+    const species = screen.getByLabelText(/^species/i);
+    await user.selectOptions(species, 'Composite');
+
+    const note = screen.getByRole('note');
+    expect(note).toHaveTextContent(/pressure-treated/i);
+    expect(note).toHaveTextContent(/composite framing is not structurally rated/i);
+  });
+
+  it('note disappears when Species reverts to a wood species', async () => {
+    const user = userEvent.setup();
+    render(<ParameterPanel />);
+    const species = screen.getByLabelText(/^species/i);
+    await user.selectOptions(species, 'Composite');
+    expect(screen.getByRole('note')).toBeInTheDocument();
+
+    await user.selectOptions(species, 'PT');
+    expect(screen.queryByRole('note')).toBeNull();
+  });
+});

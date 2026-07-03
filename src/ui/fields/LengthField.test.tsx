@@ -335,3 +335,170 @@ describe('<LengthField /> — accessibility', () => {
     expect(input.inputMode).toBe('decimal');
   });
 });
+
+// --------------------------------------------------------------------------
+// FIX 2 (review gate) — commit() short-circuits when NOT dirty or
+//   when the parsed value round-trips to the same canonical mm.
+//   The pre-fix behaviour committed on every blur, which:
+//     (a) applied in-flight edits the user meant to discard when
+//         focus moved to the UnitSwitcher (AC5 broke), and
+//     (b) drifted the canonical value 3657.6 → 3658 via a pure
+//         formatter/parser round-trip.
+//   Fix: track a `dirty` flag on user keystroke; skip commit when
+//   not dirty; also skip when the parsed mm equals the current
+//   canonical mmValue (no-op-skip).
+// --------------------------------------------------------------------------
+
+describe('<LengthField /> — FIX 2 no-op blur is a NO-OP', () => {
+  it('mount + focus + blur without typing → onChangeMm NEVER called', async () => {
+    const user = userEvent.setup();
+    const onChangeMm = vi.fn();
+    render(
+      <LengthField
+        label="Width"
+        mmValue={3657.6 /* the non-integer canonical mm for 12 ft */}
+        system="imperial"
+        onChangeMm={onChangeMm}
+      />,
+    );
+    const input = screen.getByLabelText<HTMLInputElement>('Width');
+    // Focus the field. jsdom does not always fire focus from a
+    // programmatic .focus(); use a user-driven click.
+    await user.click(input);
+    // Blur without typing anything.
+    await user.tab();
+    // Pre-fix bug would have called onChangeMm(3658) here (a drift
+    // from 3657.6 → 3658 via the formatter/parser round-trip).
+    expect(onChangeMm).not.toHaveBeenCalled();
+  });
+
+  it('typing then blurring with a value that ROUND-TRIPS to the same canonical mm does NOT fire onChangeMm', async () => {
+    const user = userEvent.setup();
+    const onChangeMm = vi.fn();
+    render(
+      <LengthField
+        label="Width"
+        mmValue={3657.6}
+        system="imperial"
+        onChangeMm={onChangeMm}
+      />,
+    );
+    const input = screen.getByLabelText<HTMLInputElement>('Width');
+    // The default formatted display is "12'" or "12′ 0″" — clear
+    // and re-type the SAME numeric intent. parseLength returns an
+    // integer mm; since parsed mm !== canonical (integer !== float),
+    // the no-op-skip predicate here is best exercised in the
+    // display-round-trip variant. This test guards the mid-edit
+    // canonicalisation invariant: retyping the current visible value
+    // should not fire onChange.
+    const current = input.value;
+    await user.clear(input);
+    await user.type(input, current);
+    await user.tab();
+    // The parsed value equals the current CANONICAL mmValue — the
+    // no-op-skip fires and onChange stays quiet.
+    expect(onChangeMm).not.toHaveBeenCalled();
+  });
+
+  it('typing a REAL change (different value) still commits normally', async () => {
+    const user = userEvent.setup();
+    const onChangeMm = vi.fn();
+    render(
+      <LengthField
+        label="Width"
+        mmValue={3658}
+        system="imperial"
+        onChangeMm={onChangeMm}
+      />,
+    );
+    const input = screen.getByLabelText<HTMLInputElement>('Width');
+    await user.clear(input);
+    await user.type(input, '16');
+    await user.tab();
+    // A real edit still commits.
+    expect(onChangeMm).toHaveBeenCalledTimes(1);
+    expect(onChangeMm).toHaveBeenCalledWith(4877);
+  });
+});
+
+// --------------------------------------------------------------------------
+// FIX 3 (review gate) — parseError must be cleared when the canonical
+//   props change. Pre-fix: after an invalid input, the parent could
+//   push a new mmValue (or the user could switch units) and the
+//   display would re-format from the new canonical value BUT the
+//   stale error message and aria-invalid=true would remain — a
+//   confusing "clean field showing an error" state.
+// --------------------------------------------------------------------------
+
+describe('<LengthField /> — FIX 3 canonical resync clears parse error', () => {
+  it('invalid input followed by a system prop change clears aria-invalid and the error text', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <LengthField
+        label="Width"
+        mmValue={3658}
+        system="imperial"
+        onChangeMm={(): void => {}}
+      />,
+    );
+    const input = screen.getByLabelText<HTMLInputElement>('Width');
+    // Trigger the error.
+    await user.clear(input);
+    await user.type(input, 'twelve feet');
+    await user.tab();
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(
+      screen.getByText(
+        /Enter a number, optionally with units — e\.g\., 12 or 12 ft/i,
+      ),
+    ).toBeInTheDocument();
+
+    // Parent flips units — a canonical resync.
+    rerender(
+      <LengthField
+        label="Width"
+        mmValue={3658}
+        system="metric"
+        onChangeMm={(): void => {}}
+      />,
+    );
+
+    // Error must be gone; aria-invalid must return to 'false'.
+    expect(input).toHaveAttribute('aria-invalid', 'false');
+    expect(
+      screen.queryByText(
+        /Enter a number, optionally with units — e\.g\., 12 or 12 ft/i,
+      ),
+    ).toBeNull();
+  });
+
+  it('invalid input followed by an external mmValue update clears the error', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <LengthField
+        label="Width"
+        mmValue={3658}
+        system="imperial"
+        onChangeMm={(): void => {}}
+      />,
+    );
+    const input = screen.getByLabelText<HTMLInputElement>('Width');
+    await user.clear(input);
+    await user.type(input, 'nope');
+    await user.tab();
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+
+    // External update (e.g. undo/redo, load-from-file).
+    rerender(
+      <LengthField
+        label="Width"
+        mmValue={4877}
+        system="imperial"
+        onChangeMm={(): void => {}}
+      />,
+    );
+
+    expect(input).toHaveAttribute('aria-invalid', 'false');
+    expect(input.value).toMatch(/16/);
+  });
+});

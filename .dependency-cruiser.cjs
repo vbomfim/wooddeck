@@ -12,7 +12,10 @@
  *   persistence → only src/(persistence|domain)/**
  *   state       → only src/(state|application|domain)/**
  *   scene       → only src/(scene|state|domain)/**
- *   ui          → only src/(ui|state)/**             (S12 issue #13 — dumb view layer)
+ *   ui          → only src/(ui|state|domain)/**      (S13 issue #14 loosened —
+ *                    ui/ may consume domain/units, domain/materials-catalog,
+ *                    and domain/model types; the dedicated `ui-no-domain-layout`
+ *                    rule below still forbids ui/ → domain/layout/**)
  *
  * Why state does NOT include persistence (revised in S8 pair-fix): the
  * state store needs `instanceof DeckFileError` narrowing on save

@@ -6,8 +6,12 @@
  * The panel is a vertical stack:
  *   1. `<h2>Parameters</h2>`
  *   2. `<UnitSwitcher />` — two-button toggle group
- *   3. `<div role="alert">` — inline LayoutError (when status='error')
- *   4. `<div class="wd-parameter-panel__fields">` — vertical field list
+ *   3. `<div role="status">` — inline LayoutError banner (when
+ *      status='error'; FIX 7 review gate — panel-level messages
+ *      use polite `status` so screen readers don't interrupt)
+ *   4. `<p role="note">` — Composite framing note (FIX 8 review
+ *      gate; only when joistSpecies==='Composite')
+ *   5. `<div class="wd-parameter-panel__fields">` — vertical field list
  *
  * Each field (LengthField / SelectField) is its own row with a
  * label above the control. Fields have a max width so a wide
@@ -21,8 +25,11 @@
  *   - The unit switcher's two buttons carry aria-pressed so screen
  *     readers announce the active state.
  *   - Focus indicators use the global :focus-visible from tokens.css.
- *   - Inline errors use role="alert" (aria-live="polite" downshift
- *     for LengthField, "polite" for the panel-level error).
+ *   - Inline errors: the panel banner uses role="status"
+ *     (aria-live="polite" — passive summary); the per-field
+ *     LengthField inline error keeps role="alert" (implicit
+ *     aria-live="assertive" — per-keystroke parse feedback where
+ *     interrupting the user IS the correct UX).
  *   - Contrast ≥ 4.5:1 for every text/bg pair (Fix I gate covers
  *     the tokens; text here inherits --wd-color-text on
  *     --wd-color-surface-alt = 17.7:1).
@@ -64,6 +71,24 @@
   color: var(--wd-color-banner-full-text);
   border-radius: 4px;
   font-size: 0.875rem;
+}
+
+/* -------------------------------------------------------------------------
+ * Passive informational note (FIX 8 — Composite framing callout).
+ *
+ * Distinct from `.wd-parameter-panel__error`: this is a role="note"
+ * region that renders in a neutral tone (no red/yellow banner
+ * colouring), never blocking, never signalling failure.
+ * ------------------------------------------------------------------------- */
+.wd-parameter-panel__note {
+  margin: 0;
+  padding: var(--wd-space-2) var(--wd-space-3);
+  background: var(--wd-color-surface);
+  border-left: 3px solid var(--wd-color-border);
+  color: var(--wd-color-text);
+  border-radius: 2px;
+  font-size: 0.875rem;
+  line-height: 1.4;
 }
 
 /* -------------------------------------------------------------------------

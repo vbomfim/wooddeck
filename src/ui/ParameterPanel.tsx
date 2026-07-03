@@ -33,8 +33,12 @@
  * When species is `'Composite'`, Grade select disables and its value
  * is forced to `'NA'` (the sentinel used for composite materials in
  * the catalog). The available Grade options list is filtered by
- * species — `'Composite'` shows only `'NA'`; non-composite shows
- * `'No1' | 'No2' | 'Select'`.
+ * species via `filterGradesByCatalog` — Composite shows only `'NA'`;
+ * PT/Cedar show only the wood grades stocked in the MVP catalog
+ * (`'No2'` for the MVP). The pre-fix code hard-coded a
+ * `[No1, No2, Select]` wood-grade list which triggered LayoutError
+ * on submit for `No1`/`Select` — see `filterGradesByCatalog`
+ * docstring for why.
  *
  * ## AC7 — Species broadcast
  *
@@ -85,26 +89,13 @@ import {
   useDesignStatus,
   useDesignStore,
   useUiUnits,
+  type DeepPartial,
 } from '../state';
 
 import { LengthField } from './fields/LengthField';
 import { SelectField, type SelectOption } from './fields/SelectField';
 import { UnitSwitcher } from './UnitSwitcher';
 import './styles/parameter-panel.css';
-
-// --------------------------------------------------------------------------
-// Local DeepPartial — mirrors `application/types.ts`'s type of the
-// same name. We define it here (rather than importing) because the
-// dep-cruiser `ui-allowlist` rule forbids `ui/ → application/`
-// (Boundary Resolution #2 for S13: the panel talks to the store,
-// not directly to the application layer). The types are structurally
-// identical, so a change to either is a compile-time break at the
-// store call site if they ever drift — but the risk is small
-// because `DeepPartial` is a general-purpose recursive utility.
-// --------------------------------------------------------------------------
-type DeepPartial<T> = T extends object
-  ? { [K in keyof T]?: DeepPartial<T[K]> }
-  : T;
 
 // --------------------------------------------------------------------------
 // Static option lists — extracted so tests can inspect them and so
@@ -118,19 +109,15 @@ const SPECIES_OPTIONS: readonly SelectOption<Species>[] = [
 ];
 
 /**
- * Non-composite grades. Composite always uses `'NA'`. See AC6 lock
- * behaviour: when species is `'Composite'`, the Grade select
- * disables + the options list is `[{ value: 'NA', label: 'NA' }]`.
+ * All Grade values the domain model exposes. The DISPLAYED options
+ * list is CATALOG-FILTERED per species via `filterGradesByCatalog`
+ * — for the MVP catalog wood species stock only `'No2'` and
+ * Composite stocks only `'NA'`, so this full list is a
+ * defense-in-depth reference rather than a directly-used option
+ * source. Keeping it as an ordered constant lets tests assert on
+ * the intended stable ordering when the catalog widens.
  */
-const GRADE_OPTIONS_WOOD: readonly SelectOption<Grade>[] = [
-  { value: 'No1', label: 'No1' },
-  { value: 'No2', label: 'No2' },
-  { value: 'Select', label: 'Select' },
-];
-
-const GRADE_OPTIONS_COMPOSITE: readonly SelectOption<Grade>[] = [
-  { value: 'NA', label: 'NA (composite)' },
-];
+const ALL_GRADES: readonly Grade[] = ['No1', 'No2', 'Select', 'NA'];
 
 const JOIST_SIZE_OPTIONS: readonly LumberNominal[] = ['2x6', '2x8', '2x10', '2x12'];
 const BEAM_SIZE_OPTIONS: readonly LumberNominal[] = ['2x8', '2x10', '2x12'];
@@ -143,6 +130,22 @@ const ORIENTATION_OPTIONS: readonly SelectOption<
   { value: 'parallel-to-length', label: 'Parallel to length' },
   { value: 'parallel-to-width', label: 'Parallel to width' },
 ];
+
+/**
+ * FIX 8 (S13 review gate) copy — the Composite framing informational
+ * note. Extracted as a module constant so tests can assert on it
+ * without duplicating the string.
+ *
+ * Homeowner-facing explanation of the safe-broadcast behaviour:
+ * when Species = Composite, posts stay pressure-treated because the
+ * MVP catalog has no composite post SKUs (see materials-catalog.ts
+ * MVP_SPECS). This is standard practice for composite decks (see
+ * ticket §17) but silent behaviour is surprising to a homeowner
+ * seeing the Species selector — the note makes it discoverable
+ * without an error state.
+ */
+const COMPOSITE_FRAMING_NOTE =
+  'Posts remain pressure-treated; composite framing is not structurally rated.';
 
 // --------------------------------------------------------------------------
 // Helpers
@@ -168,6 +171,48 @@ function filterNominalsByCatalog(
   return nominals
     .filter((n) => validSet.has(n))
     .map<SelectOption<LumberNominal>>((n) => ({ value: n, label: n }));
+}
+
+/**
+ * FIX 1 (S13 review gate) — build a Grade options list from the
+ * catalog for the given species. Returns ONLY grades that ARE
+ * stocked (any nominal for that species counts). For the MVP
+ * catalog this returns `[{ value: 'No2', label: 'No2' }]` for
+ * PT/Cedar and `[{ value: 'NA', label: 'NA (composite)' }]` for
+ * Composite.
+ *
+ * ## Why this exists
+ *
+ * Pre-fix the panel offered a hard-coded `[No1, No2, Select]` for
+ * wood — but the catalog stocks ONLY `No2`. Picking `No1` or
+ * `Select` fired `applyParameters → computeLayout → lookupMaterial`
+ * which threw a `LayoutError`, and the panel surfaced the error
+ * inline. That violates AC1 ("valid combinations only in options")
+ * and forced the user to correct a mistake the UI should not have
+ * let them make. This helper is the AC-edge "invalid select combos
+ * filtered" guarantee applied to Grade.
+ */
+function filterGradesByCatalog(
+  species: Species,
+): readonly SelectOption<Grade>[] {
+  const validSet = new Set<Grade>();
+  for (const material of listMaterials()) {
+    if (material.species === species) {
+      validSet.add(material.grade);
+    }
+  }
+  // Preserve `ALL_GRADES` ordering so the list has a stable,
+  // documented sequence — the catalog's insertion order is not a
+  // load-bearing detail.
+  return ALL_GRADES.filter((g) => validSet.has(g)).map<SelectOption<Grade>>(
+    (g) => ({
+      value: g,
+      // Human-readable label. Composite `'NA'` gets the parenthetical
+      // reminder so the disabled-select state (AC6) still reads
+      // sensibly.
+      label: g === 'NA' ? 'NA (composite)' : g,
+    }),
+  );
 }
 
 /**
@@ -199,36 +244,38 @@ export function ParameterPanel(): JSX.Element {
   // catalog once) but memoized on the specific member's species so
   // option-list identity stays stable when an unrelated field
   // mutates.
-  const joistSpeciesForOpts = design.joist.material.species;
-  const beamSpeciesForOpts = design.beam.material.species;
-  const postSpeciesForOpts = design.post.material.species;
-  const deckingSpeciesForOpts = design.decking.material.species;
+  const joistSpecies = design.joist.material.species;
+  const beamSpecies = design.beam.material.species;
+  const postSpecies = design.post.material.species;
+  const deckingSpecies = design.decking.material.species;
 
   const joistSizeOptions = useMemo(
-    () => filterNominalsByCatalog(JOIST_SIZE_OPTIONS, joistSpeciesForOpts),
-    [joistSpeciesForOpts],
+    () => filterNominalsByCatalog(JOIST_SIZE_OPTIONS, joistSpecies),
+    [joistSpecies],
   );
   const beamSizeOptions = useMemo(
-    () => filterNominalsByCatalog(BEAM_SIZE_OPTIONS, beamSpeciesForOpts),
-    [beamSpeciesForOpts],
+    () => filterNominalsByCatalog(BEAM_SIZE_OPTIONS, beamSpecies),
+    [beamSpecies],
   );
   const postSizeOptions = useMemo(
-    () => filterNominalsByCatalog(POST_SIZE_OPTIONS, postSpeciesForOpts),
-    [postSpeciesForOpts],
+    () => filterNominalsByCatalog(POST_SIZE_OPTIONS, postSpecies),
+    [postSpecies],
   );
   const deckingSizeOptions = useMemo(
-    () => filterNominalsByCatalog(DECKING_SIZE_OPTIONS, deckingSpeciesForOpts),
-    [deckingSpeciesForOpts],
+    () => filterNominalsByCatalog(DECKING_SIZE_OPTIONS, deckingSpecies),
+    [deckingSpecies],
   );
 
-  // "Panel species" is the JOIST species — the primary framing
-  // species the broadcast originates from. AC6 Grade lock keys on
-  // it (Composite framing joist → Grade select disabled + 'NA').
-  const panelSpecies = joistSpeciesForOpts;
-
-  const gradeOptions =
-    panelSpecies === 'Composite' ? GRADE_OPTIONS_COMPOSITE : GRADE_OPTIONS_WOOD;
-  const gradeDisabled = panelSpecies === 'Composite';
+  // The JOIST species is the primary framing species — AC6's Grade
+  // lock and AC7's broadcast both key on it (Composite joist →
+  // Grade select disabled + 'NA'; species control writes to joist +
+  // beam + post). The variable is `joistSpecies` above; no separate
+  // alias needed here.
+  const gradeOptions = useMemo(
+    () => filterGradesByCatalog(joistSpecies),
+    [joistSpecies],
+  );
+  const gradeDisabled = joistSpecies === 'Composite';
 
   // Species change → broadcast to joist + beam + post per AC7,
   // BUT only for members whose current nominal is stocked in the
@@ -326,13 +373,36 @@ export function ParameterPanel(): JSX.Element {
       <UnitSwitcher />
 
       {errorMessage !== null && (
+        // FIX 7 (S13 review gate) — passive summary. `role="alert"`
+        // implies `aria-live="assertive"`, which is loud enough to
+        // interrupt a screen reader mid-word; a panel-level "the
+        // last apply failed" banner is a status update, not an
+        // interruption. `role="status"` (implicit `aria-live=polite`)
+        // matches the intent. The assertive channel is reserved for
+        // the per-field `LengthField` inline error (per-keystroke
+        // parse errors, where interrupting IS the right UX).
         <div
           className="wd-parameter-panel__error"
-          role="alert"
+          role="status"
           aria-live="polite"
         >
           {errorMessage}
         </div>
+      )}
+
+      {joistSpecies === 'Composite' && (
+        // FIX 8 (S13 review gate) — passive informational note. When
+        // Species = Composite, the safe-broadcast (see
+        // `onSpeciesChange`) leaves posts pressure-treated because
+        // the MVP catalog has no composite post SKUs. Silent
+        // behaviour is surprising to a homeowner who just picked
+        // "Composite" and might expect every framing member to
+        // change. `role="note"` is the ARIA landmark for a passive
+        // callout — NOT `alert`/`status`, because this is
+        // informational context, not a state change.
+        <p className="wd-parameter-panel__note" role="note">
+          {COMPOSITE_FRAMING_NOTE}
+        </p>
       )}
 
       <div className="wd-parameter-panel__fields">
@@ -390,7 +460,7 @@ export function ParameterPanel(): JSX.Element {
 
         <SelectField<Species>
           label="Species"
-          value={panelSpecies}
+          value={joistSpecies}
           options={SPECIES_OPTIONS}
           onChange={onSpeciesChange}
         />

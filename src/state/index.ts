@@ -62,3 +62,18 @@ export {
 
 // ---- default-design factory ------------------------------------------------
 export { DEFAULT_DESIGN_PARAMS, makeDefaultDesign } from './default-design';
+
+// ---- shared utility types --------------------------------------------------
+//
+// `DeepPartial<T>` originates in the application layer (see
+// `src/application/types.ts`) — it is the exact type
+// `applyParameters(patch: DeepPartial<DeckDesign>)` consumes. The ui
+// layer needs the same type but the ui→application boundary rule
+// forbids a direct import (S13 issue #14 Boundary Resolution §2:
+// the panel talks to the store, not to application). Re-exporting
+// through the state barrel gives ui a single sanctioned source of
+// truth so a future refactor of `DeepPartial` (e.g. tightening to
+// omit arrays) does not require touching both layers, and — more
+// importantly — the type at the store call site and the type at
+// the ui call site can never drift.
+export type { DeepPartial } from '../application';
