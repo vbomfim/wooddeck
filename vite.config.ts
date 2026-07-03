@@ -30,6 +30,22 @@ export default defineConfig({
   define: {
     __WOODDECK_VERSION__: JSON.stringify(pkg.version),
   },
+  resolve: {
+    // Pair-fix iter 1 — Nit L. Every three.js API surface must
+    // resolve to the SAME module instance. Without dedupe, npm has
+    // multiple three copies (stats-gl@2.4.2 pins three@0.170.0
+    // while everything else pins 0.185.1) → console warnings
+    // "Multiple instances of Three.js" AND — more insidiously —
+    // `instanceof PerspectiveCamera` returning FALSE under test
+    // even when the object IS a PerspectiveCamera (different
+    // module = different constructor identity). The alias forces
+    // ANY import of `three` to resolve to the top-level 0.185.1
+    // instance; dedupe backs that up for indirect resolvers.
+    dedupe: ['three'],
+    alias: {
+      three: resolve(configDir, 'node_modules/three'),
+    },
+  },
   build: {
     target: 'es2022',
     sourcemap: true,
