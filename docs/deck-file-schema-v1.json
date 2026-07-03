@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wooddeck.dev/schema/deck-file-v1.json",
+  "title": "wooddeck .deck file — envelope v1",
+  "description": "JSON Schema (Draft 2020-12) for the wooddeck .deck v1 file format. The envelope is intentionally lenient (no additionalProperties:false at the root) so future minor releases may append optional metadata without a breaking schema bump; the design payload is strict (additionalProperties:false at every level) so unknown fields are rejected, never silently dropped. Loader logic MUST switch on `schema` and refuse any value other than 1.",
+  "type": "object",
+  "required": ["schema", "generator", "generatorVersion", "createdAt", "design"],
+  "properties": {
+    "schema": {
+      "description": "Envelope version. Frozen at 1 for the initial release; a new major format is a new schema number.",
+      "type": "integer",
+      "const": 1
+    },
+    "generator": {
+      "description": "Producing application identifier — always the literal string 'wooddeck'.",
+      "type": "string",
+      "const": "wooddeck"
+    },
+    "generatorVersion": {
+      "description": "SemVer version of the producing wooddeck build (from package.json at build time).",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "createdAt": {
+      "description": "ISO-8601 date-time at which the file was produced.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "design": { "$ref": "#/$defs/DeckDesign" }
+  },
+  "$defs": {
+    "DeckDesign": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "createdAt",
+        "footprint",
+        "joist",
+        "beam",
+        "post",
+        "decking",
+        "layout"
+      ],
+      "properties": {
+        "id": {
+          "description": "RFC 4122 v4 UUID.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "footprint": { "$ref": "#/$defs/Dimensions3D" },
+        "joist": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["material", "spacingMm"],
+          "properties": {
+            "material": { "$ref": "#/$defs/MaterialRef" },
+            "spacingMm": { "$ref": "#/$defs/Mm" }
+          }
+        },
+        "beam": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["material"],
+          "properties": { "material": { "$ref": "#/$defs/MaterialRef" } }
+        },
+        "post": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["material"],
+          "properties": { "material": { "$ref": "#/$defs/MaterialRef" } }
+        },
+        "decking": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["material", "orientation"],
+          "properties": {
+            "material": { "$ref": "#/$defs/MaterialRef" },
+            "orientation": {
+              "type": "string",
+              "enum": ["parallel-to-length", "parallel-to-width"]
+            }
+          }
+        },
+        "layout": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["bayRemainderStrategy"],
+          "properties": {
+            "bayRemainderStrategy": {
+              "type": "string",
+              "enum": ["extra-bay-at-end", "centered"]
+            }
+          }
+        }
+      }
+    },
+    "Dimensions3D": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["widthMm", "lengthMm", "heightMm"],
+      "properties": {
+        "widthMm": { "$ref": "#/$defs/Mm" },
+        "lengthMm": { "$ref": "#/$defs/Mm" },
+        "heightMm": { "$ref": "#/$defs/Mm" }
+      }
+    },
+    "MaterialRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nominal", "species", "grade"],
+      "properties": {
+        "nominal": {
+          "type": "string",
+          "enum": ["2x6", "2x8", "2x10", "2x12", "4x4", "6x6", "5/4x6"]
+        },
+        "species": { "type": "string", "enum": ["PT", "Cedar", "Composite"] },
+        "grade": { "type": "string", "enum": ["No1", "No2", "Select", "NA"] }
+      }
+    },
+    "Mm": {
+      "description": "Canonical millimeter length — finite non-negative number.",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1000000
+    }
+  }
+}

@@ -1,4 +1,7 @@
 /// <reference types="vitest/config" />
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -10,8 +13,23 @@ import react from '@vitejs/plugin-react';
 //   ensures the split points are in place when it lands.
 // - Vitest config lives here (no separate vitest.config.ts) to keep a single
 //   source of truth for tsconfig, path aliases, and env — see WD-S1 decision.
+// - `__WOODDECK_VERSION__` is a build-time constant injected via `define`
+//   so `src/persistence/deck-file/schema-v1.ts` can stamp every generated
+//   `.deck` file with the producing wooddeck version WITHOUT importing
+//   `package.json` at runtime (that would leak devDependency metadata
+//   into the client bundle). The token is declared as an ambient global
+//   in `src/persistence/deck-file/schema-v1.ts`; a `globalThis` fallback
+//   handles the (should-be-unreachable) case where the define didn't run.
+const configDir = dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(resolve(configDir, 'package.json'), 'utf-8')) as {
+  version: string;
+};
+
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __WOODDECK_VERSION__: JSON.stringify(pkg.version),
+  },
   build: {
     target: 'es2022',
     sourcemap: true,
