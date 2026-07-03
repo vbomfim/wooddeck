@@ -1,0 +1,133 @@
+/**
+ * `src/state/hooks.ts` — granular selector hooks over the two
+ * Zustand stores.
+ *
+ * ## Why granular selectors (issue #9 §9)
+ *
+ * Consumers that call `useDesignStore()` with NO selector re-render
+ * on every mutation, even ones that don't touch the slice they care
+ * about (a decking-orientation change re-renders the warnings panel,
+ * a camera preset toggle re-renders every scene component). Zustand
+ * memoizes selector-based subscriptions per-hook — one hook per
+ * READ slice keeps the re-render footprint minimal and matches the
+ * NFR §9 "granular selectors to avoid unnecessary re-renders" rule.
+ *
+ * ## Hook naming convention
+ *
+ *   - `useDesign()`         → the raw `DeckDesign` (from bundle).
+ *   - `useLayout()`         → the computed `Layout`.
+ *   - `useWarnings()`       → the span-check warnings.
+ *   - `useDesignStatus()`   → the `{ status, lastError }` tuple.
+ *   - `useUiUnits()`        → the unit-display preference.
+ *   - `useCameraPreset()`   → the current camera preset.
+ *   - `useLayerVisibility()`→ the full six-key layer map.
+ *   - `useStorageBanner()`  → the AC6/AC9 banner code (or null).
+ *
+ * The `useDesign*` / `useUi*` prefix mirrors the two-store split so
+ * a grep of a component file makes it obvious which store a hook
+ * reads from. `useLayout` and `useWarnings` are grouped under the
+ * design side (they live inside `bundle`) but shed the prefix
+ * because those two names are unambiguous — `useWarnings` from any
+ * other layer would be surprising.
+ *
+ * ## Return-value shapes
+ *
+ * `useDesignStatus` returns a single OBJECT `{ status, lastError }`
+ * rather than two separate hooks so a component that renders "error
+ * state" reads both together with ONE subscription. Zustand's
+ * default equality is referential — the store's actions always
+ * write a NEW status/lastError object even when unchanged? No: they
+ * write specific `set({ status, lastError })` payloads, so the
+ * selector picks up the changes correctly.
+ *
+ * ## Rewritability
+ *
+ * Every hook is a ONE-line arrow — the whole file is trivially
+ * rewritable from its function signatures alone. A future addition
+ * (`useDesignId`, `useLayerVisibility(name)`) drops in with no
+ * surrounding-code touch.
+ */
+
+import type { DeckDesign, Layout, Warning } from '../domain/model';
+
+import { useDesignStore } from './design-store';
+import type { CameraPreset, LayerVisibility, StorageBanner } from './ui-store';
+import { useUiStore } from './ui-store';
+
+// ---- design-store selectors ------------------------------------------------
+
+/**
+ * The canonical `DeckDesign`. This is the SKU-and-geometry-only
+ * shape S13's parameter panel reads.
+ */
+export function useDesign(): DeckDesign {
+  return useDesignStore((s) => s.bundle.design);
+}
+
+/**
+ * The computed `Layout` render contract (S10 scene reads this).
+ */
+export function useLayout(): Layout {
+  return useDesignStore((s) => s.bundle.layout);
+}
+
+/**
+ * The span-check warnings (S13 warnings panel + S10 overlays read
+ * this). Referentially stable — the store writes a new bundle on
+ * every mutation, but `bundle.warnings` is a plain array reference
+ * that changes only when the bundle changes.
+ */
+export function useWarnings(): readonly Warning[] {
+  return useDesignStore((s) => s.bundle.warnings);
+}
+
+/**
+ * The `{status, lastError}` diagnostic tuple. Grouped so error
+ * banners read both slots with ONE subscription. The returned
+ * object is CONSTRUCTED per render — consumers should destructure
+ * (`const { status } = useDesignStatus()`) rather than reference-
+ * compare across renders.
+ */
+export function useDesignStatus(): {
+  status: 'idle' | 'loading' | 'error';
+  lastError: Error | null;
+} {
+  const status = useDesignStore((s) => s.status);
+  const lastError = useDesignStore((s) => s.lastError);
+  return { status, lastError };
+}
+
+// ---- ui-store selectors ----------------------------------------------------
+
+/**
+ * The active unit-display preference. S13's parameter panel reads
+ * this to format `Mm` values via `formatLength`.
+ */
+export function useUiUnits(): 'imperial' | 'metric' {
+  return useUiStore((s) => s.units);
+}
+
+/**
+ * The active camera preset. S9's `<DeckScene>` reads this to
+ * position the camera / auto-frame.
+ */
+export function useCameraPreset(): CameraPreset {
+  return useUiStore((s) => s.cameraPreset);
+}
+
+/**
+ * The full layer-visibility map. S9 / S10 scene components read
+ * this to toggle their group visibility.
+ */
+export function useLayerVisibility(): LayerVisibility {
+  return useUiStore((s) => s.layerVisibility);
+}
+
+/**
+ * The current persistence-event banner (`null` when none). S12's
+ * banner component reads this to render one of the three codes
+ * (`'storage-full'` / `'storage-blocked'` / `'load-recompute-failed'`).
+ */
+export function useStorageBanner(): StorageBanner {
+  return useUiStore((s) => s.storageBanner);
+}

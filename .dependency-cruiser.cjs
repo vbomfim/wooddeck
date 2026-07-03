@@ -10,9 +10,21 @@
  *   domain      → only src/domain/**                 (+ external: no react/three/DOM per NFR-010)
  *   application → only src/(application|domain|persistence)/**
  *   persistence → only src/(persistence|domain)/**
- *   state       → only src/(state|application|domain)/**
+ *   state       → only src/(state|application|domain|persistence)/**
  *   scene       → only src/(scene|state|domain)/**
  *   ui          → only src/(ui|state|application|domain)/**
+ *
+ * Why state → persistence is allowed (S8): the state store needs
+ * `instanceof DeckFileError` narrowing on save failures (AC6:
+ * storage-full / storage-blocked → ui-store banner). `DeckFileError`
+ * is defined in `src/persistence/deck-file/errors.ts` and the
+ * application-layer barrel does NOT re-export it (issue #7). Rather
+ * than forge an application-layer re-export just to keep state
+ * blind to persistence, we widen the state allowlist by one entry.
+ * State code MUST still route all I/O through the application layer;
+ * the persistence edge is for TYPE / instanceof imports only. A
+ * grep-based convention keeps enforcement human — dep-cruiser
+ * accepts any persistence import.
  *
  * Note on the application → persistence edge: `application/` composes
  * domain use-cases with persistence-layer I/O (see S7 issue #8 §2).
@@ -48,7 +60,7 @@ const ALLOWED_SRC_PATHS = {
   domain: '^src/domain/',
   application: '^src/(application|domain|persistence)/',
   persistence: '^src/(persistence|domain)/',
-  state: '^src/(application|domain|state)/',
+  state: '^src/(application|domain|persistence|state)/',
   scene: '^src/(domain|scene|state)/',
   ui: '^src/(application|domain|state|ui)/',
 };

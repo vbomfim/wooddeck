@@ -1,0 +1,62 @@
+/**
+ * `src/state/index.ts` — the SINGLE public entry point for the
+ * state layer.
+ *
+ * Downstream layers (`src/scene/` — S9–S11, `src/ui/` — S12–S15)
+ * MUST import from this barrel, never from a private submodule.
+ * Enforcement:
+ *
+ *   - `.dependency-cruiser.cjs` limits `scene/` and `ui/` to
+ *     `state/` (plus their own tree + domain/ + application/) —
+ *     a direct `import '../state/design-store'` from a consumer is
+ *     technically legal to dep-cruiser but the codebase convention
+ *     is to route through this barrel so a submodule rename /
+ *     split does not break downstream imports.
+ *
+ * ## Public surface (frozen — issue #9 §2)
+ *
+ *   store   useDesignStore, useUiStore
+ *   hooks   useDesign, useLayout, useWarnings, useDesignStatus,
+ *           useUiUnits, useCameraPreset, useLayerVisibility,
+ *           useStorageBanner
+ *   types   DesignStoreState, DesignStoreActions,
+ *           UiStoreState, UiStoreActions,
+ *           CameraPreset, LayerVisibility, StorageBanner
+ *   default DEFAULT_DESIGN_PARAMS, makeDefaultDesign
+ *   constants AUTOSAVE_DEBOUNCE_MS
+ *
+ * ## Excluded surface
+ *
+ *   - `resetDesignStoreForTests` — test-only surface, kept out of
+ *     the barrel so a component that reaches for it is a red flag.
+ *     Import it directly from `./design-store` in a `.test.ts` file.
+ *   - `flushAutosaveForTests` — same rationale.
+ */
+
+// ---- stores ----------------------------------------------------------------
+export { useDesignStore, AUTOSAVE_DEBOUNCE_MS } from './design-store';
+export type { DesignStoreState, DesignStoreActions, DesignStoreShape } from './design-store';
+
+export { useUiStore } from './ui-store';
+export type {
+  CameraPreset,
+  LayerVisibility,
+  StorageBanner,
+  UiStoreActions,
+  UiStoreState,
+} from './ui-store';
+
+// ---- hooks -----------------------------------------------------------------
+export {
+  useCameraPreset,
+  useDesign,
+  useDesignStatus,
+  useLayerVisibility,
+  useLayout,
+  useStorageBanner,
+  useUiUnits,
+  useWarnings,
+} from './hooks';
+
+// ---- default-design factory ------------------------------------------------
+export { DEFAULT_DESIGN_PARAMS, makeDefaultDesign } from './default-design';

@@ -229,17 +229,44 @@ export const StubDeckScene = 'stub';
     mustNameFile: true,
   },
   {
-    label: 'BLOCK-2e: state reaches into src/persistence',
-    path: 'src/state/__selftest__/allowlist-persistence.ts',
+    // S8 issue #9 boundary rule: state/ MUST NOT import from scene/
+    // (state is view-free — no three.js, no scene graph). This
+    // fixture proves the state-allowlist rule fires when state
+    // reaches into scene.
+    label: 'BLOCK-2e: state reaches into src/scene (framework leak)',
+    path: 'src/state/__selftest__/allowlist-scene.ts',
     contents: `// self-test fixture — MUST fail lint:boundaries (allowlist)
-import { stubSave } from '../../persistence/__selftest__/target';
-export const _ = stubSave;
+import { StubDeckScene } from '../../scene/__selftest__/target';
+export const _ = StubDeckScene;
 `,
     targets: [
       {
-        path: 'src/persistence/__selftest__/target.ts',
+        path: 'src/scene/__selftest__/target.ts',
         contents: `// self-test target for BLOCK-2e — resolves the offending import
-export const stubSave = 'stub';
+export const StubDeckScene = 'stub';
+`,
+      },
+    ],
+    tool: 'depcruise',
+    expectedRule: 'state-allowlist',
+    mustNameFile: true,
+  },
+  {
+    // S8 issue #9 boundary rule: state/ MUST NOT import from ui/
+    // (state is view-free — no React components, no view helpers).
+    // This fixture proves the state-allowlist rule fires when state
+    // reaches into ui.
+    label: 'BLOCK-2k: state reaches into src/ui (view leak)',
+    path: 'src/state/__selftest__/allowlist-ui.ts',
+    contents: `// self-test fixture — MUST fail lint:boundaries (allowlist)
+import { stubUi } from '../../ui/__selftest__/target';
+export const _ = stubUi;
+`,
+    targets: [
+      {
+        path: 'src/ui/__selftest__/target.ts',
+        contents: `// self-test target for BLOCK-2k — resolves the offending import
+export const stubUi = 'stub';
 `,
       },
     ],
