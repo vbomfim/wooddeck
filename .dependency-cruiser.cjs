@@ -8,11 +8,17 @@
  *
  * Allowlist:
  *   domain      → only src/domain/**                 (+ external: no react/three/DOM per NFR-010)
- *   application → only src/(application|domain)/**
+ *   application → only src/(application|domain|persistence)/**
  *   persistence → only src/(persistence|domain)/**
  *   state       → only src/(state|application|domain)/**
  *   scene       → only src/(scene|state|domain)/**
  *   ui          → only src/(ui|state|application|domain)/**
+ *
+ * Note on the application → persistence edge: `application/` composes
+ * domain use-cases with persistence-layer I/O (see S7 issue #8 §2).
+ * Without this edge, `loadDesignFromFile` / `saveDesignToLocalStorage`
+ * could not delegate through the persistence barrel — the whole point
+ * of the application layer.
  *
  * `App.tsx` and `main.tsx` are the composition root and live OUTSIDE
  * every layer folder — so a layer that tries to reach into the root
@@ -40,7 +46,7 @@
 // for readability.
 const ALLOWED_SRC_PATHS = {
   domain: '^src/domain/',
-  application: '^src/(application|domain)/',
+  application: '^src/(application|domain|persistence)/',
   persistence: '^src/(persistence|domain)/',
   state: '^src/(application|domain|state)/',
   scene: '^src/(domain|scene|state)/',

@@ -1,0 +1,111 @@
+/**
+ * `src/application/load-design.ts` — the two "load" use-cases:
+ * `loadDesignFromFile` and `loadDesignFromLocalStorage`.
+ *
+ * ## Same file name, different responsibilities
+ *
+ * The persistence layer (`../persistence/local-storage.ts`) exports a
+ * function CALLED `loadDesignFromLocalStorage`. THIS module also
+ * exports a function called `loadDesignFromLocalStorage` — the
+ * application-layer wrapper composes:
+ *
+ *   persistence.loadDesignFromLocalStorage() : DeckDesign | null
+ *   application.loadDesignFromLocalStorage() : DesignBundle | null
+ *
+ * The application version delegates to the persistence version, then
+ * (on non-null) runs `computeLayoutAndCheck` to produce the full
+ * `DesignBundle` the S8 store consumes.
+ *
+ * To make the name collision unambiguous at read time we import the
+ * persistence function under an ALIAS
+ * (`persistenceLoadFromLocalStorage`). Every subsequent reference is
+ * unambiguous: the un-aliased identifier at the bottom is the export;
+ * every alias-prefixed call is a delegated persistence call. Same
+ * pattern will show up in `save-design.ts` (`saveDesignToLocalStorage`
+ * exists in both layers).
+ *
+ * A naive `import { loadDesignFromLocalStorage } from '../persistence'`
+ * would collide at export site, and a re-export at the barrel would
+ * silently mask one of them. Alias-plus-single-export removes the
+ * ambiguity structurally.
+ *
+ * ## Line budget
+ *
+ * Issue #8 §15 caps each USE-CASE at 40 lines. Both functions in this
+ * file are ≤ 15 lines each — well under budget. The two are grouped
+ * in one file because they share a concern ("load a design bundle")
+ * and share the same persistence-alias import.
+ *
+ * ## Error contract
+ *
+ * `loadDesignFromFile` propagates `DeckFileError` (from persistence)
+ * and `LayoutError` (from `computeLayout` via `computeLayoutAndCheck`)
+ * unchanged — the state store pattern-matches on both.
+ *
+ * `loadDesignFromLocalStorage` NEVER throws — the persistence loader
+ * already returns `null` on any parse/schema failure (its documented
+ * contract), so any null propagates straight through as a null bundle.
+ * If the loaded design nevertheless fails `computeLayout` (a design
+ * that passed the JSON Schema but is nonsensical for the layout
+ * engine — e.g. widthMm too small), the `LayoutError` is allowed to
+ * escape: this is a boot-time bug the store should surface rather
+ * than silently drop.
+ */
+
+import type { SpanTable } from '../domain/spans';
+import {
+  loadDesignFromLocalStorage as persistenceLoadFromLocalStorage,
+  readDeckFile,
+} from '../persistence';
+
+import { computeLayoutAndCheck } from './compute-layout';
+import type { DesignBundle } from './types';
+
+/**
+ * Parse + validate a `.deck` file uploaded by the user, then compute
+ * its layout and run the span-check.
+ *
+ * @param file  Untrusted `File` from a `<input type="file">` — every
+ *              validation lives in `readDeckFile` (size cap, JSON
+ *              parse, schema validation, version check).
+ * @param table `SpanTable` instance owned by the state store (the
+ *              ticket §17 Open Question resolved to option (b): pass
+ *              at every call site rather than a module singleton).
+ *
+ * @throws {DeckFileError} propagated unchanged from `readDeckFile`
+ *   (codes: `file-too-large`, `file-read-failed`, `invalid-json`,
+ *   `schema-validation-failed`, `unknown-schema`).
+ * @throws {LayoutError} propagated from `computeLayout` when the
+ *   parsed design references an unknown catalog material OR is
+ *   dimensionally invalid (issue #8 §4 Edge cases).
+ */
+export async function loadDesignFromFile(
+  file: File,
+  table: SpanTable,
+): Promise<DesignBundle> {
+  const design = await readDeckFile(file);
+  const { layout, warnings } = computeLayoutAndCheck(design, table);
+  return { design, layout, warnings };
+}
+
+/**
+ * Boot-time load of the current design from `localStorage`. Returns
+ * `null` when no valid design is stored — the state store treats this
+ * as "start with a fresh default".
+ *
+ * Does NOT catch `LayoutError`: if the stored design deserializes
+ * successfully but fails layout compute, the throw surfaces so the
+ * bug is loud rather than silently discarded (that would look like
+ * "storage lost my design"). The persistence-side load already
+ * swallows any `DeckFileError`, so `LayoutError` is the only
+ * remaining failure mode we might see here.
+ *
+ * @param table `SpanTable` instance (see `loadDesignFromFile` param
+ *   docs for why it is passed here).
+ */
+export function loadDesignFromLocalStorage(table: SpanTable): DesignBundle | null {
+  const design = persistenceLoadFromLocalStorage();
+  if (design === null) return null;
+  const { layout, warnings } = computeLayoutAndCheck(design, table);
+  return { design, layout, warnings };
+}

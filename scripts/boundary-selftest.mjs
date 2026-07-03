@@ -145,6 +145,71 @@ export const _ = App;
     mustNameFile: true,
   },
   {
+    // S7 issue #8 boundary rule: application/ MUST NOT import from
+    // state/ (that would create a circular dep because state/ imports
+    // application/). The allowlist rule fires when application/
+    // reaches into state/.
+    label: 'BLOCK-2h: application reaches into src/state (circular dep prevention)',
+    path: 'src/application/__selftest__/allowlist-state.ts',
+    contents: `// self-test fixture — MUST fail lint:boundaries (allowlist)
+import { stubStore } from '../../state/__selftest__/target';
+export const _ = stubStore;
+`,
+    targets: [
+      {
+        path: 'src/state/__selftest__/target.ts',
+        contents: `// self-test target for BLOCK-2h — resolves the offending import
+export const stubStore = 'stub';
+`,
+      },
+    ],
+    tool: 'depcruise',
+    expectedRule: 'application-allowlist',
+    mustNameFile: true,
+  },
+  {
+    // S7 issue #8 boundary rule: application/ MUST NOT import from
+    // scene/ (application is I/O-free orchestration, no three.js).
+    label: 'BLOCK-2i: application reaches into src/scene (framework leak)',
+    path: 'src/application/__selftest__/allowlist-scene.ts',
+    contents: `// self-test fixture — MUST fail lint:boundaries (allowlist)
+import { StubDeckScene } from '../../scene/__selftest__/target';
+export const _ = StubDeckScene;
+`,
+    targets: [
+      {
+        path: 'src/scene/__selftest__/target.ts',
+        contents: `// self-test target for BLOCK-2i — resolves the offending import
+export const StubDeckScene = 'stub';
+`,
+      },
+    ],
+    tool: 'depcruise',
+    expectedRule: 'application-allowlist',
+    mustNameFile: true,
+  },
+  {
+    // S7 issue #8 boundary rule: application/ MUST NOT import from
+    // ui/ (application is view-free orchestration, no React).
+    label: 'BLOCK-2j: application reaches into src/ui (view leak)',
+    path: 'src/application/__selftest__/allowlist-ui.ts',
+    contents: `// self-test fixture — MUST fail lint:boundaries (allowlist)
+import { stubUi } from '../../ui/__selftest__/target';
+export const _ = stubUi;
+`,
+    targets: [
+      {
+        path: 'src/ui/__selftest__/target.ts',
+        contents: `// self-test target for BLOCK-2j — resolves the offending import
+export const stubUi = 'stub';
+`,
+      },
+    ],
+    tool: 'depcruise',
+    expectedRule: 'application-allowlist',
+    mustNameFile: true,
+  },
+  {
     label: 'BLOCK-2d: ui reaches into src/scene',
     path: 'src/ui/__selftest__/allowlist-scene.ts',
     contents: `// self-test fixture — MUST fail lint:boundaries (allowlist)
