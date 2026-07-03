@@ -44,6 +44,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   AUTOFIT_MARGIN,
+  CAMERA_FAR_MM,
+  CAMERA_NEAR_MM,
   DEFAULT_FOV_DEG,
   PRESET_TRANSITION_MS,
   TOP_DOWN_FOV_DEG,
@@ -104,6 +106,54 @@ describe('camera-presets constants', () => {
     // interpolation timer.
     expect(PRESET_TRANSITION_MS).toBeGreaterThan(0);
     expect(PRESET_TRANSITION_MS).toBeLessThanOrEqual(500);
+  });
+
+  // ------------------------------------------------------------------
+  // PR#29 pair-fix iter 1 — Fix A. Canvas near/far clipping constants.
+  //
+  // r3f's default camera near=0.1 / far=1000 mm-clips the entire deck
+  // (preset distances range from ~2 700 mm for a tiny deck up to
+  // ~113 600 mm for a 40×40 ft deck's top preset). DeckScene MUST
+  // override these with wooddeck-scale values so geometry from S10
+  // renders at all. Exporting a single constant per plane means the
+  // Canvas prop and the invariant test below can never drift.
+  // ------------------------------------------------------------------
+
+  it('AC1: CAMERA_NEAR_MM is small enough for tight orbit without z-fighting the deck', () => {
+    // Needs to be << minDistance for the smallest deck. Tiny deck
+    // minDistance = 900 / 2 = 450 mm; CAMERA_NEAR_MM must sit well
+    // below that so an orbit that dollies to the min doesn't clip
+    // near-plane. 10 mm gives ~45× headroom.
+    expect(CAMERA_NEAR_MM).toBeGreaterThan(0);
+    expect(CAMERA_NEAR_MM).toBeLessThan(50);
+  });
+
+  it('AC1: CAMERA_FAR_MM covers the worst-case top-preset distance for a 40×40 ft deck', () => {
+    // Ticket §9 worst case = 40 ft × 40 ft × 4 ft deck. The top
+    // preset uses the narrow FOV, which pushes the auto-fit distance
+    // out furthest. The far plane must accommodate that distance
+    // AND the extra bounding-sphere radius (the deck extends BEYOND
+    // the target on the far side of the camera's viewing frustum).
+    const worstCaseBounds: BoundsMm = { widthMm: 12192, lengthMm: 12192, heightMm: 1219 };
+    const topDist = computeAutoFitDistance(worstCaseBounds, TOP_DOWN_FOV_DEG);
+    const sphereRadius =
+      Math.sqrt(
+        worstCaseBounds.widthMm ** 2 +
+          worstCaseBounds.lengthMm ** 2 +
+          worstCaseBounds.heightMm ** 2,
+      ) / 2;
+    // Camera-to-far-edge distance = distance + sphereRadius. Far
+    // plane must exceed this with margin.
+    expect(CAMERA_FAR_MM).toBeGreaterThan(topDist + sphereRadius);
+  });
+
+  it('AC1: CAMERA_FAR_MM keeps depth-buffer precision (log2(far/near) < 20 bits)', () => {
+    // A 24-bit depth buffer can distinguish ~2^24 depth samples.
+    // At log2(CAMERA_FAR_MM / CAMERA_NEAR_MM) bits of precision cost,
+    // we want to stay well under 24 to avoid z-fighting between
+    // adjacent joists / decking. log2(500 000 / 10) ≈ 15.6 bits.
+    const bits = Math.log2(CAMERA_FAR_MM / CAMERA_NEAR_MM);
+    expect(bits).toBeLessThan(20);
   });
 });
 
@@ -170,6 +220,73 @@ describe('computeAutoFitDistance', () => {
     expect(d).toBeGreaterThan(0);
     expect(Number.isFinite(d)).toBe(true);
   });
+
+  // PR#29 pair-fix iter 1 — Fix I (QA G4). The auto-fit distance MUST
+  // put the camera FARTHER from the target than the bounding sphere's
+  // radius, else the camera sits INSIDE the deck. This is an obvious
+  // sanity check that was never asserted before.
+  it.each([
+    ['tiny', TINY_BOUNDS],
+    ['reference', REFERENCE_BOUNDS],
+    ['large', LARGE_BOUNDS],
+  ] as const)(
+    'AC4 invariant: %s bounds — auto-fit distance >= bounding-sphere radius (camera outside deck)',
+    (_label, b) => {
+      const radius = Math.sqrt(b.widthMm ** 2 + b.lengthMm ** 2 + b.heightMm ** 2) / 2;
+      // Default FOV
+      expect(computeAutoFitDistance(b)).toBeGreaterThanOrEqual(radius);
+      // Top preset narrow FOV — even more distance required
+      expect(computeAutoFitDistance(b, TOP_DOWN_FOV_DEG)).toBeGreaterThanOrEqual(radius);
+    },
+  );
+
+  // PR#29 pair-fix iter 1 — Fix I (QA G5). The auto-fit pose must
+  // not dolly the camera INSIDE the OrbitControls minDistance floor
+  // — otherwise OrbitControls would push the camera back on user
+  // interaction, breaking the fit-margin promise.
+  it.each([
+    ['tiny', TINY_BOUNDS],
+    ['reference', REFERENCE_BOUNDS],
+    ['large', LARGE_BOUNDS],
+  ] as const)(
+    'AC4 invariant: %s bounds — auto-fit distance >= zoom minDistance',
+    (_label, b) => {
+      const { minDistance } = computeZoomLimits(b);
+      expect(computeAutoFitDistance(b)).toBeGreaterThanOrEqual(minDistance);
+    },
+  );
+
+  // PR#29 pair-fix iter 1 — Fix M (QA G6). A partial-zero bounds
+  // (one dim = 0, others real) must ONLY floor the zero dim, not
+  // over-clamp the real dims.
+  it('Partial-zero bounds: only the zero dimension is floored, real dims pass through', () => {
+    // widthMm=0 (degenerate), lengthMm=6000, heightMm=900 (real).
+    // Result should be dominated by the 6000 mm length, not the
+    // 1000 mm floor.
+    const partial: BoundsMm = { widthMm: 0, lengthMm: 6000, heightMm: 900 };
+    const full: BoundsMm = { widthMm: 6000, lengthMm: 6000, heightMm: 900 };
+    // Distance for `partial` is smaller (only the length + height
+    // dominate the sphere radius, so the smaller sphere → smaller
+    // distance) but MUST be finite and positive.
+    const dPartial = computeAutoFitDistance(partial);
+    const dFull = computeAutoFitDistance(full);
+    expect(dPartial).toBeGreaterThan(0);
+    expect(Number.isFinite(dPartial)).toBe(true);
+    expect(dPartial).toBeLessThan(dFull);
+  });
+
+  // PR#29 pair-fix iter 1 — Fix M (QA G7). Negative dimensions
+  // (garbage input from a corrupt bundle) must be treated as the
+  // degenerate zero case, NOT propagated into NaN / Infinity.
+  it('Negative bounds: treated as zero-degenerate (floored), never NaN', () => {
+    const negative: BoundsMm = { widthMm: -1000, lengthMm: -6000, heightMm: -900 };
+    const d = computeAutoFitDistance(negative);
+    expect(d).toBeGreaterThan(0);
+    expect(Number.isFinite(d)).toBe(true);
+    // Same result as all-zero (both are floored identically).
+    const zero: BoundsMm = { widthMm: 0, lengthMm: 0, heightMm: 0 };
+    expect(d).toBeCloseTo(computeAutoFitDistance(zero), 6);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -187,15 +304,39 @@ describe('computeZoomLimits', () => {
     expect(minDistance).toBeCloseTo(smallest / 2, EPS);
   });
 
-  it('AC3: maxDistance = 5 × largest deck dimension', () => {
+  it('AC3: maxDistance is AT LEAST 5 × largest deck dimension', () => {
+    // Was: `== 5 × largest`. PR#29 pair-fix iter 1 — Fix B: this
+    // clamp cropped the top preset for the reference (20×30 ft) deck
+    // and larger, because top-preset auto-fit distance at the narrow
+    // FOV exceeds 5 × largest. The invariant is now RELAXED to a
+    // lower bound; the exact value is the max of the AC3 formula and
+    // the top-preset fit distance (see next test).
     const { maxDistance } = computeZoomLimits(REFERENCE_BOUNDS);
     const largest = Math.max(
       REFERENCE_BOUNDS.widthMm,
       REFERENCE_BOUNDS.lengthMm,
       REFERENCE_BOUNDS.heightMm,
     );
-    expect(maxDistance).toBeCloseTo(largest * 5, EPS);
+    expect(maxDistance).toBeGreaterThanOrEqual(largest * 5);
   });
+
+  // PR#29 pair-fix iter 1 — Fix B. THE invariant that closes the
+  // clipping bug: for every deck size, the top preset's auto-fit
+  // distance MUST fit within maxDistance (otherwise OrbitControls
+  // would clamp the camera closer than the fit distance and crop
+  // the top view). Assert across the three canonical size fixtures.
+  it.each([
+    ['tiny', TINY_BOUNDS],
+    ['reference', REFERENCE_BOUNDS],
+    ['large', LARGE_BOUNDS],
+  ] as const)(
+    'AC2/AC4 invariant: %s bounds — top preset distance <= maxDistance (OrbitControls does NOT clamp the top view)',
+    (_label, b) => {
+      const topDist = computeAutoFitDistance(b, TOP_DOWN_FOV_DEG);
+      const { maxDistance } = computeZoomLimits(b);
+      expect(topDist).toBeLessThanOrEqual(maxDistance);
+    },
+  );
 
   it('always returns minDistance < maxDistance (invariant for OrbitControls)', () => {
     for (const b of [TINY_BOUNDS, REFERENCE_BOUNDS, LARGE_BOUNDS]) {

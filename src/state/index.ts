@@ -16,9 +16,9 @@
  * ## Public surface (frozen — issue #9 §2)
  *
  *   store   useDesignStore, useUiStore
- *   hooks   useDesign, useLayout, useWarnings, useDesignStatus,
- *           useUiUnits, useCameraPreset, useLayerVisibility,
- *           useStorageBanner
+ *   hooks   useDesign, useLayout, useLayoutBounds, useWarnings,
+ *           useDesignStatus, useUiUnits, useCameraPreset,
+ *           useLayerVisibility, useStorageBanner
  *   types   DesignStoreState, DesignStoreActions,
  *           UiStoreState, UiStoreActions,
  *           CameraPreset, LayerVisibility, StorageBanner
@@ -53,6 +53,7 @@ export {
   useDesignStatus,
   useLayerVisibility,
   useLayout,
+  useLayoutBounds,
   useStorageBanner,
   useUiUnits,
   useWarnings,

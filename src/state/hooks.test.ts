@@ -29,6 +29,7 @@ import {
   useDesignStatus,
   useLayerVisibility,
   useLayout,
+  useLayoutBounds,
   useStorageBanner,
   useUiUnits,
   useWarnings,
@@ -82,6 +83,52 @@ describe('useLayout()', () => {
     expect(result.current.designId).toBe(FIXED_ID);
     // But the bounds now reflect the widened footprint.
     expect(result.current.bounds.widthMm).toBe(4100);
+  });
+});
+
+// PR#29 pair-fix iter 1 — Fix G. DeckScene needs a granular hook
+// that reads ONLY the layout.bounds slice — not the whole layout —
+// so a warnings-only mutation (which recomputes the layout object
+// but leaves bounds numerically unchanged) does NOT re-render the
+// scene shell. Zustand's default equality is referential; the
+// design store writes a NEW bundle on every mutation, so we rely on
+// the store using stable references for the bounds slice OR the
+// consumer opting into shallow equality. This hook simply reads the
+// slice and the S9 CameraRig useMemo does the numeric-value dep
+// pinning downstream (Fix F).
+describe('useLayoutBounds()', () => {
+  it('returns the current bounds object with the initial-design dimensions', () => {
+    const { result } = renderHook(() => useLayoutBounds());
+    expect(result.current).toBeDefined();
+    expect(typeof result.current.widthMm).toBe('number');
+    expect(typeof result.current.lengthMm).toBe('number');
+    expect(typeof result.current.heightMm).toBe('number');
+  });
+
+  it('re-renders when the footprint changes (bounds slice update)', () => {
+    const { result } = renderHook(() => useLayoutBounds());
+    const initialWidth = result.current.widthMm;
+    act(() => {
+      useDesignStore.getState().applyParameters({
+        footprint: { widthMm: initialWidth + 500 },
+      });
+    });
+    expect(result.current.widthMm).toBe(initialWidth + 500);
+  });
+
+  it('DOES NOT re-render when only ui-store mutates (cross-store granularity)', () => {
+    let renderCount = 0;
+    const { result } = renderHook(() => {
+      renderCount += 1;
+      return useLayoutBounds();
+    });
+    const baseline = renderCount;
+    expect(result.current).toBeDefined();
+    act(() => {
+      useUiStore.getState().setCameraPreset('top');
+      useUiStore.getState().setUnits('metric');
+    });
+    expect(renderCount).toBe(baseline);
   });
 });
 

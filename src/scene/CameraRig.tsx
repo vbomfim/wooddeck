@@ -8,9 +8,11 @@
  *   - Applies the initial auto-fit pose on mount / bounds change (AC4).
  *   - Mounts drei's `<OrbitControls>` so the user gets free
  *     orbit / zoom / pan (AC3).
- *   - Interpolates the camera position + target + FOV smoothly to
- *     the pose the current `preset` prop requests (AC2), completing
- *     within `PRESET_TRANSITION_MS` (≤ 500 ms).
+ *   - Interpolates the camera position + target + FOV + UP vector
+ *     smoothly to the pose the current `preset` prop requests
+ *     (AC2), completing within `PRESET_TRANSITION_MS` (≤ 500 ms).
+ *   - Disables `<OrbitControls>` for the duration of a preset lerp
+ *     so user input does not race the animation (§4 edge case).
  *
  * It owns NO geometry, NO lighting, NO layer visibility. Those live
  * outside the rig so the whole file stays rewritable from its props
@@ -33,6 +35,35 @@
  * We keep the transition state in a `useRef` object; React never
  * re-renders during a preset lerp.
  *
+ * ## Up-vector nlerp (PR#29 pair-fix iter 1 — Fix D)
+ *
+ * Snapping `up` to the destination at t=0 broke top↔front and
+ * top↔side transitions: the initial camera position (still at the
+ * source pose) combined with the destination `up` produces a
+ * degenerate `lookAt` (view direction parallel to up), which
+ * yields a NaN camera matrix for one frame. The fix normalised-
+ * linear-interpolates (nlerp) the up vector between `from.up`
+ * and `to.up`. All wooddeck presets use orthogonal or identical
+ * ups so nlerp is safe (it fails only on anti-parallel vectors —
+ * we don't have those).
+ *
+ * ## useMemo bounds identity (PR#29 pair-fix iter 1 — Fix F)
+ *
+ * The store returns a NEW `bounds` OBJECT on every layout recompute
+ * even when the numeric values are unchanged (e.g. the user
+ * toggles decking orientation). Depending on the object REFERENCE
+ * in `useMemo` would schedule a pointless 500 ms lerp per edit.
+ * The fix depends on the numeric VALUES so a same-numeric bounds
+ * update is a no-op.
+ *
+ * ## Controls disabled during transition (PR#29 pair-fix iter 1 — Fix E)
+ *
+ * Ticket §4 edge case: "Preset change during ongoing orbit →
+ * cancel the orbit gesture; complete the preset transition." We
+ * flip `controls.enabled = false` at transition start and back to
+ * `true` at completion (also on unmount). Two writers on
+ * `camera.position` / `.target` would otherwise race.
+ *
  * ## Pure math vs r3f-touching code
  *
  * Every numerical claim about WHERE the camera sits (positions,
@@ -45,15 +76,12 @@
  *
  * Every `[x, y, z]` tuple this file accepts / emits is in the same
  * world frame as `src/domain/model.ts` §"LAYOUT COORDINATE FRAME":
- * +x width, +y up, +z length, origin ground-level centre. The rig
- * relies on that contract to place the camera; violating it in the
- * layout engine would show up as an inverted preset (e.g., top view
- * looking UP instead of down).
+ * +x width, +y up, +z length, origin ground-level centre.
  */
 import { useEffect, useMemo, useRef, type JSX } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
-import { MathUtils, PerspectiveCamera as ThreePerspectiveCamera, Vector3 } from 'three';
+import { MathUtils, PerspectiveCamera as ThreePerspectiveCamera } from 'three';
 import type { Camera } from 'three';
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 
@@ -75,13 +103,25 @@ export interface CameraRigProps {
 }
 
 /**
- * Per-transition scratch: holds the animation start-time, start
+ * Per-transition scratch: holds the elapsed animation time, start
  * pose, and target pose. `null` when no transition is active.
  * Kept in a ref so `useFrame` mutations never trigger a React
  * re-render.
+ *
+ * ## Why `elapsedMs` accumulates from `useFrame`'s delta
+ *
+ * The natural choice would be `startMs = performance.now()` +
+ * `elapsed = now - startMs`. That works in real browsers but
+ * `performance.now()` does NOT advance with r3f test-renderer's
+ * `advanceFrames(count, deltaMs)`, which drives a SIMULATED clock.
+ * Accumulating the useFrame `delta` argument (per-tick simulated
+ * seconds) makes the lerp progress deterministically in tests AND
+ * frame-rate-adapt in production — a 30 FPS frame reports twice
+ * the delta of a 60 FPS frame, so a slower machine still completes
+ * the animation in ~500 ms of wall clock.
  */
 interface TransitionState {
-  readonly startMs: number;
+  elapsedMs: number;
   readonly durationMs: number;
   readonly from: CameraPose;
   readonly to: CameraPose;
@@ -98,19 +138,6 @@ function easeInOut(t: number): number {
 }
 
 /**
- * Linear interpolation on a 3-tuple. Kept local (not exported from
- * camera-presets) because it's a tiny helper and camera-presets
- * intentionally exports POSES, not lerp primitives.
- */
-function lerpTuple(
-  a: readonly [number, number, number],
-  b: readonly [number, number, number],
-  t: number,
-): [number, number, number] {
-  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-}
-
-/**
  * `<CameraRig>` — see module header for behaviour. Mounts once per
  * `<DeckScene>` mount; internally re-computes poses on prop change.
  */
@@ -121,15 +148,23 @@ export function CameraRig({ preset, bounds }: CameraRigProps): JSX.Element {
   const camera = useThree((state) => state.camera);
   const controlsRef = useRef<OrbitControlsImpl | null>(null);
 
-  // Compute the target pose for the current (preset, bounds) pair.
-  // Memoised so the useEffect below only triggers a NEW transition
-  // when the pose actually changes (a bounds update that leaves the
-  // preset pose numerically identical is a no-op).
-  const targetPose = useMemo(() => computePresetCamera(preset, bounds), [preset, bounds]);
+  // Fix F: depend on the numeric VALUES, not the object identity.
+  // The store issues a NEW `bounds` object on every layout recompute
+  // even when the numbers are unchanged (e.g. after a decking-
+  // orientation toggle) — an identity-based dep would schedule a
+  // pointless 500 ms lerp every edit.
+  const { widthMm, lengthMm, heightMm } = bounds;
+  const targetPose = useMemo(
+    () => computePresetCamera(preset, { widthMm, lengthMm, heightMm }),
+    [preset, widthMm, lengthMm, heightMm],
+  );
 
   // AC3: zoom limits — derived from bounds so the orbit range scales
-  // with deck size.
-  const { minDistance, maxDistance } = useMemo(() => computeZoomLimits(bounds), [bounds]);
+  // with deck size. Same numeric-value dep as above (Fix F).
+  const { minDistance, maxDistance } = useMemo(
+    () => computeZoomLimits({ widthMm, lengthMm, heightMm }),
+    [widthMm, lengthMm, heightMm],
+  );
 
   // Transition scratch — see comment on TransitionState. `null`
   // when no transition is active; useEffect below fills it in on
@@ -144,44 +179,114 @@ export function CameraRig({ preset, bounds }: CameraRigProps): JSX.Element {
   useEffect(() => {
     if (!initializedRef.current) {
       applyPose(camera, targetPose);
-      controlsRef.current?.target.set(...targetPose.target);
-      controlsRef.current?.update();
+      if (controlsRef.current) {
+        controlsRef.current.target.set(...targetPose.target);
+        controlsRef.current.update();
+      }
       initializedRef.current = true;
       return;
     }
-    // Subsequent (preset OR bounds) change → start a lerp from the
-    // camera's CURRENT pose to the new target pose.
+    // Subsequent (preset OR numeric-value bounds) change → start a
+    // lerp from the camera's CURRENT pose to the new target pose.
     const from: CameraPose = readCurrentPose(camera, controlsRef.current);
     transitionRef.current = {
-      startMs: performance.now(),
+      elapsedMs: 0,
       durationMs: PRESET_TRANSITION_MS,
       from,
       to: targetPose,
     };
+    // Fix E: disable user input for the duration of the animation
+    // so OrbitControls' drag / zoom handlers don't race the useFrame
+    // lerp writing to the same camera state.
+    if (controlsRef.current) {
+      controlsRef.current.enabled = false;
+    }
   }, [camera, targetPose]);
 
+  // Fix E: on unmount, re-enable controls (defensive — if the rig
+  // unmounts mid-transition, leaving `controls.enabled = false`
+  // would strand a NEW rig with disabled controls if it were
+  // mounted around the same time).
+  useEffect(() => {
+    const controls = controlsRef.current;
+    return () => {
+      if (controls) {
+        controls.enabled = true;
+      }
+    };
+  }, []);
+
   // Drive the lerp on every frame while a transition is active.
-  useFrame(() => {
+  // Zero per-frame allocation: no new Vector3 / Array / Object.
+  // `delta` is the SIMULATED frame delta in seconds (advances via
+  // `renderer.advanceFrames(count, dtMs)` in tests, real wall
+  // clock in production) — accumulating it into `tx.elapsedMs`
+  // gives us deterministic progress in tests without a real timer.
+  useFrame((_state, delta) => {
     const tx = transitionRef.current;
     if (!tx) return;
-    const elapsed = performance.now() - tx.startMs;
-    const t = Math.min(1, elapsed / tx.durationMs);
+    tx.elapsedMs += delta * 1000;
+    const t = Math.min(1, tx.elapsedMs / tx.durationMs);
     const eased = easeInOut(t);
 
-    const pose: CameraPose = {
-      position: lerpTuple(tx.from.position, tx.to.position, eased),
-      target: lerpTuple(tx.from.target, tx.to.target, eased),
-      up: tx.to.up, // up vector doesn't lerp cleanly — snap on start
-      fovDeg: tx.from.fovDeg + (tx.to.fovDeg - tx.from.fovDeg) * eased,
-    };
-    applyPose(camera, pose);
+    // Position lerp — write directly to the camera without allocating.
+    const px = tx.from.position[0] + (tx.to.position[0] - tx.from.position[0]) * eased;
+    const py = tx.from.position[1] + (tx.to.position[1] - tx.from.position[1]) * eased;
+    const pz = tx.from.position[2] + (tx.to.position[2] - tx.from.position[2]) * eased;
+
+    // Target lerp — used for lookAt AND for the controls target.
+    const tgx = tx.from.target[0] + (tx.to.target[0] - tx.from.target[0]) * eased;
+    const tgy = tx.from.target[1] + (tx.to.target[1] - tx.from.target[1]) * eased;
+    const tgz = tx.from.target[2] + (tx.to.target[2] - tx.from.target[2]) * eased;
+
+    // Fix D: nlerp the up vector (normalised linear interpolation).
+    // Snapping to `to.up` at t=0 broke top↔front / top↔side
+    // transitions because the source-pose camera + destination-up
+    // produced a near-degenerate lookAt. nlerp is safe here because
+    // every wooddeck preset up is orthogonal or identical to every
+    // other — nlerp fails only on ANTI-parallel vectors.
+    let ux = tx.from.up[0] + (tx.to.up[0] - tx.from.up[0]) * eased;
+    let uy = tx.from.up[1] + (tx.to.up[1] - tx.from.up[1]) * eased;
+    let uz = tx.from.up[2] + (tx.to.up[2] - tx.from.up[2]) * eased;
+    const upLen = Math.hypot(ux, uy, uz);
+    if (upLen < 1e-6) {
+      // Anti-parallel or degenerate — snap to destination.
+      ux = tx.to.up[0];
+      uy = tx.to.up[1];
+      uz = tx.to.up[2];
+    } else {
+      ux /= upLen;
+      uy /= upLen;
+      uz /= upLen;
+    }
+
+    // FOV lerp — perspective cameras only.
+    const fovDeg = tx.from.fovDeg + (tx.to.fovDeg - tx.from.fovDeg) * eased;
+
+    // Apply, in order: up (before lookAt so the view is oriented
+    // correctly), position, lookAt, then FOV update.
+    camera.up.set(ux, uy, uz);
+    camera.position.set(px, py, pz);
+    // `Camera.lookAt(x, y, z)` accepts numbers — no Vector3
+    // allocation.
+    camera.lookAt(tgx, tgy, tgz);
+    if (camera instanceof ThreePerspectiveCamera) {
+      camera.fov = fovDeg;
+      camera.updateProjectionMatrix();
+    }
     if (controlsRef.current) {
-      controlsRef.current.target.set(...pose.target);
+      controlsRef.current.target.set(tgx, tgy, tgz);
       controlsRef.current.update();
     }
 
     if (t >= 1) {
       transitionRef.current = null;
+      // Fix E: re-enable user input now that the animation
+      // completed. If controls unmounted mid-transition the
+      // useEffect cleanup above has already handled it.
+      if (controlsRef.current) {
+        controlsRef.current.enabled = true;
+      }
     }
   });
 
@@ -191,6 +296,8 @@ export function CameraRig({ preset, bounds }: CameraRigProps): JSX.Element {
       // makeDefault registers this as the primary controls instance
       // so any drei helper that needs the "active controls" (e.g.,
       // future TransformControls in the parameter panel) finds it.
+      // Also puts the impl on `state.controls` for downstream
+      // consumers via useThree(s => s.controls).
       makeDefault
       // AC3: dolly / zoom range derived from bounds.
       minDistance={minDistance}
@@ -213,12 +320,14 @@ export function CameraRig({ preset, bounds }: CameraRigProps): JSX.Element {
 /**
  * Mutate the r3f-managed camera to match a {@link CameraPose}.
  * Handles the perspective-camera-specific FOV update and asks
- * three.js to recompute its projection matrix.
+ * three.js to recompute its projection matrix. Called ONCE per
+ * bounds / preset change from `useEffect`; the per-frame lerp
+ * body applies its interpolated pose inline (no allocation).
  */
 function applyPose(camera: Camera, pose: CameraPose): void {
-  camera.position.set(...pose.position);
   camera.up.set(...pose.up);
-  camera.lookAt(new Vector3(...pose.target));
+  camera.position.set(...pose.position);
+  camera.lookAt(pose.target[0], pose.target[1], pose.target[2]);
   if (camera instanceof ThreePerspectiveCamera) {
     // Only PerspectiveCamera has `.fov`; guarding keeps a future
     // Ortho-camera swap from crashing here.

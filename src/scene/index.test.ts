@@ -37,5 +37,17 @@ describe('scene barrel', () => {
     expect(typeof scene.DEFAULT_FOV_DEG).toBe('number');
     expect(typeof scene.TOP_DOWN_FOV_DEG).toBe('number');
     expect(typeof scene.PRESET_TRANSITION_MS).toBe('number');
+    // PR#29 pair-fix iter 1 — Fix A. Near / far plane constants
+    // must be exported so DeckScene passes them to Canvas and tests
+    // can lock the values.
+    expect(typeof scene.CAMERA_NEAR_MM).toBe('number');
+    expect(typeof scene.CAMERA_FAR_MM).toBe('number');
+  });
+
+  it('exports installContextLossHandler (Fix H)', () => {
+    // PR#29 pair-fix iter 1 — Fix H. The GL context-loss listener
+    // is extracted so it's testable in jsdom AND consumable by S12's
+    // banner surfacing story.
+    expect(typeof scene.installContextLossHandler).toBe('function');
   });
 });

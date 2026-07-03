@@ -13,18 +13,27 @@
  *                             We can't actually MOUNT the r3f Canvas
  *                             in jsdom (no GL), so we mock the r3f
  *                             `<Canvas>` export to a wrapping DOM
- *                             element that carries the same aria-label
- *                             and `className`, then assert the
- *                             wrapper element. Real Canvas mounts +
- *                             pixel diffs are QA E2E scope (S9 §18).
+ *                             element AND stub `<CameraRig>` +
+ *                             `<SceneLighting>` (both need the r3f
+ *                             context we've replaced). That lets the
+ *                             mock render the OTHER children — the
+ *                             S10 layer-mount-point slot the
+ *                             composition-root user passes in — so
+ *                             a regression that DROPS `{children}`
+ *                             from the Canvas is caught here (K).
  *
  * ## Coverage map
  *
- *   AC1 canvas element is present + has aria-label (fallback + real)
- *   AC5 WebGL fallback message when the detector returns false
- *   AC10 aria-label copy matches the ticket §10 pinned wording
+ *   AC1  canvas element is present + has aria-label (fallback + real)
+ *   AC5  WebGL fallback message when the detector returns false
+ *   AC10 aria-label copy matches the pinned wording (updated per
+ *        PR#29 pair-fix iter 1 — Fix J to be HONEST about the
+ *        interactions the rig actually supports)
+ *   K    passed-in children are forwarded to the Canvas mount point
+ *   G    routes state through granular hooks (mocking useUiStore
+ *        directly is fine — the hooks re-export those under the hood)
  */
-import { describe, expect, it, vi, afterEach } from 'vitest';
+import { describe, expect, it, vi, afterEach, beforeAll, afterAll } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 
 import { DECKSCENE_ARIA_LABEL } from './DeckScene';
@@ -35,9 +44,16 @@ import { WEBGL_FALLBACK_MESSAGE } from './WebGLFallback';
 // r3f's real <Canvas> creates a DOM <canvas> and calls WebGLRenderer,
 // which throws in jsdom (no GL implementation). Replacing it with a
 // plain DOM stub lets us assert the DeckScene's OUTER shape — the
-// aria-label, the class name, the fallback branching — without paying
-// the price of a real Canvas mount. drei's OrbitControls and any
-// three-only children the rig mounts are inert under this stub.
+// aria-label, the class name, the fallback branching, AND the S10
+// layer-mount-point children forwarding — without paying the price
+// of a real Canvas mount.
+//
+// PR#29 pair-fix iter 1 — Fix K: the Canvas mock now RENDERS
+// `{children}` (was `{null}`) so a regression that drops the layer
+// slot forwarding is caught by the "forwards children" test below.
+// The scene-internal children (SceneLighting + CameraRig) are
+// SEPARATELY mocked to `() => null` so they don't try to consume
+// the (missing) r3f context.
 vi.mock('@react-three/fiber', async () => {
   const actual = await vi.importActual<typeof import('@react-three/fiber')>('@react-three/fiber');
   return {
@@ -52,15 +68,23 @@ vi.mock('@react-three/fiber', async () => {
       'aria-label'?: string;
     }) => (
       <div data-testid="canvas-mock" className={className} aria-label={ariaLabel} role="img">
-        {/* Children (lighting, camera rig, layer mount point) are not
-            rendered here — they need the real r3f context. Structural
-            assertions for those subtrees live in their own
-            test-renderer tests (lighting.test.tsx, CameraRig.test.tsx). */}
-        {typeof children === 'function' ? null : null}
+        {children}
       </div>
     ),
   };
 });
+
+// CameraRig + SceneLighting call useThree() / useFrame(), which need
+// the r3f reconciler context we've replaced above. Stubbing them out
+// keeps DeckScene tests focused on composition + user-children slot;
+// the scene-graph structure of the rig / lighting is tested in
+// CameraRig.test.tsx / lighting.test.tsx.
+vi.mock('./CameraRig', () => ({
+  CameraRig: () => null,
+}));
+vi.mock('./lighting', () => ({
+  SceneLighting: () => null,
+}));
 
 // WebGL detection is toggled per-test via vi.mocked below.
 vi.mock('./webgl-support', () => ({
@@ -95,11 +119,43 @@ describe('<DeckScene /> — WebGL 2 supported path', () => {
     expect(canvas).toHaveAttribute('aria-label', DECKSCENE_ARIA_LABEL);
   });
 
+  it('AC10 (Fix J): aria-label mentions ONLY interactions actually implemented (no keyboard-orbit promise)', () => {
+    // GPT review flagged: the original ticket §10 copy promised
+    // "use arrow keys or WASD to orbit, +/- to zoom" but the rig
+    // does not implement keyboard orbit. Accessibility copy must
+    // not promise controls that don't exist. The pinned constant
+    // now mentions ONLY the interactions the code actually supports.
+    expect(DECKSCENE_ARIA_LABEL).not.toMatch(/arrow keys/i);
+    expect(DECKSCENE_ARIA_LABEL).not.toMatch(/wasd/i);
+    // AND it explicitly names the ACTUAL interactions — drag orbit,
+    // scroll zoom, preset buttons — so screen-reader users learn how
+    // to use what does work.
+    expect(DECKSCENE_ARIA_LABEL).toMatch(/drag/i);
+    expect(DECKSCENE_ARIA_LABEL).toMatch(/scroll/i);
+  });
+
   it('forwards a `className` prop to the Canvas element', () => {
     // The AppShell (S12) will position the scene via a CSS layout
     // class — DeckScene must not hard-code its own visual container.
     render(<DeckScene className="deck-viewport" />);
     expect(screen.getByTestId('canvas-mock')).toHaveClass('deck-viewport');
+  });
+
+  // PR#29 pair-fix iter 1 — Fix K. The S10 layer components will
+  // mount as children of `<DeckScene>` via the `children` slot. If
+  // the Canvas forwarding regresses (e.g., a maintainer accidentally
+  // removes `{children}` from inside the Canvas JSX), S10's whole
+  // deck geometry disappears silently. This test locks the contract.
+  it('Fix K: forwards `children` into the Canvas mount point (S10 layer slot)', () => {
+    render(
+      <DeckScene>
+        <div data-testid="layer-a">joists</div>
+        <div data-testid="layer-b">decking</div>
+      </DeckScene>,
+    );
+    const canvas = screen.getByTestId('canvas-mock');
+    expect(canvas).toContainElement(screen.getByTestId('layer-a'));
+    expect(canvas).toContainElement(screen.getByTestId('layer-b'));
   });
 });
 
@@ -135,4 +191,21 @@ describe('DeckScene module surface (lazy-import contract)', () => {
     const mod = await import('./DeckScene');
     expect(mod.default).toBe(DeckScene);
   });
+});
+
+// Silence known-noise "unrecognized in this browser" warnings that
+// React emits when the mocked <Canvas> would receive r3f primitive
+// children (it doesn't — CameraRig / SceneLighting are stubbed —
+// but we keep this guard here in case a future test passes an
+// r3f-primitive child directly).
+const originalConsoleError = console.error;
+beforeAll(() => {
+  console.error = (...args: unknown[]) => {
+    const msg = typeof args[0] === 'string' ? args[0] : '';
+    if (msg.includes('is unrecognized in this browser')) return;
+    originalConsoleError(...args);
+  };
+});
+afterAll(() => {
+  console.error = originalConsoleError;
 });

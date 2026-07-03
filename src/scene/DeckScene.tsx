@@ -9,13 +9,20 @@
  *     when unavailable (BEFORE any Canvas mount so a WebGL crash
  *     never reaches the user).
  *   - Reads the current camera preset and layout bounds from the
- *     Zustand stores (the ONLY state coupling; no props flow up).
- *   - Mounts the r3f `<Canvas>` with an accessible `aria-label`
- *     (WCAG 2.2 landmark per ticket §10).
- *   - Mounts the {@link SceneLighting} + {@link CameraRig} +
- *     a CLEARLY-COMMENTED mount point for layer components (S10+).
- *   - Wires the `onContextLost` event (§5) so a driver crash logs
- *     a diagnostic; the UI banner surfacing lives in S12.
+ *     Zustand stores VIA THE GRANULAR HOOKS (`useCameraPreset`,
+ *     `useLayoutBounds`) so the scene is decoupled from the
+ *     `bundle.layout` shape (PR#29 pair-fix iter 1 — Fix G).
+ *   - Mounts the r3f `<Canvas>` with:
+ *       * an accessible `aria-label` (WCAG 2.2 landmark),
+ *       * millimeter-scale near / far clipping planes so deck
+ *         geometry from S10 is not clipped by r3f's default
+ *         `near = 0.1 / far = 1000` values (Fix A).
+ *   - Mounts {@link SceneLighting} + {@link CameraRig} + a
+ *     CLEARLY-COMMENTED mount point for layer components (S10+).
+ *   - Wires the `webglcontextlost` diagnostic via
+ *     {@link installContextLossHandler} (§5 / Fix H) so a driver
+ *     crash logs a console error. The user-facing banner lives in
+ *     S12.
  *
  * ## Lazy-import contract (§7 SC-009)
  *
@@ -34,31 +41,44 @@
  *   - `react`
  *   - `@react-three/fiber`
  *   - `../state` (barrel — the ONLY state coupling channel)
- *   - `./CameraRig`, `./lighting`, `./WebGLFallback`, `./webgl-support`
+ *   - `./CameraRig`, `./context-loss`, `./lighting`, `./WebGLFallback`,
+ *     `./webgl-support`, `./camera-presets`
  *
  * It does NOT import from `../ui/**`, `../application/**`, or
  * `../persistence/**` — enforced by `.dependency-cruiser.cjs`
  * `scene-allowlist` and the boundary self-test probes.
  */
-import { useMemo, type JSX, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, type JSX, type ReactNode } from 'react';
 import { Canvas } from '@react-three/fiber';
 
-import { useDesignStore, useUiStore } from '../state';
+import { useCameraPreset, useLayoutBounds } from '../state';
 
+import { CAMERA_FAR_MM, CAMERA_NEAR_MM, DEFAULT_FOV_DEG } from './camera-presets';
 import { CameraRig } from './CameraRig';
+import { installContextLossHandler } from './context-loss';
 import { SceneLighting } from './lighting';
 import { WebGLFallback } from './WebGLFallback';
 import { isWebGL2Available } from './webgl-support';
 
 /**
- * The accessible name for the canvas. Ticket §10 (WCAG 2.2) pins the
- * copy so screen-reader users learn how to change the view via the
- * preset buttons in the toolbar. Kept as an exported constant so
- * `DeckScene.test.tsx` and the QA E2E can grep-import the exact
- * string rather than duplicating it.
+ * The accessible name for the canvas. Ticket §10 (WCAG 2.2) pins
+ * the copy so screen-reader users learn how to interact with the
+ * scene. Kept as an exported constant so `DeckScene.test.tsx` and
+ * the QA E2E can grep-import the exact string rather than
+ * duplicating it.
+ *
+ * ## PR#29 pair-fix iter 1 — Fix J (honest a11y copy)
+ *
+ * The original ticket §10 wording promised "use arrow keys or WASD
+ * to orbit, +/- to zoom" — but keyboard orbit is an EXPLICIT
+ * stretch goal (ticket §16) that S9 does NOT implement. Promising
+ * controls that don't exist is worse than describing fewer of
+ * them, so the pinned copy now names ONLY what actually works:
+ * drag to orbit, scroll to zoom, and the preset view buttons
+ * (S14) for keyboard-accessible angles.
  */
 export const DECKSCENE_ARIA_LABEL =
-  '3D view of deck design; use the preset view buttons in the toolbar to change angle';
+  '3D view of deck design; drag to orbit, scroll to zoom, or use the preset view buttons in the toolbar to change angle';
 
 /**
  * Props for {@link DeckScene}. `className` is forwarded to the
@@ -82,14 +102,31 @@ export function DeckScene({ className, children }: DeckSceneProps): JSX.Element 
   // per mount" idiom.
   const webgl2Ok = useMemo(() => isWebGL2Available(), []);
 
-  // Read state via the granular selector hooks — one subscription
-  // per read slot. See state/hooks.ts for the re-render rationale.
-  const preset = useUiStore((s) => s.cameraPreset);
-  const bounds = useDesignStore((s) => s.bundle.layout.bounds);
+  // Fix G: read state via the granular selector hooks — one
+  // subscription per read slot. `useCameraPreset` reads from the ui
+  // store; `useLayoutBounds` reads a scoped slice of the design
+  // store's `bundle.layout.bounds`. See state/hooks.ts for the
+  // re-render rationale.
+  const preset = useCameraPreset();
+  const bounds = useLayoutBounds();
+
+  // Fix H: hold the cleanup returned by installContextLossHandler
+  // so we can un-register on unmount. Populated inside onCreated
+  // (which fires exactly once per Canvas mount).
+  const contextLossCleanupRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    // Cleanup only — the register call happens in Canvas.onCreated.
+    // This effect exists so we get a Composition-root-lifetime hook
+    // to run the returned cleanup on unmount.
+    return () => {
+      contextLossCleanupRef.current?.();
+      contextLossCleanupRef.current = null;
+    };
+  }, []);
 
   // AC5 fallback branch — return BEFORE mounting the Canvas so we
-  // don't touch WebGL at all. The className prop is spread through a
-  // rest-props object rather than passed directly, so
+  // don't touch WebGL at all. The className prop is spread through
+  // a rest-props object rather than passed directly, so
   // `exactOptionalPropertyTypes: true` doesn't complain about
   // `string | undefined` → `string`.
   if (!webgl2Ok) {
@@ -100,20 +137,21 @@ export function DeckScene({ className, children }: DeckSceneProps): JSX.Element 
     <Canvas
       className={className}
       aria-label={DECKSCENE_ARIA_LABEL}
-      // Reliability §5: log GL context loss so an ops / developer
-      // console diagnostics catches driver crashes. The user-facing
-      // banner ("3D view crashed — please reload") is S12's job.
+      // Fix A: near / far clipping planes in millimeter world units.
+      // r3f's default 0.1 / 1000 would clip every deck member —
+      // preset camera distances run 2 700 – 113 600 mm. See
+      // `camera-presets.ts` module header for the derivation.
+      camera={{
+        near: CAMERA_NEAR_MM,
+        far: CAMERA_FAR_MM,
+        fov: DEFAULT_FOV_DEG,
+      }}
+      // Reliability §5 (Fix H): install the GL context-loss
+      // diagnostic. The cleanup returned here is stashed in a ref
+      // so the composition-root useEffect above un-registers on
+      // unmount.
       onCreated={({ gl }) => {
-        gl.domElement.addEventListener(
-          'webglcontextlost',
-          (event: Event) => {
-            event.preventDefault();
-            console.error(
-              '[wooddeck:scene] WebGL context lost — the 3D viewer needs to reload.',
-            );
-          },
-          { passive: false },
-        );
+        contextLossCleanupRef.current = installContextLossHandler(gl);
       }}
     >
       <SceneLighting />

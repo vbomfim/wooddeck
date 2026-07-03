@@ -132,6 +132,23 @@ export default tseslint.config(
     },
   },
 
+  // Scene layer override — the r3f pattern REQUIRES imperative mutation
+  // of hook-returned handles (`useThree(s => s.camera).position.set(...)`,
+  // `useThree(s => s.controls).enabled = false`, etc.). That is the
+  // framework's design, not a bug. `react-hooks/immutability` (new in
+  // React 19 / plugin v7) flags every such mutation. Scoping the rule
+  // OFF for `src/scene/**` keeps the r3f imperative style clean without
+  // scattering per-line disable comments across every camera-mutating
+  // hook body. The tests in the same tree use the same pattern (capture
+  // refs from useEffect for LIVE-state assertions), so the override
+  // covers them too. Pair-fix iter 1 — Fix C.
+  {
+    files: ['src/scene/**/*.{ts,tsx}'],
+    rules: {
+      'react-hooks/immutability': 'off',
+    },
+  },
+
   // Config files (JS, ESM) — parser-only, no type-aware rules.
   {
     files: ['*.{js,cjs,mjs}', 'scripts/**/*.{js,mjs}'],

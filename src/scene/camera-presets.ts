@@ -153,6 +153,45 @@ export const PRESET_TRANSITION_MS = 500;
  */
 const MIN_BOUND_FLOOR_MM = 1000;
 
+/**
+ * Near clipping plane in millimeters — passed to the r3f
+ * `<Canvas camera={{ near }}>` prop by `<DeckScene>` (Fix A).
+ *
+ * ## Why this constant exists (PR#29 pair-fix iter 1 — Fix A)
+ *
+ * r3f's default camera near = 0.1 (unitless). The wooddeck world is
+ * in MILLIMETERS — so with the default, geometry that sits between
+ * 0.1 mm and 10 mm of the camera clips against the near plane. In
+ * practice the camera never dollies that close, but the SAME
+ * defaults set FAR = 1000 mm, which is far worse: preset camera
+ * distances range from ~2 700 mm (tiny deck iso) to ~113 600 mm
+ * (large deck top). EVERY deck member renders behind the default
+ * far plane → completely blank scene when S10 mounts geometry.
+ *
+ * We ship a single constant per plane so the Canvas prop and the
+ * invariant tests (see `camera-presets.test.ts`) share ONE source
+ * of truth; a maintainer who bumps FAR without bumping NEAR (or
+ * vice-versa) will trigger a "log2(far/near) < 20 bits" precision
+ * assertion, keeping z-fighting away from the default depth buffer.
+ *
+ * 10 mm ≈ 0.4 in — well below the ~450 mm minDistance for the
+ * smallest supported deck.
+ */
+export const CAMERA_NEAR_MM = 10;
+
+/**
+ * Far clipping plane in millimeters — passed to the r3f
+ * `<Canvas camera={{ far }}>` prop by `<DeckScene>` (Fix A).
+ *
+ * 500 000 mm = 500 m: comfortably covers the worst-case top-preset
+ * fit distance for a 40 ft × 40 ft × 4 ft deck (~113 600 mm) with
+ * a large safety margin for future larger designs, while keeping
+ * `log2(CAMERA_FAR_MM / CAMERA_NEAR_MM) ≈ 15.6` bits of depth-
+ * buffer precision usage — well under the 24-bit depth buffer
+ * ceiling and 20-bit soft cap the test asserts.
+ */
+export const CAMERA_FAR_MM = 500_000;
+
 // ---------------------------------------------------------------------------
 // Internal helpers — kept module-private (single call site each)
 // ---------------------------------------------------------------------------
@@ -222,11 +261,25 @@ export function computeAutoFitDistance(
  * OrbitControls zoom / dolly range. AC3 exact formula:
  *
  *     minDistance = ½ × min(widthMm, lengthMm, heightMm)
- *     maxDistance = 5 × max(widthMm, lengthMm, heightMm)
+ *     maxDistance = max(5 × largest, topFitDistance × TOP_FIT_HEADROOM)
  *
  * Both derived from the SAFE bounds so a zero-volume bundle still
  * yields a valid strictly-increasing range.
+ *
+ * ## Why maxDistance is NOT just `5 × largest` (PR#29 pair-fix iter 1 — Fix B)
+ *
+ * The original ticket AC3 formula was `maxDistance = 5 × largest`.
+ * That clamp is TIGHTER than the top-preset auto-fit distance for
+ * every real deck size (top uses TOP_DOWN_FOV_DEG ≈ 10°, which
+ * pushes the camera much farther than 5 × largest). OrbitControls
+ * would silently clamp the camera closer than the top-preset
+ * target, cropping the top view and violating AC4's 15% margin
+ * promise. The relaxed formula takes the MAX of the AC3 zoom cap
+ * and the top-preset fit distance (with a small headroom so the
+ * top pose sits comfortably inside the clamp, not on it).
  */
+const TOP_FIT_HEADROOM = 1.05;
+
 export function computeZoomLimits(bounds: BoundsMm): {
   readonly minDistance: number;
   readonly maxDistance: number;
@@ -234,9 +287,10 @@ export function computeZoomLimits(bounds: BoundsMm): {
   const b = safeBounds(bounds);
   const smallest = Math.min(b.widthMm, b.lengthMm, b.heightMm);
   const largest = Math.max(b.widthMm, b.lengthMm, b.heightMm);
+  const topFitDistance = computeAutoFitDistance(b, TOP_DOWN_FOV_DEG);
   return {
     minDistance: smallest / 2,
-    maxDistance: largest * 5,
+    maxDistance: Math.max(largest * 5, topFitDistance * TOP_FIT_HEADROOM),
   };
 }
 

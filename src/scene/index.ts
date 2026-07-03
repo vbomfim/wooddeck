@@ -25,6 +25,7 @@
  *   component  SceneLighting        — ambient + directional
  *   component  WebGLFallback        — AC5 unsupported-browser view
  *   function   isWebGL2Available    — client-side detection
+ *   function   installContextLossHandler — §5 GL-loss diagnostic
  *   function   computePresetCamera  — pure preset math
  *   function   computeAutoFitDistance
  *   function   computeZoomLimits
@@ -33,8 +34,9 @@
  *   constant   PRESET_TRANSITION_MS
  *   constant   AUTOFIT_MARGIN
  *   constant   DEFAULT_FOV_DEG, TOP_DOWN_FOV_DEG
+ *   constant   CAMERA_NEAR_MM, CAMERA_FAR_MM
  *   types      DeckSceneProps, CameraRigProps, WebGLFallbackProps,
- *              CameraPose, BoundsMm, CameraPreset
+ *              CameraPose, BoundsMm, CameraPreset, ContextLossTarget
  */
 
 // ---- components ------------------------------------------------------------
@@ -52,8 +54,13 @@ export type { WebGLFallbackProps } from './WebGLFallback';
 // ---- utilities & pure math -------------------------------------------------
 export { isWebGL2Available } from './webgl-support';
 
+export { installContextLossHandler } from './context-loss';
+export type { ContextLossTarget } from './context-loss';
+
 export {
   AUTOFIT_MARGIN,
+  CAMERA_FAR_MM,
+  CAMERA_NEAR_MM,
   DEFAULT_FOV_DEG,
   PRESET_TRANSITION_MS,
   TOP_DOWN_FOV_DEG,

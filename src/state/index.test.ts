@@ -24,6 +24,7 @@ describe('src/state/index.ts — frozen public surface', () => {
     // check would fail even if the compile somehow passed.
     expect(typeof StateBarrel.useDesign).toBe('function');
     expect(typeof StateBarrel.useLayout).toBe('function');
+    expect(typeof StateBarrel.useLayoutBounds).toBe('function');
     expect(typeof StateBarrel.useWarnings).toBe('function');
     expect(typeof StateBarrel.useDesignStatus).toBe('function');
     expect(typeof StateBarrel.useUiUnits).toBe('function');

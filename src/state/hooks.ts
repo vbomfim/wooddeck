@@ -48,7 +48,7 @@
  * surrounding-code touch.
  */
 
-import type { DeckDesign, Layout, Warning } from '../domain/model';
+import type { DeckDesign, Dimensions3D, Layout, Warning } from '../domain/model';
 import { useShallow } from 'zustand/react/shallow';
 
 import { useDesignStore } from './design-store';
@@ -70,6 +70,37 @@ export function useDesign(): DeckDesign {
  */
 export function useLayout(): Layout {
   return useDesignStore((s) => s.bundle.layout);
+}
+
+/**
+ * The layout's `bounds` (deck AABB in millimeters). Split out from
+ * `useLayout` so downstream 3D consumers — starting with S9's
+ * `<DeckScene>` — subscribe to the SLICE they actually need, not
+ * the whole layout object. This keeps the scene from re-rendering
+ * on a warnings-only mutation (which recomputes the layout but
+ * leaves the bounds numerically unchanged).
+ *
+ * ## PR#29 pair-fix iter 1 — Fix G
+ *
+ * The original `<DeckScene>` used an inline
+ * `useDesignStore(s => s.bundle.layout.bounds)` selector,
+ * coupling the scene to the private `bundle.layout` shape. Routing
+ * through this hook decouples the scene from the store's INTERNAL
+ * structure — a future refactor that flattens `bundle.layout` into
+ * `bundle.layoutSummary` need only update THIS hook, not every
+ * consumer.
+ *
+ * ## Reference identity
+ *
+ * The store writes a NEW bundle on every mutation, so this hook's
+ * default referential-equality selector will fire on any layout
+ * recompute even when numeric values are unchanged. That's fine
+ * for `<DeckScene>` because the downstream `<CameraRig>` uses
+ * numeric-value dependencies in its `useMemo` (Fix F) to avoid
+ * scheduling spurious preset transitions.
+ */
+export function useLayoutBounds(): Dimensions3D {
+  return useDesignStore((s) => s.bundle.layout.bounds);
 }
 
 /**
