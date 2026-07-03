@@ -15,6 +15,10 @@
  *               BeamsLayer, JoistsLayer, DeckingLayer
  *   component   DeckLayers               — the six-in-order bundle
  *   constant    DECK_LAYER_ORDER         — the pinned six-entry order
+ *   constant    LAYER_USER_DATA_KEY      — well-known key stamped on
+ *                                         every layer group's userData
+ *                                         (S12/S14 can grep-find a
+ *                                         group by its logical id)
  *   function    materialForSpecies       — shared per-species material
  *   function    materialForMember        — helper for a LayoutMember
  *   constant    MATERIAL_COLORS          — the AC6 palette (S11 uses)
@@ -30,7 +34,7 @@
  *     `./shared/materials` directly in `.test.ts` files, kept out
  *     of the barrel so a production consumer reaching for it is a
  *     red flag.
- *   - `renderKindLayer` is an internal helper for the five kind
+ *   - `KindLayer` is an internal helper for the five kind
  *     layers — NOT exported. Adding a seventh kind layer would go
  *     through this file, not through direct helper reuse.
  */
@@ -46,6 +50,7 @@ export { DeckingLayer } from './DeckingLayer';
 // ---- bundle + order --------------------------------------------------------
 export { DeckLayers } from './DeckLayers';
 export { DECK_LAYER_ORDER } from './deck-layer-order';
+export { LAYER_USER_DATA_KEY } from './shared/kind-layer';
 
 // ---- shared building blocks (S11 will reuse) -------------------------------
 export { BoxMember } from './shared/BoxMember';

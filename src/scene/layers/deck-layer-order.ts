@@ -23,7 +23,7 @@
  * A raycast from the ISO camera hits `decking` FIRST because
  * decking is highest in y — the order matches the physical stack.
  *
- * ## Type-safety
+ * ## Type-safety AND runtime immutability
  *
  * The `as const satisfies readonly (keyof LayerVisibility)[]`
  * clause pins two invariants at compile time:
@@ -33,16 +33,20 @@
  *   - The array is `readonly` — mutation through the exported
  *     reference is a type error.
  *
- * No runtime `Object.freeze` needed — TypeScript enforces the
- * mutation guard at the consumer boundary.
+ * Wrapping the whole thing in `Object.freeze` adds runtime
+ * immutability — a consumer that ignores the type system (e.g. a
+ * plain-JS test, or a `Reflect.set` call) cannot silently reorder
+ * the sequence. GPT review #4 flagged this — the type-level
+ * `readonly` is defense-in-depth compile-time; `Object.freeze` is
+ * defense-in-depth runtime.
  */
 import type { LayerVisibility } from '../../state';
 
-export const DECK_LAYER_ORDER = [
+export const DECK_LAYER_ORDER = Object.freeze([
   'environment',
   'footings',
   'posts',
   'beams',
   'joists',
   'decking',
-] as const satisfies readonly (keyof LayerVisibility)[];
+] as const satisfies readonly (keyof LayerVisibility)[]);

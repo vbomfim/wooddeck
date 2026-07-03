@@ -68,6 +68,8 @@ import { DoubleSide } from 'three';
 
 import { useUiStore } from '../../state';
 
+import { LAYER_USER_DATA_KEY } from './shared/kind-layer';
+
 /**
  * Full extent of the ground plane (millimeters). See module
  * header for the sizing rationale.
@@ -106,7 +108,13 @@ const GROUND_PLANE_ROTATION: readonly [number, number, number] = [-Math.PI / 2, 
 export function EnvironmentLayer(): JSX.Element {
   const visible = useUiStore((s) => s.layerVisibility.environment);
   return (
-    <group visible={visible}>
+    /*
+     * `userData[LAYER_USER_DATA_KEY] = 'environment'` — same layer-
+     * identity stamp used by every KindLayer. The AC8 scene-graph
+     * order test walks the top-level groups and reads the sequence
+     * of layer ids directly from three.js.
+     */
+    <group visible={visible} userData={{ [LAYER_USER_DATA_KEY]: 'environment' }}>
       {/*
        * Ground plane — laid flat in the world x-z plane at y = 0.
        * DoubleSide so the plane renders whether the camera is

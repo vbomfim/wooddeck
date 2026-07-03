@@ -29,10 +29,22 @@
  *
  * ## Forbidden patterns (this test fires)
  *
- *   - `member.position.x + 100`
+ *   - `member.position.x + 100`  — infix arithmetic AFTER coord
  *   - `member.size.x / 2`
  *   - `member.size.x * 0.5`
- *   - `-member.position.y`
+ *   - `-member.position.y`       — leading unary minus (axis flip)
+ *   - `member.position['x']`     — bracket notation (any use)
+ *   - `member.position['x'] + 1` — bracket notation + arithmetic
+ *
+ * ## Self-tests (the guard's guard)
+ *
+ * The regex is exercised BY THIS FILE against a `mustFire[]`
+ * fixture list AND a `mustNotFire[]` fixture list — a
+ * regression that silently weakens the pattern (as happened in
+ * Opus review #1: the previous `captured.slice(-2)` tail check
+ * missed unary-minus) is caught by the fixtures immediately
+ * rather than by a slow-burn "we never noticed the guard broke"
+ * discovery months later.
  *
  * ## What this test does NOT catch
  *
@@ -91,25 +103,66 @@ function collectSourceFiles(dir: string): string[] {
 }
 
 /**
- * Regex that matches arithmetic on member coordinate fields.
- * Any of `member.position.<axis>` / `member.size.<axis>` /
- * `member.rotation.<axis>` immediately followed by whitespace and
- * a `+` / `-` / `*` / `/` / `%` operator (avoiding `**` for the
- * spread operator false-positive by requiring a single operator).
+ * Guard patterns for arithmetic on member coordinate fields.
  *
- * The regex also flags a leading unary minus: `-member.position.x`.
+ * ## Design: three narrow regexes beat one clever combined regex
+ *
+ * The first iteration of this guard tried to squeeze the three
+ * forbidden shapes into one alternation and then post-filter on
+ * `captured.slice(-2)`. That approach missed leading unary minus
+ * silently (`-member.position.y` — Opus review #1 HIGH) because
+ * the tail-slice fell on `.y` instead of on the `-` prefix. Lesson:
+ * one regex per forbidden shape, each tested independently, is
+ * both easier to reason about and easier to prove-fires with
+ * fixture strings below.
+ *
+ * ## The three forbidden shapes
+ *
+ *   1. Infix arithmetic AFTER the coord access:
+ *      `member.position.x + 1`, `member.size.y / 2`, `member.rotation.z * 0.5`.
+ *
+ *   2. Leading unary minus BEFORE the coord access — the axis-flip
+ *      idiom (`-member.position.y` to invert Y):
+ *      the `-` must be preceded by start-of-line, whitespace, or a
+ *      grouping/expression character (`[`, `(`, `,`, `=`, `:`) so
+ *      we don't false-positive an identifier fragment like
+ *      `foo-member.position.y` (which would be a syntax error
+ *      anyway, but tidy).
+ *
+ *   3. Bracket notation on the coord fields — a defense against
+ *      `member.position['x'] + 1` and friends that would sneak
+ *      past the dot-only pattern above.
+ *
+ * Each regex is `global` so the scanner can find every offender
+ * on a line — the failing test lists them all.
  */
-const ARITHMETIC_ON_MEMBER_COORD = new RegExp(
-  // Group 1: optional unary minus prefix (with a preceding char that
-  // isn't an identifier so we don't match `foo-member.position.x`
-  // where the `-` is part of a var name — unlikely but tidy).
-  '(?:^|[^A-Za-z0-9_])' +
-    // Group 2: the coord access itself.
-    '(-)?(?:member\\.(?:position|size|rotation)\\.[xyz])' +
-    // Group 3: an infix arithmetic operator that follows.
-    '(?:\\s*[+*/%]|\\s*-(?!>))?',
-  'g',
-);
+const INFIX_ARITHMETIC_AFTER_COORD =
+  /member\.(?:position|size|rotation)\.[xyz]\s*[+\-*/%]/g;
+
+const UNARY_MINUS_BEFORE_COORD =
+  /(?:^|[\s([{,;:=?])-\s*member\.(?:position|size|rotation)\.[xyz]\b/g;
+
+const BRACKET_NOTATION_ON_COORD =
+  /member\.(?:position|size|rotation)\[/g;
+
+/**
+ * Apply all three guard regexes to a single (comment-stripped)
+ * source line and return the concatenated matches (empty if
+ * clean). Exported for the fixture-string self-tests below —
+ * so a regression that weakens any of the three patterns is
+ * caught mechanically.
+ */
+export function findGeometryMathOffenses(line: string): string[] {
+  const found: string[] = [];
+  for (const re of [INFIX_ARITHMETIC_AFTER_COORD, UNARY_MINUS_BEFORE_COORD, BRACKET_NOTATION_ON_COORD]) {
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(line)) !== null) {
+      found.push(m[0]);
+    }
+  }
+  return found;
+}
 
 describe('layers — no scene geometry math (finding #3)', () => {
   const files = collectSourceFiles(LAYERS_DIR);
@@ -120,6 +173,51 @@ describe('layers — no scene geometry math (finding #3)', () => {
     // a refactor that moves the layer files elsewhere without
     // updating the walk root.
     expect(files.length).toBeGreaterThan(0);
+  });
+
+  describe('guard-regex self-tests — MUST-FIRE fixtures (regression sentinels)', () => {
+    // Each fixture is a string that the guard MUST flag. If any of
+    // these ever passes silently, we have re-introduced the exact
+    // finding-#3 escape hatch that Code Review Guardian Opus flagged.
+    const mustFire: Array<[label: string, source: string]> = [
+      ['infix add on position.x', 'const y = member.position.x + 100;'],
+      ['infix multiply on size.y', 'const h = member.size.y * 0.5;'],
+      ['infix divide on rotation.z', 'const r = member.rotation.z / 2;'],
+      ['infix subtract on position.y', 'const d = member.position.y - offset;'],
+      ['leading unary minus on position.y (Opus #1 miss)', 'const flipped = -member.position.y;'],
+      ['unary minus after equals', 'const v = -member.size.x;'],
+      ['unary minus in array literal', 'const arr = [-member.position.x, 0, 0];'],
+      ['unary minus in function call', 'foo(-member.rotation.y);'],
+      ['bracket notation on position', "const v = member.position['x'] + 1;"],
+      ['bracket notation on size (no arithmetic — still forbidden)', "const s = member.size['y'];"],
+    ];
+    for (const [label, source] of mustFire) {
+      it(`FIRES on: ${label}`, () => {
+        const offenses = findGeometryMathOffenses(source);
+        expect(offenses.length, `expected the guard to flag: ${source}`).toBeGreaterThan(0);
+      });
+    }
+  });
+
+  describe('guard-regex self-tests — MUST-NOT-FIRE fixtures (false-positive sentinels)', () => {
+    // Each fixture is a legitimate scene-layer line the guard
+    // MUST leave alone. If a regex tweak here starts firing on any
+    // of them, we have made the guard too aggressive.
+    const mustNotFire: Array<[label: string, source: string]> = [
+      ['bare coord read in array construction', 'position={[member.position.x, member.position.y, member.position.z]}'],
+      ['bare coord read in another array', 'scale={[member.size.x, member.size.y, member.size.z]}'],
+      ['bare coord read in rotation array', 'rotation={[member.rotation.x, member.rotation.y, member.rotation.z]}'],
+      ['coord passed to a function without arithmetic', 'someHelper(member.position.x, member.position.y);'],
+      ['object shorthand with coord', 'const p = { x: member.position.x };'],
+      ['coord in a variable assignment', 'const px = member.position.x;'],
+      ['string containing member.position.x + but with word boundary', 'const doc = "member.position.x describes the center";'],
+    ];
+    for (const [label, source] of mustNotFire) {
+      it(`does NOT fire on: ${label}`, () => {
+        const offenses = findGeometryMathOffenses(source);
+        expect(offenses, `expected the guard to leave alone: ${source}`).toEqual([]);
+      });
+    }
   });
 
   for (const file of files) {
@@ -135,22 +233,10 @@ describe('layers — no scene geometry math (finding #3)', () => {
         // by skipping lines that start with `*` (jsdoc continuation).
         const stripped = line.replace(/\/\/.*$/, '').trim();
         if (stripped.startsWith('*') || stripped.startsWith('//')) return;
-        // Re-run the regex on each line — resetting lastIndex is a
-        // must because we're re-using the global regex.
-        ARITHMETIC_ON_MEMBER_COORD.lastIndex = 0;
-        let m: RegExpExecArray | null;
-        while ((m = ARITHMETIC_ON_MEMBER_COORD.exec(stripped)) !== null) {
-          // Group 2 is the coord access; group 3 (if present) is the
-          // arithmetic operator. If we captured the group 3 half of
-          // the alternation, arithmetic is happening.
-          const captured = m[0];
-          // Require that some arithmetic operator was captured
-          // (either the unary minus in group 1 or the infix
-          // operator at the end of the pattern) — a bare
-          // `member.position.x` (no arithmetic) is OK.
-          if (/[+*/%]|(?:^|[^-])-[a-zA-Z0-9_]|^-|-$/.test(captured.slice(-2))) {
-            matches.push(`  ${i + 1}: ${line.trim()}`);
-          }
+        const offenses = findGeometryMathOffenses(stripped);
+        for (const _ of offenses) {
+          matches.push(`  ${i + 1}: ${line.trim()}`);
+          break; // one report per line is enough
         }
       });
       // If any offending line was found, surface all of them at once

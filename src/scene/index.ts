@@ -40,6 +40,8 @@
  *   function   materialForSpecies   — S10 shared MeshStandardMaterial
  *   function   materialForMember    — S10 material by LayoutMember
  *   constant   DECK_LAYER_ORDER     — S10 pinned six-entry sequence
+ *   constant   LAYER_USER_DATA_KEY  — S10 well-known userData key
+ *                                     stamped on every layer group
  *   constant   DECKSCENE_ARIA_LABEL — canvas accessible name
  *   constant   WEBGL_FALLBACK_MESSAGE — AC5 copy
  *   constant   PRESET_TRANSITION_MS
@@ -101,6 +103,7 @@ export {
   GROUND_GRID_DIVISIONS,
   GROUND_PLANE_SIZE_MM,
   JoistsLayer,
+  LAYER_USER_DATA_KEY,
   MATERIAL_COLORS,
   PostsLayer,
   materialForMember,

@@ -285,5 +285,52 @@ export function registerLayerSuite({ Layer, kind, visibilityKey, displayName }: 
       expect(elapsedMs).toBeLessThan(100);
       await renderer.unmount();
     });
+
+    it('G6: each mesh scale maps to its OWN source member — no broadcast (QA-G6)', async () => {
+      // Three DISTINCT sizes AND distinct positions. If a subtle
+      // refactor broadcast one member's fields to every mesh (e.g.
+      // reading `members[0]` in a loop by mistake), every mesh
+      // would end up with the same scale — this test flags the
+      // regression by asserting every observed scale tuple is in
+      // the input set exactly once.
+      const inputs: Array<[[number, number, number], [number, number, number]]> = [
+        [[100, 200, 300], [-500, 100, 0]],
+        [[400, 500, 600], [0, 200, 500]],
+        [[700, 800, 900], [500, 300, -500]],
+      ];
+      const members = inputs.map(([size, pos], i) =>
+        makeMember({
+          id: `${kind}-g6-${i}`,
+          kind,
+          size: { x: size[0], y: size[1], z: size[2] },
+          position: { x: pos[0], y: pos[1], z: pos[2] },
+        }),
+      );
+      seedLayout(makeLayout(members));
+      const renderer = await ReactThreeTestRenderer.create(<Layer />);
+      const meshes = renderer.scene.findAllByType('Mesh').map((n) => n.instance as Mesh);
+      expect(meshes).toHaveLength(3);
+      // For each input, find a mesh whose position AND scale
+      // match. Every input must find a unique mesh — no
+      // duplicates, no broadcast, no cross-wire.
+      const matchedIndices = new Set<number>();
+      for (const [size, pos] of inputs) {
+        const meshIndex = meshes.findIndex((m, i) => {
+          if (matchedIndices.has(i)) return false;
+          return (
+            m.position.x === pos[0] &&
+            m.position.y === pos[1] &&
+            m.position.z === pos[2] &&
+            m.scale.x === size[0] &&
+            m.scale.y === size[1] &&
+            m.scale.z === size[2]
+          );
+        });
+        expect(meshIndex, `input ${JSON.stringify({ size, pos })} matched no mesh`).toBeGreaterThanOrEqual(0);
+        matchedIndices.add(meshIndex);
+      }
+      expect(matchedIndices.size).toBe(3);
+      await renderer.unmount();
+    });
   });
 }

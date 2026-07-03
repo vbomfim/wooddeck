@@ -22,9 +22,10 @@
  *   rotation = [ m.rotation.x, m.rotation.y, m.rotation.z ]
  *
  * There is a sibling `no-geometry-math.test.ts` grep that scans
- * this file (and every layer sibling) for any `member.position.<axis> +/-/*  /` pattern and fires
- * if one appears. The layout engine (S4) owns every derivation;
- * scene code is the passive consumer.
+ * this file (and every layer sibling) for any `member.position.<axis> +/-/*  /` pattern (plus
+ * unary-minus and bracket-notation variants) and fires if one
+ * appears. The layout engine (S4) owns every derivation; scene
+ * code is the passive consumer.
  *
  * ## AC7: 1 three.js unit = 1 mm
  *
@@ -34,60 +35,89 @@
  * `CAMERA_NEAR_MM` / `CAMERA_FAR_MM` so the mm-scale geometry
  * fits inside the frustum.
  *
- * ## Unit-box geometry + scale
+ * ## Shared unit-box geometry (pair-fix iter 1 Fix D — GPT review #3)
  *
- * We use a stock `<boxGeometry args={[1, 1, 1]}/>` primitive and
- * scale each `<mesh>` per member. Rationale (issue #11 §17):
+ * A single module-level `UNIT_BOX_GEOMETRY` — `new BoxGeometry(1, 1, 1)`
+ * — is shared by EVERY `<BoxMember>` in the scene. Rationale:
  *
- *   - Every mesh shares the same underlying geometry buffer —
- *     GPU has one BoxGeometry to bind, and the per-mesh scale
- *     modifier is essentially free (one 4×4 matrix multiply the
- *     driver would do anyway).
+ *   - GPU binds ONE geometry buffer for every member (previously,
+ *     `<boxGeometry args={[1,1,1]}/>` inline created one
+ *     `BoxGeometry` instance per mesh — ~1900 for a 40'×40' deck,
+ *     each with its own 24-vertex + 36-index buffer).
+ *   - The per-mesh `scale` prop is the only per-member cost — the
+ *     GPU applies the model matrix in the vertex shader regardless.
  *   - Full-extent size fields match three.js `BoxGeometry`
  *     convention (`new BoxGeometry(w, h, d)` is FULL widths, not
  *     half-widths). Scaling a unit cube by `size` gives an
  *     equivalent shape.
+ *   - Referential equality: every `<BoxMember>` in the scene
+ *     graph has `mesh.geometry === UNIT_BOX_GEOMETRY` — asserted
+ *     by `BoxMember.test.tsx`.
  *
  * The alternative (each mesh with its own
  * `<boxGeometry args={[m.size.x, m.size.y, m.size.z]}/>`) would
  * put a distinct geometry buffer in every mesh — many more GPU
  * bindings, larger memory footprint, and no visual difference.
  *
- * ## Material
+ * ## Disposal contract
  *
- * Every mesh binds a species-specific `MeshStandardMaterial` from
- * `./materials.ts` — a SHARED instance per species so every joist
- * points at the same GPU handle. `materialForMember(m)` handles
- * the lookup.
+ * `UNIT_BOX_GEOMETRY` is a module-level singleton. It lives for
+ * the lifetime of the JavaScript module (which in a real app is
+ * the lifetime of the tab). Browser tab teardown reclaims the GPU
+ * handle — no explicit disposal is required in production.
+ *
+ * For HMR / test scenarios that want to prove the singleton is
+ * rebuild-friendly, {@link disposeSharedGeometry} is exported
+ * alongside `disposeSharedMaterials`. Both live in `./materials.ts`
+ * as a package-level helper (`disposeSharedResources`) — kept out
+ * of the public barrel because production code never calls them.
+ *
+ * ## Optional `material` prop (pair-fix iter 1 Fix F — Opus review #6)
+ *
+ * `BoxMember` accepts an optional `material?: Material` prop so
+ * downstream stories (notably S11's WarningOverlay, which
+ * highlights a member with a red outline material) can reuse the
+ * SAME position / scale / rotation / geometry pipeline without
+ * duplicating the component. When `material` is omitted, the
+ * per-species shared material is looked up via `materialForMember`.
+ *
+ * Current call sites (the five kind layers via `<KindLayer>`) do
+ * NOT pass `material` — behaviour is unchanged.
  */
 import type { JSX } from 'react';
+import type { Material } from 'three';
 
 import type { LayoutMember } from '../../../domain/model';
 
+import { UNIT_BOX_GEOMETRY } from './geometries';
 import { materialForMember } from './materials';
 
 /**
  * Props for {@link BoxMember}. The single `member` field carries
  * every render input — the layer above is responsible for filtering
  * to the right `kind`.
+ *
+ * `material` is optional — omit for the per-species shared material
+ * (the common case), or pass an override for a decorator use case
+ * such as S11's WarningOverlay.
  */
 export interface BoxMemberProps {
   readonly member: LayoutMember;
+  readonly material?: Material;
 }
 
-export function BoxMember({ member }: BoxMemberProps): JSX.Element {
+export function BoxMember({ member, material }: BoxMemberProps): JSX.Element {
+  // Look up the species material ONLY when the caller did not
+  // provide an override. The lookup is a Map.get + reference
+  // return — no allocation.
+  const effectiveMaterial = material ?? materialForMember(member);
   return (
     <mesh
       position={[member.position.x, member.position.y, member.position.z]}
       scale={[member.size.x, member.size.y, member.size.z]}
       rotation={[member.rotation.x, member.rotation.y, member.rotation.z]}
-      material={materialForMember(member)}
-    >
-      {/*
-       * Unit-cube geometry. Scaled per-mesh via the `scale` prop.
-       * See module header for the "shared geometry + scale" rationale.
-       */}
-      <boxGeometry args={[1, 1, 1]} />
-    </mesh>
+      geometry={UNIT_BOX_GEOMETRY}
+      material={effectiveMaterial}
+    />
   );
 }

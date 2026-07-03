@@ -1,6 +1,17 @@
 /**
  * `src/scene/DeckScene.tsx` — the root 3D viewer component.
  *
+ * ## Scene coordinate frame & units (S10 pinned — see docs/ARCHITECTURE.md § 3b)
+ *
+ * The scene is authored at **millimeter world scale** —
+ * `1 three.js unit = 1 mm`. Every `LayoutMember.position` /
+ * `size` field (see `domain/model.ts` "LAYOUT COORDINATE FRAME")
+ * flows into `<mesh>` props unchanged. Frame is right-handed:
+ * `+x = width`, `+y = up` (`y = 0` is the ground plane),
+ * `+z = length`; Euler rotations are XYZ, radians. The near /
+ * far clipping planes below are mm-scaled to match — see
+ * `camera-presets.ts` module header for the derivation.
+ *
  * ## Responsibility (single)
  *
  * `<DeckScene>` is the composition root for the 3D viewer. It:
