@@ -1,0 +1,298 @@
+/*
+ * `src/ui/styles/side-panels.css` — S14 issue #15.
+ *
+ * ## Layout
+ *
+ * `<SidePanels>` is a vertical stack of four `<section>`s (Layer
+ * toggles + camera presets, Warnings, BOM, Save & export). Each
+ * section carries its own `<h2>` to satisfy the AppShell
+ * rightPanel landmark invariant.
+ *
+ * Small screens (< 640 px) collapse to a single-column stack
+ * with reduced spacing. The AppShell parent handles overall
+ * width; this file only styles the internal composition.
+ *
+ * ## Accessibility
+ *
+ *   - Every interactive element inherits the global
+ *     :focus-visible ring from tokens.css.
+ *   - No transitions are applied unless the user opted into
+ *     motion (@media prefers-reduced-motion: no-preference).
+ *   - The BOM table uses a caption-based accessible name.
+ *
+ * ## Tokens
+ *
+ * Uses the design tokens from `tokens.css` — same palette as
+ * ParameterPanel + AppShell.
+ */
+
+@import './tokens.css';
+
+/* --------------------------------------------------------------
+ * Wrapper — vertical stack
+ * -------------------------------------------------------------- */
+.wd-side-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1rem;
+  font-family: var(--wd-font-family, system-ui, sans-serif);
+}
+
+.wd-side-panels > section > h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--wd-color-text, #1a1a1a);
+}
+
+/* --------------------------------------------------------------
+ * LayerTogglePanel
+ * -------------------------------------------------------------- */
+.wd-layer-toggle-panel__checks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.25rem 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.wd-layer-toggle-panel__check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.wd-layer-toggle-panel__check input[type='checkbox'] {
+  min-width: 1rem;
+  min-height: 1rem;
+  cursor: pointer;
+}
+
+.wd-layer-toggle-panel__bulk {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.wd-layer-toggle-panel__bulk-btn {
+  flex: 1;
+  padding: 0.375rem 0.5rem;
+  font-size: 0.8125rem;
+  background: var(--wd-color-bg-secondary, #f5f5f5);
+  border: 1px solid var(--wd-color-border, #ccc);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--wd-color-text, #1a1a1a);
+}
+
+.wd-layer-toggle-panel__bulk-btn:hover {
+  background: var(--wd-color-bg-hover, #e8e8e8);
+}
+
+.wd-layer-toggle-panel__presets {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+
+.wd-layer-toggle-panel__preset-btn {
+  padding: 0.375rem 0.25rem;
+  font-size: 0.75rem;
+  background: var(--wd-color-bg-secondary, #f5f5f5);
+  border: 1px solid var(--wd-color-border, #ccc);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--wd-color-text, #1a1a1a);
+}
+
+.wd-layer-toggle-panel__preset-btn:hover {
+  background: var(--wd-color-bg-hover, #e8e8e8);
+}
+
+.wd-layer-toggle-panel__preset-btn[aria-pressed='true'] {
+  background: var(--wd-color-primary, #2b6cb0);
+  color: var(--wd-color-primary-text, #fff);
+  border-color: var(--wd-color-primary, #2b6cb0);
+}
+
+/* --------------------------------------------------------------
+ * WarningsPanel
+ * -------------------------------------------------------------- */
+.wd-warnings-panel__badge {
+  color: var(--wd-color-warning, #b7791f);
+  font-weight: 600;
+}
+
+.wd-warnings-panel__empty {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  background: var(--wd-color-success-bg, #f0fff4);
+  color: var(--wd-color-success-text, #22543d);
+  border-left: 3px solid var(--wd-color-success, #38a169);
+  border-radius: 4px;
+  font-size: 0.8125rem;
+}
+
+.wd-warnings-panel__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.wd-warnings-panel__item {
+  padding: 0.5rem 0.75rem;
+  background: var(--wd-color-warning-bg, #fffaf0);
+  border-left: 3px solid var(--wd-color-warning, #b7791f);
+  border-radius: 4px;
+  font-size: 0.8125rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.wd-warnings-panel__message {
+  color: var(--wd-color-text, #1a1a1a);
+}
+
+.wd-warnings-panel__citation {
+  color: var(--wd-color-text-muted, #666);
+  font-size: 0.75rem;
+}
+
+/* --------------------------------------------------------------
+ * BomPanel
+ * -------------------------------------------------------------- */
+.wd-bom-panel__empty {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  background: var(--wd-color-bg-secondary, #f5f5f5);
+  color: var(--wd-color-text-muted, #666);
+  border-radius: 4px;
+  font-size: 0.8125rem;
+}
+
+.wd-bom-panel__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.wd-bom-panel__caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+.wd-bom-panel__table th,
+.wd-bom-panel__table td {
+  padding: 0.375rem 0.5rem;
+  text-align: left;
+  border-bottom: 1px solid var(--wd-color-border-subtle, #eee);
+}
+
+.wd-bom-panel__table thead th {
+  font-weight: 600;
+  color: var(--wd-color-text, #1a1a1a);
+  background: var(--wd-color-bg-secondary, #f5f5f5);
+  border-bottom: 2px solid var(--wd-color-border, #ccc);
+}
+
+.wd-bom-panel__table tbody th[scope='row'] {
+  font-weight: 500;
+}
+
+/* --------------------------------------------------------------
+ * ExportMenu
+ * -------------------------------------------------------------- */
+.wd-export-menu__error {
+  margin-bottom: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--wd-color-danger-bg, #fff5f5);
+  color: var(--wd-color-danger-text, #742a2a);
+  border-left: 3px solid var(--wd-color-danger, #e53e3e);
+  border-radius: 4px;
+  font-size: 0.8125rem;
+}
+
+.wd-export-menu__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.wd-export-menu__btn {
+  display: inline-block;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+  text-align: center;
+  background: var(--wd-color-bg-secondary, #f5f5f5);
+  border: 1px solid var(--wd-color-border, #ccc);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--wd-color-text, #1a1a1a);
+}
+
+.wd-export-menu__btn:hover {
+  background: var(--wd-color-bg-hover, #e8e8e8);
+}
+
+.wd-export-menu__btn--file {
+  /*
+   * The Open .deck… control is a <label htmlFor>, not a <button>.
+   * Match the button styling so the two feel identical.
+   */
+  user-select: none;
+}
+
+.wd-export-menu__btn--danger {
+  background: var(--wd-color-danger-bg, #fff5f5);
+  border-color: var(--wd-color-danger, #e53e3e);
+  color: var(--wd-color-danger-text, #742a2a);
+}
+
+.wd-export-menu__btn--danger:hover {
+  background: var(--wd-color-danger, #e53e3e);
+  color: var(--wd-color-primary-text, #fff);
+}
+
+/*
+ * The hidden file input — visually hidden but STILL focusable via
+ * keyboard TAB (so keyboard users can trigger the file picker
+ * without the mouse). Uses the standard `visually-hidden` pattern.
+ */
+.wd-export-menu__file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --------------------------------------------------------------
+ * Small-screen responsive tweaks
+ * -------------------------------------------------------------- */
+@media (max-width: 640px) {
+  .wd-side-panels {
+    gap: 1rem;
+    padding: 0.75rem;
+  }
+
+  .wd-layer-toggle-panel__checks {
+    grid-template-columns: 1fr;
+  }
+}

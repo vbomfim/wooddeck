@@ -55,6 +55,13 @@
  *   - `'storage-blocked'` — `localStorage` is unavailable or setItem
  *     threw a `SecurityError` (private browsing on some engines).
  *     Caller UX disables autosave and surfaces a banner.
+ *   - `'canvas-empty'` — the WebGL canvas passed to
+ *     `screenshot.captureCanvasPng` had zero width or height (window
+ *     minimized, panel hidden, mount race). S14 issue #15 AC10 edge
+ *     case: the caller UX surfaces a toast instead of downloading a
+ *     transparent PNG. Reuses the persistence-error surface so
+ *     `ui`/`state` can pattern-match with the same `instanceof
+ *     DeckFileError` idiom they use for storage/file failures.
  */
 export type DeckFileErrorCode =
   | 'invalid-json'
@@ -63,7 +70,8 @@ export type DeckFileErrorCode =
   | 'file-too-large'
   | 'file-read-failed'
   | 'storage-full'
-  | 'storage-blocked';
+  | 'storage-blocked'
+  | 'canvas-empty';
 
 /**
  * Typed error thrown by every public function in `src/persistence/**`.

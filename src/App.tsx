@@ -54,7 +54,7 @@
  * cross-layer. Every OTHER file in the codebase is boundary-checked.
  */
 import { lazy, Suspense, useEffect, type JSX } from 'react';
-import { AppShell, ParameterPanel, SceneErrorBoundary } from './ui';
+import { AppShell, ParameterPanel, SceneErrorBoundary, SidePanels } from './ui';
 import { useDesignStore } from './state';
 
 /**
@@ -124,28 +124,12 @@ function SceneFallback(): JSX.Element {
 
 /**
  * S13 placeholder REPLACED — the leftPanel now hosts the real
- * `<ParameterPanel />`. Kept the S14 placeholder alone.
- *
- * `LeftPanelPlaceholder` is removed; `<ParameterPanel />` is the
- * S13 landing per issue #14 §2 (renders `<h2>Parameters</h2>` so
- * the leftPanel landmark still carries an accessible section
- * title). The panel reads `useDesign()`/`useUiUnits()` and writes
- * via `useDesignStore.getState().applyParameters(...)`.
+ * `<ParameterPanel />`. S14 placeholder REPLACED — the rightPanel
+ * now hosts `<SidePanels />` (a wrapper composing four sections:
+ * layer toggles + camera presets, warnings, BOM, export menu).
+ * Both real panels carry their own `<h2>` titles so the aside
+ * landmarks keep accessible names.
  */
-
-/**
- * Placeholder for the S14 tools panel (toggles + warnings + BOM +
- * export). Same contract as the (former) LeftPanelPlaceholder:
- * keep the `<h2>` heading when S14 lands.
- */
-function RightPanelPlaceholder(): JSX.Element {
-  return (
-    <>
-      <h2>Tools</h2>
-      <p>Layer toggles, warnings, BOM, and export arrive in S14.</p>
-    </>
-  );
-}
 
 export function App(): JSX.Element {
   // Boot: hydrate the design store from localStorage. The store
@@ -164,7 +148,7 @@ export function App(): JSX.Element {
   return (
     <AppShell
       leftPanel={<ParameterPanel />}
-      rightPanel={<RightPanelPlaceholder />}
+      rightPanel={<SidePanels />}
       main={
         // SceneErrorBoundary (S12 pair-fix iter 1 — Fix B / GPT#2
         // HIGH) traps chunk-load failures and any r3f/three

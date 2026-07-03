@@ -160,6 +160,7 @@ describe('useDesignStore — AC1 disjoint state', () => {
     expect(typeof state.loadFromLocalStorage).toBe('function');
     expect(typeof state.applyParameters).toBe('function');
     expect(typeof state.downloadDeckFile).toBe('function');
+    expect(typeof state.exportScreenshot).toBe('function');
     expect(typeof state.reset).toBe('function');
   });
 });
@@ -789,5 +790,108 @@ describe('useDesignStore — pair-fix Review E: autosave has no feedback loop', 
       const forbidden = /\.subscribe\s*\(/.test(src);
       expect(forbidden, `${file} uses .subscribe(...) — autosave feedback loop hazard`).toBe(false);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S14 issue #15 — exportScreenshot(canvas, filename)
+// ---------------------------------------------------------------------------
+
+describe('useDesignStore — exportScreenshot (S14 AC10)', () => {
+  it('happy path: calls persistence to trigger an anchor click and stays status:idle', () => {
+    // Route: exportScreenshot → application → persistence
+    // (downloadCanvasScreenshot). We spy on document.createElement
+    // to observe the anchor click that persistence makes.
+    const clickSpy = vi.fn();
+    const realCreate = document.createElement.bind(document);
+    const createSpy = vi
+      .spyOn(document, 'createElement')
+      .mockImplementation((tag: string) => {
+        const el = realCreate(tag);
+        if (tag === 'a') {
+          (el as HTMLAnchorElement).click = clickSpy;
+        }
+        return el;
+      });
+
+    const canvas = {
+      width: 800,
+      height: 600,
+      toDataURL: vi.fn().mockReturnValue('data:image/png;base64,fake'),
+    } as unknown as HTMLCanvasElement;
+
+    useDesignStore.getState().exportScreenshot(canvas, 'wooddeck-test.png');
+
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+    const state = useDesignStore.getState();
+    expect(state.status).toBe('idle');
+    expect(state.lastError).toBeNull();
+
+    createSpy.mockRestore();
+  });
+
+  it('zero-size canvas: sets status=error + lastError to a DeckFileError code=canvas-empty', () => {
+    const canvas = {
+      width: 0,
+      height: 0,
+      toDataURL: vi.fn(),
+    } as unknown as HTMLCanvasElement;
+
+    useDesignStore.getState().exportScreenshot(canvas, 'wooddeck-empty.png');
+
+    const state = useDesignStore.getState();
+    expect(state.status).toBe('error');
+    expect(state.lastError).not.toBeNull();
+    // Import lazily to avoid circular test dep on the persistence
+    // barrel; a `.name === 'DeckFileError'` check is enough.
+    expect(state.lastError?.name).toBe('DeckFileError');
+  });
+
+  it('clears a stale error on a subsequent successful export', () => {
+    // First call fails.
+    const bad = {
+      width: 0,
+      height: 0,
+      toDataURL: vi.fn(),
+    } as unknown as HTMLCanvasElement;
+    useDesignStore.getState().exportScreenshot(bad, 'bad.png');
+    expect(useDesignStore.getState().status).toBe('error');
+
+    // Second call succeeds — status/lastError must reset.
+    const clickSpy = vi.fn();
+    const realCreate = document.createElement.bind(document);
+    const createSpy = vi
+      .spyOn(document, 'createElement')
+      .mockImplementation((tag: string) => {
+        const el = realCreate(tag);
+        if (tag === 'a') {
+          (el as HTMLAnchorElement).click = clickSpy;
+        }
+        return el;
+      });
+
+    const good = {
+      width: 800,
+      height: 600,
+      toDataURL: vi.fn().mockReturnValue('data:image/png;base64,fake'),
+    } as unknown as HTMLCanvasElement;
+    useDesignStore.getState().exportScreenshot(good, 'good.png');
+
+    const state = useDesignStore.getState();
+    expect(state.status).toBe('idle');
+    expect(state.lastError).toBeNull();
+
+    createSpy.mockRestore();
+  });
+
+  it('does NOT touch the bundle on error (screenshot is read-only)', () => {
+    const before = useDesignStore.getState().bundle;
+    const bad = {
+      width: 0,
+      height: 0,
+      toDataURL: vi.fn(),
+    } as unknown as HTMLCanvasElement;
+    useDesignStore.getState().exportScreenshot(bad, 'x.png');
+    expect(useDesignStore.getState().bundle).toBe(before);
   });
 });

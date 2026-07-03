@@ -43,3 +43,5 @@ export {
 
 export type { DownloadDeckFileOptions } from './file-io';
 export { downloadDeckFile, readDeckFile } from './file-io';
+
+export { captureCanvasPng, downloadCanvasScreenshot } from './screenshot';
