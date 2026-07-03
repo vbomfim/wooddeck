@@ -62,12 +62,20 @@ vi.mock('@react-three/fiber', async () => {
       children,
       className,
       'aria-label': ariaLabel,
+      tabIndex,
     }: {
       children?: React.ReactNode;
       className?: string;
       'aria-label'?: string;
+      tabIndex?: number;
     }) => (
-      <div data-testid="canvas-mock" className={className} aria-label={ariaLabel} role="img">
+      <div
+        data-testid="canvas-mock"
+        className={className}
+        aria-label={ariaLabel}
+        role="img"
+        tabIndex={tabIndex}
+      >
         {children}
       </div>
     ),
@@ -156,6 +164,19 @@ describe('<DeckScene /> — WebGL 2 supported path', () => {
     const canvas = screen.getByTestId('canvas-mock');
     expect(canvas).toContainElement(screen.getByTestId('layer-a'));
     expect(canvas).toContainElement(screen.getByTestId('layer-b'));
+  });
+
+  // S12 pair-fix iter 1 — Fix D (AC6 real canvas focusability).
+  // Before this fix, `<Canvas>` had an aria-label but NO tabIndex,
+  // so keyboard users tabbed RIGHT PAST the 3D view. Add
+  // tabIndex={0} to make the canvas part of the natural tab order.
+  // This test locks the contract at the DeckScene level; the App
+  // integration test (`App.test.tsx` "real tab order") asserts the
+  // canvas is reachable end-to-end from the shell.
+  it('Fix D: passes tabIndex={0} to the Canvas so it is keyboard-focusable (AC6)', () => {
+    render(<DeckScene />);
+    const canvas = screen.getByTestId('canvas-mock');
+    expect(canvas).toHaveAttribute('tabindex', '0');
   });
 });
 

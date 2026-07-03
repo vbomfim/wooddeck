@@ -12,7 +12,7 @@
  *   persistence → only src/(persistence|domain)/**
  *   state       → only src/(state|application|domain)/**
  *   scene       → only src/(scene|state|domain)/**
- *   ui          → only src/(ui|state|application|domain)/**
+ *   ui          → only src/(ui|state)/**             (S12 issue #13 — dumb view layer)
  *
  * Why state does NOT include persistence (revised in S8 pair-fix): the
  * state store needs `instanceof DeckFileError` narrowing on save
@@ -60,7 +60,16 @@ const ALLOWED_SRC_PATHS = {
   persistence: '^src/(persistence|domain)/',
   state: '^src/(application|domain|state)/',
   scene: '^src/(domain|scene|state)/',
-  ui: '^src/(application|domain|state|ui)/',
+  // S12 issue #13 — the `ui/` layer is the DUMB view: it composes React
+  // panels off the Zustand stores and nothing else. Application-layer
+  // use-cases are the state store's concern (actions on the store), so
+  // ui/ MUST NOT reach into `application/` (bypassing the store) or
+  // `domain/` (rendering raw domain types would leak business logic
+  // into JSX). Composition of `ui/` + `scene/` + `application/`
+  // happens at the root (`src/App.tsx`) — see docs/ARCHITECTURE.md
+  // § 3a. Boundary self-test probes BLOCK-2r..2u enforce this rule
+  // with fixture violations.
+  ui: '^src/(state|ui)/',
 };
 
 // NPM package prefixes that domain/ must NEVER import (spec § NFR-010).

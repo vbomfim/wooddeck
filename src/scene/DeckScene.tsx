@@ -148,6 +148,14 @@ export function DeckScene({ className, children }: DeckSceneProps): JSX.Element 
     <Canvas
       className={className}
       aria-label={DECKSCENE_ARIA_LABEL}
+      // S12 pair-fix iter 1 — Fix D (AC6 real canvas focusability).
+      // The r3f `<Canvas>` forwards unknown HTML attributes to the
+      // underlying `<canvas>` element. Adding tabIndex={0} makes
+      // the 3D view part of the natural tab order — WITHOUT it, a
+      // keyboard user tabs right past the main content and lands
+      // in the right-panel. The AC6 test in App.test.tsx asserts
+      // the real tab order lands here (not on a fake test button).
+      tabIndex={0}
       // Fix A: near / far clipping planes in millimeter world units.
       // r3f's default 0.1 / 1000 would clip every deck member —
       // preset camera distances run 2 700 – 113 600 mm. See

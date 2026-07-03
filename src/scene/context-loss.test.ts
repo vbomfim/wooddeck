@@ -28,6 +28,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 
+import { useUiStore } from '../state';
 import { installContextLossHandler } from './context-loss';
 
 // A minimal fake WebGLRenderer stand-in — implements just the
@@ -40,16 +41,21 @@ function makeFakeGl(): {
 }
 
 let consoleErrorSpy: MockInstance<(...args: unknown[]) => void>;
+const UI_STORE_INITIAL = useUiStore.getInitialState();
 
 beforeEach(() => {
   // `MockInstance` gives us `.mock.calls[i]` typed with our declared
   // signature (`(...args: unknown[]) => void`), which the wooddeck-
   // prefix assertion below inspects.
   consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  // Reset the ui-store so the webglContextLost assertions below
+  // aren't polluted by a prior test that set the flag.
+  useUiStore.setState(UI_STORE_INITIAL, true);
 });
 
 afterEach(() => {
   consoleErrorSpy.mockRestore();
+  useUiStore.setState(UI_STORE_INITIAL, true);
 });
 
 describe('installContextLossHandler', () => {
@@ -106,6 +112,18 @@ describe('installContextLossHandler', () => {
     const message = typeof firstArg === 'string' ? firstArg : '';
     expect(message).toMatch(/\[wooddeck:scene\]/);
     expect(message).toMatch(/context lost/i);
+  });
+
+  it('firing webglcontextlost flips ui-store webglContextLost=true (S12 Fix C)', () => {
+    const gl = makeFakeGl();
+    installContextLossHandler(gl);
+    // Precondition: the store starts with the flag `false`.
+    expect(useUiStore.getState().webglContextLost).toBe(false);
+
+    const event = new Event('webglcontextlost', { cancelable: true });
+    gl.domElement.dispatchEvent(event);
+
+    expect(useUiStore.getState().webglContextLost).toBe(true);
   });
 
   it('after cleanup, firing the event does NOT invoke the handler', () => {

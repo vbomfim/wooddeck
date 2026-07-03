@@ -1,0 +1,47 @@
+/*
+ * `src/ui/styles/app-header.css` — top header (h1 name / version /
+ * spec link).
+ */
+.wd-app-header {
+  z-index: var(--wd-z-header);
+  padding: var(--wd-space-2) var(--wd-space-4);
+  background: var(--wd-color-surface);
+  color: var(--wd-color-text);
+  border-bottom: 1px solid var(--wd-color-border);
+  min-height: var(--wd-header-height);
+  display: flex;
+  align-items: baseline;
+  gap: var(--wd-space-4);
+}
+
+.wd-app-header__title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.wd-app-header__version {
+  color: var(--wd-color-text-muted);
+  font-size: 0.75rem;
+  font-family:
+    ui-monospace,
+    'SF Mono',
+    Menlo,
+    Monaco,
+    Consolas,
+    'Liberation Mono',
+    'Courier New',
+    monospace;
+}
+
+.wd-app-header__spec-link {
+  margin-left: auto;
+  color: var(--wd-focus-outline-color);
+  font-size: 0.875rem;
+  text-decoration: underline;
+}
+
+.wd-app-header__spec-link:hover {
+  text-decoration: none;
+}

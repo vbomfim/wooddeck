@@ -1,0 +1,50 @@
+/*
+ * `src/ui/styles/scene-error-boundary.css` — S12 pair-fix iter 1
+ * Fix B.
+ *
+ * The fallback fills the AppShell's main slot when the lazy scene
+ * subtree throws. Kept intentionally low-contrast (grey surface)
+ * because losing the 3D view is less severe than losing the
+ * disclaimer — the disclaimer + banners above and the panels to
+ * the sides all still work.
+ */
+.wd-scene-error {
+  height: 100%;
+  min-height: 12rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--wd-space-3);
+  align-items: center;
+  justify-content: center;
+  padding: var(--wd-space-6);
+  background: var(--wd-color-scene-error-bg);
+  color: var(--wd-color-scene-error-text);
+  border: 1px solid var(--wd-color-scene-error-border);
+  text-align: center;
+}
+
+.wd-scene-error__title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.wd-scene-error__body {
+  margin: 0;
+  max-width: 40rem;
+  line-height: 1.5;
+}
+
+.wd-scene-error__reload {
+  padding: var(--wd-space-2) var(--wd-space-4);
+  background: var(--wd-color-surface);
+  color: var(--wd-color-text);
+  border: 1px solid var(--wd-color-border);
+  border-radius: 4px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.wd-scene-error__reload:hover {
+  background: var(--wd-color-surface-alt);
+}

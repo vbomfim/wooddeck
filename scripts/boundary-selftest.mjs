@@ -36,11 +36,48 @@
  *   - be deleted by `cleanup()` (fixture directory is `rm -rf`ed)
  */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(import.meta.url), '..', '..');
+
+/**
+ * S12 pair-fix iter 1 — Fix E (GPT#4 SHOULD-FIX).
+ *
+ * `npx depcruise` / `npx eslint` were the previous invocation
+ * shape. Those forms tell npm-exec to fall back to the network if
+ * the local binary "looks missing" (a heuristic that periodically
+ * misfires — most often after a partial cache clear or when npm
+ * decides to reinstall its own bootstrap). The observed failure
+ * mode: `npx` would try to install a placeholder `depcruise@1.0.0`
+ * from a NON-EXISTENT registry entry, or would resolve the local
+ * binary but fail with "Cannot find module 'chalk'" because it
+ * picked up a stale node_modules layout during a race.
+ *
+ * The deterministic fix: point directly at the LOCAL binary
+ * (`node_modules/.bin/…`), and fail FAST with a clear diagnostic
+ * if it isn't present (rather than falling back to a network
+ * install). CI must have already run `npm ci` — the binaries WILL
+ * exist. If they don't, the environment is broken and the harness
+ * should say so instead of masking the problem with a re-install.
+ */
+const DEPCRUISE_BIN = resolve(ROOT, 'node_modules', '.bin', 'depcruise');
+const ESLINT_BIN = resolve(ROOT, 'node_modules', '.bin', 'eslint');
+
+function assertLocalBinary(binPath, humanName) {
+  if (!existsSync(binPath)) {
+    console.error(
+      `\n[boundary-selftest] FATAL: local ${humanName} binary not found at ${binPath}.\n` +
+        `Run \`npm ci\` first. This harness deliberately does NOT fall\n` +
+        `back to \`npx\` (which spuriously reddens CI when it attempts\n` +
+        `a network re-install — the exact failure mode Fix E targets).\n`,
+    );
+    process.exit(2);
+  }
+}
+assertLocalBinary(DEPCRUISE_BIN, 'dependency-cruiser');
+assertLocalBinary(ESLINT_BIN, 'eslint');
 // Every layer that MIGHT host a fixture OR a fixture target. `rm -rf` on
 // setup + teardown makes cross-run pollution impossible.
 const SELFTEST_DIRS = [
@@ -222,6 +259,84 @@ export const _ = StubDeckScene;
         path: 'src/scene/__selftest__/target.ts',
         contents: `// self-test target for BLOCK-2d — resolves the offending import
 export const StubDeckScene = 'stub';
+`,
+      },
+    ],
+    tool: 'depcruise',
+    expectedRule: 'ui-allowlist',
+    mustNameFile: true,
+  },
+  {
+    // S12 issue #13 boundary rule: ui/ MUST NOT import from
+    // domain/. The dumb-view layer renders JSX from Zustand state
+    // only; a `ui/` import of `../../domain/...` would drag business
+    // logic (layout math, span-check) into the JSX render path.
+    // Domain data flows through `state/` (which owns the DesignBundle);
+    // panels read shaped view models from state hooks. Pair-fix with
+    // BLOCK-2d (ui→scene), BLOCK-2s (ui→application), BLOCK-2t
+    // (ui→persistence) — the four together lock down the dumb-view
+    // boundary structurally, not by convention.
+    label: 'BLOCK-2r: ui reaches into src/domain (business-logic leak)',
+    path: 'src/ui/__selftest__/allowlist-domain.ts',
+    contents: `// self-test fixture — MUST fail lint:boundaries (allowlist)
+import { stubDomain } from '../../domain/__selftest__/ui-target';
+export const _ = stubDomain;
+`,
+    targets: [
+      {
+        path: 'src/domain/__selftest__/ui-target.ts',
+        contents: `// self-test target for BLOCK-2r — resolves the offending import
+export const stubDomain = 'stub';
+`,
+      },
+    ],
+    tool: 'depcruise',
+    expectedRule: 'ui-allowlist',
+    mustNameFile: true,
+  },
+  {
+    // S12 issue #13 boundary rule: ui/ MUST NOT import from
+    // application/. Use-cases are invoked via state store actions
+    // (the store is the sole caller of the application layer); a
+    // panel that reached directly into `application/` would bypass
+    // the store, breaking undo/redo (zundo tracks store mutations)
+    // and cross-store coordination (banner set on save-fail).
+    label: 'BLOCK-2s: ui reaches into src/application (bypasses state store)',
+    path: 'src/ui/__selftest__/allowlist-application.ts',
+    contents: `// self-test fixture — MUST fail lint:boundaries (allowlist)
+import { stubApp } from '../../application/__selftest__/ui-target';
+export const _ = stubApp;
+`,
+    targets: [
+      {
+        path: 'src/application/__selftest__/ui-target.ts',
+        contents: `// self-test target for BLOCK-2s — resolves the offending import
+export const stubApp = 'stub';
+`,
+      },
+    ],
+    tool: 'depcruise',
+    expectedRule: 'ui-allowlist',
+    mustNameFile: true,
+  },
+  {
+    // S12 issue #13 boundary rule: ui/ MUST NOT import from
+    // persistence/. Every persistence action flows through the state
+    // store (which routes through application/); a panel reaching
+    // directly into localStorage/file-io would bypass the AC6/AC9
+    // storage banner + the autosave debounce. This fixture LOCKS IN
+    // that separation.
+    label: 'BLOCK-2t: ui reaches into src/persistence (I/O bypass)',
+    path: 'src/ui/__selftest__/allowlist-persistence.ts',
+    contents: `// self-test fixture — MUST fail lint:boundaries (allowlist)
+import { stubPers } from '../../persistence/__selftest__/ui-target';
+export const _ = stubPers;
+`,
+    targets: [
+      {
+        path: 'src/persistence/__selftest__/ui-target.ts',
+        contents: `// self-test target for BLOCK-2t — resolves the offending import
+export const stubPers = 'stub';
 `,
       },
     ],
@@ -524,9 +639,11 @@ function writeFixture(fixture) {
 
 function runLint(tool, targetPath) {
   if (tool === 'depcruise') {
+    // Fix E: local binary — no `npx` fallback. See top-of-file
+    // comment for the flaky-npx failure history this replaces.
     return spawnSync(
-      'npx',
-      ['depcruise', '--config', '.dependency-cruiser.cjs', 'src'],
+      DEPCRUISE_BIN,
+      ['--config', '.dependency-cruiser.cjs', 'src'],
       { cwd: ROOT, encoding: 'utf8' },
     );
   }
@@ -535,8 +652,8 @@ function runLint(tool, targetPath) {
     // Boundary rules for ESLint are the `src/domain/**` override which
     // applies regardless of the file path we lint here.
     return spawnSync(
-      'npx',
-      ['eslint', '--no-warn-ignored', targetPath],
+      ESLINT_BIN,
+      ['--no-warn-ignored', targetPath],
       { cwd: ROOT, encoding: 'utf8' },
     );
   }

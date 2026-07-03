@@ -16,18 +16,28 @@
  *     stand-in (any object exposing `domElement`) and assert:
  *       (1) the listener is registered on the correct element,
  *       (2) firing the event calls `preventDefault()` +
- *           `console.error()` with the wooddeck-scoped prefix,
+ *           `console.error()` with the wooddeck-scoped prefix
+ *           + flips the ui-store `webglContextLost` flag,
  *       (3) the returned cleanup removes the listener.
  *
- * ## Why NO UI banner here (§5 / S12 boundary)
+ * ## User-facing surfacing (S12 pair-fix iter 1 — Fix C)
  *
- * Turning a context-loss into a user-facing "3D view crashed —
- * please reload" banner is the AppShell's job (S12 — banner
- * surfacing lives with the other storage/error banners in the
- * ui-store). This module ONLY drops a diagnostic into the ops /
- * developer console. S12 will layer a Zustand `setStorageBanner`
- * (or new `setContextLossBanner`) call on top when it lands.
+ * S9 promised "UI banner shows '3D view crashed — please reload.'"
+ * (§5) but left the surfacing wiring for S12. This module now
+ * writes to `useUiStore.getState().setWebglContextLost(true)` when
+ * the event fires — S12's `<ContextLostBanner>` reads that flag
+ * and renders the user-facing message with a Reload button.
+ *
+ * ## Boundary
+ *
+ * Scene → state is an allowed dep-cruiser channel (scene already
+ * reads state via the granular hooks; writing an ORTHOGONAL
+ * surface via `useUiStore.getState()` follows the same channel).
+ * The console.error is retained as a developer-side diagnostic
+ * that's easy to grep for in production log aggregation.
  */
+
+import { useUiStore } from '../state';
 
 /**
  * Minimal contract required from the WebGL renderer — just the
@@ -43,10 +53,15 @@ export interface ContextLossTarget {
 
 /**
  * Registers a `webglcontextlost` listener on the renderer's canvas.
- * The listener calls `event.preventDefault()` (per the WebGL spec —
- * required to enable the paired `webglcontextrestored` event) and
- * logs a wooddeck-scoped diagnostic to the console so ops can
- * grep it in production log aggregation.
+ * The listener:
+ *
+ *   1. Calls `event.preventDefault()` (per the WebGL spec —
+ *      required to enable the paired `webglcontextrestored` event).
+ *   2. Logs a wooddeck-scoped diagnostic to `console.error` so ops
+ *      can grep it in production log aggregation.
+ *   3. Flips `useUiStore.getState().setWebglContextLost(true)` so
+ *      S12's `<ContextLostBanner>` can surface a user-facing
+ *      "3D view crashed — please reload" message.
  *
  * @param gl  the WebGL renderer (or any object exposing
  *            `domElement` — the fake used in the tests).
@@ -64,6 +79,12 @@ export function installContextLossHandler(gl: ContextLossTarget): () => void {
     console.error(
       '[wooddeck:scene] WebGL context lost — the 3D viewer needs to reload.',
     );
+    // S12 pair-fix iter 1 — Fix C. Reach into the store via
+    // getState() rather than a subscription: this is a
+    // fire-and-forget WRITE from a DOM event handler that is not
+    // a React component, so there's no hook to call. The store
+    // action is idempotent (setting `true` twice is a no-op).
+    useUiStore.getState().setWebglContextLost(true);
   };
   gl.domElement.addEventListener('webglcontextlost', handler, { passive: false });
   return () => {

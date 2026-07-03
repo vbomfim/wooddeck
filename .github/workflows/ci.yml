@@ -67,3 +67,11 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Build-artifact invariants (SC-009 code-split + shell budget)
+        # After `vite build`, assert `dist/assets/` emits the code-
+        # split contract: r3f/three chunk separate from the shell,
+        # DeckScene chunk separate, shell gzipped size under the
+        # documented SC-009 budget. See scripts/check-build-artifacts.mjs
+        # module header for the rationale + budget notes.
+        run: npm run test:artifacts

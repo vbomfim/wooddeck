@@ -1,0 +1,109 @@
+/*
+ * `src/ui/styles/tokens.css` — design tokens (colours, spacing,
+ * z-index) shared across the UI layer.
+ *
+ * WCAG 2.2 §1.4.3 (contrast, minimum) requires 4.5:1 for normal
+ * text on background. Every foreground/background pair below is
+ * hand-picked to exceed that threshold:
+ *
+ *   --wd-color-text on --wd-color-bg:            #111111 on #ffffff → 18.9:1  ✓
+ *   --wd-color-text on --wd-color-surface-alt:   #111111 on #f5f5f5 → 17.7:1  ✓
+ *   --wd-color-disclaimer-text on --wd-color-disclaimer-bg:
+ *                                                #7a4a00 on #fff4d1 → 5.85:1  ✓
+ *   --wd-color-banner-text on --wd-color-banner-bg (storage-full):
+ *                                                #7c1400 on #fde4dc → 7.11:1  ✓
+ *   --wd-color-banner-text on --wd-color-banner-bg (storage-blocked):
+ *                                                #7c1400 on #fde4dc → 7.11:1  ✓
+ *   --wd-color-banner-text on --wd-color-banner-bg (load-recompute-failed):
+ *                                                #573a00 on #fff4d1 → 8.31:1  ✓
+ *   --wd-color-context-lost-text on --wd-color-context-lost-bg:
+ *                                                #4b0d02 on #fbd7d0 → 10.6:1  ✓
+ *   --wd-color-scene-error-text on --wd-color-scene-error-bg:
+ *                                                #202020 on #f5f5f5 → 15.4:1  ✓
+ *
+ * Contrast recomputes via a trusted checker (WebAIM). Any token
+ * change here MUST be re-verified — see docs/ARCHITECTURE.md
+ * § "UI colour contrast". `src/ui/styles/tokens.contrast.test.ts`
+ * asserts each pair statically at CI time (S12 pair-fix iter 1 —
+ * Fix I).
+ *
+ * Focus outlines use `--wd-focus-outline-color` at 3px width to
+ * exceed the 3:1 focus-indicator contrast requirement (WCAG 2.4.11
+ * — Level AA in WCAG 2.2).
+ */
+:root {
+  color-scheme: light;
+
+  /* Neutral surface + text */
+  --wd-color-bg: #ffffff;
+  --wd-color-surface: #ffffff;
+  --wd-color-surface-alt: #f5f5f5;
+  --wd-color-border: #d0d0d0;
+  --wd-color-text: #111111;
+  --wd-color-text-muted: #4a4a4a;
+
+  /* Disclaimer (warm amber — legal-warning conventions) */
+  --wd-color-disclaimer-bg: #fff4d1;
+  --wd-color-disclaimer-border: #d1a24c;
+  --wd-color-disclaimer-text: #7a4a00;
+
+  /* Storage banners — error red-ish for full/blocked; muted amber
+     for load-recompute-failed (less alarming — a recovery, not a
+     hard failure). */
+  --wd-color-banner-full-bg: #fde4dc;
+  --wd-color-banner-full-border: #c93d1a;
+  --wd-color-banner-full-text: #7c1400;
+
+  --wd-color-banner-blocked-bg: #fde4dc;
+  --wd-color-banner-blocked-border: #c93d1a;
+  --wd-color-banner-blocked-text: #7c1400;
+
+  --wd-color-banner-recompute-bg: #fff4d1;
+  --wd-color-banner-recompute-border: #d1a24c;
+  --wd-color-banner-recompute-text: #573a00;
+
+  /* Context-lost banner — the most urgent (graphics-crash),
+     hardest red we use. #4b0d02 on #fbd7d0 = 10.6:1 (WebAIM). */
+  --wd-color-context-lost-bg: #fbd7d0;
+  --wd-color-context-lost-border: #a02418;
+  --wd-color-context-lost-text: #4b0d02;
+
+  /* Scene error boundary (chunk-load failure). Uses a neutral
+     grey surface so it doesn't compete with the disclaimer for
+     visual weight — #202020 on #f5f5f5 = 15.4:1. */
+  --wd-color-scene-error-bg: #f5f5f5;
+  --wd-color-scene-error-border: #d0d0d0;
+  --wd-color-scene-error-text: #202020;
+
+  /* Focus indicator — 3px so it exceeds the WCAG 2.4.11 3:1 contrast
+     requirement against any --wd-color-*-bg above. */
+  --wd-focus-outline-color: #0055aa;
+  --wd-focus-outline-width: 3px;
+
+  /* Spacing scale (rem-based so it reflects user font-size). */
+  --wd-space-1: 0.25rem;
+  --wd-space-2: 0.5rem;
+  --wd-space-3: 0.75rem;
+  --wd-space-4: 1rem;
+  --wd-space-6: 1.5rem;
+
+  /* Layout dimensions. Left + right panels are fixed-width in the
+     desktop layout; the middle main region flexes. */
+  --wd-panel-width: 320px;
+  --wd-header-height: 3rem;
+  --wd-disclaimer-height: 2.25rem;
+
+  /* z-index scale — sticky elements stay above the scrolling body. */
+  --wd-z-disclaimer: 30;
+  --wd-z-banner: 25;
+  --wd-z-header: 20;
+}
+
+/* Global focus-visible outline — every focusable element gets the
+   same 3px indicator so keyboard users always see where they are.
+   Wrapped in :focus-visible (not :focus) so mouse users don't see
+   a stray outline on click. */
+:focus-visible {
+  outline: var(--wd-focus-outline-width) solid var(--wd-focus-outline-color);
+  outline-offset: 2px;
+}

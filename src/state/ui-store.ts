@@ -110,6 +110,29 @@ export interface UiStoreState {
    * three discriminator values.
    */
   readonly storageBanner: StorageBanner;
+  /**
+   * WebGL context-lost flag — set by
+   * {@link installContextLossHandler} (in `src/scene/context-loss.ts`)
+   * when the GPU driver drops the context. Rendered as a
+   * user-facing "3D view crashed — please reload" banner by S12's
+   * `<ContextLostBanner>`. Kept as a SEPARATE field from
+   * `storageBanner` because the two concerns are orthogonal
+   * (persistence vs. graphics) and their banners must be able to
+   * coexist — e.g. a page in `storage-full` state can also lose
+   * its WebGL context.
+   *
+   * ## Boundary (S12 pair-fix iter 1 — Fix C)
+   *
+   * The scene layer MAY write this via
+   * `useUiStore.getState().setWebglContextLost(true)`. Scene→state
+   * is an allowed boundary (scene reads state via the granular
+   * hooks; writing an ORTHOGONAL surface via `getState()` follows
+   * the same channel — see the `design-store.setStorageBanner`
+   * precedent). The UI layer reads it via
+   * `useUiStore(s => s.webglContextLost)` — ui→state, also allowed.
+   * Neither direction requires a scene↔ui coupling.
+   */
+  readonly webglContextLost: boolean;
 }
 
 export interface UiStoreActions {
@@ -119,6 +142,16 @@ export interface UiStoreActions {
   showAllLayers(): void;
   hideAllLayers(): void;
   setStorageBanner(banner: StorageBanner): void;
+  /**
+   * Set the WebGL context-lost flag. Called by the scene's
+   * `installContextLossHandler` when the GPU driver drops the
+   * context. Idempotent — setting to `true` twice is a no-op.
+   * There is NO setter to `false`: WebGL context-restored is a
+   * separate event we don't yet handle, and reloading the page
+   * is the only reliable recovery. If a future story implements
+   * proper restore-and-recreate, this contract can loosen.
+   */
+  setWebglContextLost(lost: boolean): void;
 }
 
 /**
@@ -157,6 +190,7 @@ export const useUiStore = create<UiStoreState & UiStoreActions>((set) => ({
   layerVisibility: ALL_LAYERS_VISIBLE,
   disclaimerAcknowledged: false,
   storageBanner: null,
+  webglContextLost: false,
 
   // ---- actions ---------------------------------------------------
   //
@@ -182,5 +216,8 @@ export const useUiStore = create<UiStoreState & UiStoreActions>((set) => ({
   },
   setStorageBanner(storageBanner): void {
     set({ storageBanner });
+  },
+  setWebglContextLost(webglContextLost): void {
+    set({ webglContextLost });
   },
 }));

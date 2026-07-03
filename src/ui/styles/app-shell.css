@@ -1,0 +1,170 @@
+/*
+ * `src/ui/styles/app-shell.css` — CSS-grid layout for AppShell.
+ *
+ * Grid template:
+ *
+ *   Row 1: DisclaimerBanner (sticky)
+ *   Row 2: StorageBanner (auto — 0 height when null)
+ *   Row 3: AppHeader
+ *   Row 4: Mobile note (0 height on desktop via display:none)
+ *   Row 5: Body — three columns [leftPanel | main | rightPanel]
+ *
+ * Desktop viewports (≥ 1024px) use a three-column grid inside the
+ * body row; narrower viewports collapse to a single-column stack
+ * (main first, then panels — the deck is the primary content).
+ *
+ * `color-scheme: light` is on :root (tokens.css) so dark-mode
+ * browsers do NOT auto-invert.
+ */
+
+/* -------------------------------------------------------------------------
+ * Root container — fill the viewport, use a vertical grid for chrome rows,
+ * flex the body region to fill remaining height.
+ * ------------------------------------------------------------------------- */
+.wd-app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto auto auto auto 1fr;
+  background: var(--wd-color-bg);
+  color: var(--wd-color-text);
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    'Helvetica Neue',
+    Arial,
+    sans-serif;
+  color-scheme: light;
+}
+
+/* -------------------------------------------------------------------------
+ * Mobile note — hidden on desktop (≥ 640px), shown on narrow viewports.
+ * The disclaimer still renders above it (SC-007 first-paint invariant
+ * remains).
+ * ------------------------------------------------------------------------- */
+.wd-app-shell__mobile-note {
+  margin: 0;
+  padding: var(--wd-space-2) var(--wd-space-4);
+  background: var(--wd-color-surface-alt);
+  color: var(--wd-color-text-muted);
+  font-size: 0.875rem;
+  text-align: center;
+  border-bottom: 1px solid var(--wd-color-border);
+}
+
+@media (min-width: 640px) {
+  .wd-app-shell__mobile-note {
+    display: none;
+  }
+}
+
+/* -------------------------------------------------------------------------
+ * Body — desktop grid, mobile stack.
+ * ------------------------------------------------------------------------- */
+.wd-app-shell__body {
+  display: grid;
+  min-height: 0; /* Prevent auto-min-content from blowing out the layout. */
+}
+
+@media (min-width: 1024px) {
+  .wd-app-shell__body {
+    grid-template-columns: var(--wd-panel-width) 1fr var(--wd-panel-width);
+    grid-template-areas: 'left main right';
+  }
+  .wd-app-shell__left {
+    grid-area: left;
+  }
+  .wd-app-shell__main {
+    grid-area: main;
+  }
+  .wd-app-shell__right {
+    grid-area: right;
+  }
+}
+
+@media (max-width: 1023px) {
+  /* Stack: main first, then the two asides below it. Users on a
+     narrow viewport get the 3D view immediately; panels are still
+     reachable by scrolling. */
+  .wd-app-shell__body {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      'main'
+      'left'
+      'right';
+  }
+  .wd-app-shell__left {
+    grid-area: left;
+  }
+  .wd-app-shell__main {
+    grid-area: main;
+  }
+  .wd-app-shell__right {
+    grid-area: right;
+  }
+}
+
+/* -------------------------------------------------------------------------
+ * Panels — consistent surface, border on the shared edge with main.
+ * ------------------------------------------------------------------------- */
+.wd-app-shell__left,
+.wd-app-shell__right {
+  background: var(--wd-color-surface-alt);
+  color: var(--wd-color-text);
+  padding: var(--wd-space-3);
+  overflow-y: auto;
+  min-height: 0;
+}
+
+@media (min-width: 1024px) {
+  .wd-app-shell__left {
+    border-right: 1px solid var(--wd-color-border);
+  }
+  .wd-app-shell__right {
+    border-left: 1px solid var(--wd-color-border);
+  }
+}
+
+@media (max-width: 1023px) {
+  .wd-app-shell__left,
+  .wd-app-shell__right {
+    border-top: 1px solid var(--wd-color-border);
+  }
+}
+
+/* -------------------------------------------------------------------------
+ * Main — fill the column, no padding (the canvas fills edge-to-edge).
+ * ------------------------------------------------------------------------- */
+.wd-app-shell__main {
+  background: var(--wd-color-bg);
+  overflow: hidden;
+  min-height: 0;
+}
+
+/* -------------------------------------------------------------------------
+ * Panel headings — <h2>s inside the panels. Style-only; the a11y
+ * landmark is on the wrapper <aside>.
+ * ------------------------------------------------------------------------- */
+.wd-app-shell__left h2,
+.wd-app-shell__right h2 {
+  margin: 0 0 var(--wd-space-3) 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--wd-color-text);
+}
+
+/* -------------------------------------------------------------------------
+ * Reduced-motion gate.
+ *
+ * The shell itself has no transitions today (static layout), but the
+ * @media block below is documented as the ONLY place transitions may
+ * live. Adding a transition here without the gate is a WCAG 2.3.3
+ * violation — AppShell.test.tsx enforces the "no transition outside
+ * this block" invariant via a source-file grep.
+ * ------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: no-preference) {
+  /* Currently empty — reserved for future transitions. All future
+     transition/animation properties on .wd-app-shell__* MUST live
+     inside this @media block. */
+}
