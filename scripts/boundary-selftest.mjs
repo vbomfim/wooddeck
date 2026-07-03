@@ -51,6 +51,10 @@ const SELFTEST_DIRS = [
   resolve(ROOT, 'src', 'state', '__selftest__'),
   resolve(ROOT, 'src', 'scene', '__selftest__'),
   resolve(ROOT, 'src', 'ui', '__selftest__'),
+  // Non-src fixture target dir — used by BLOCK-2g to prove the
+  // persistence-non-src-imports rule fires when persistence reaches
+  // outside `src/` (into `scripts/`, `docs/`, etc.).
+  resolve(ROOT, 'scripts', '__selftest__'),
 ];
 
 /**
@@ -176,6 +180,33 @@ export const stubSave = 'stub';
     ],
     tool: 'depcruise',
     expectedRule: 'state-allowlist',
+    mustNameFile: true,
+  },
+  {
+    // PR#26 pair-fix iter 1 — Code Review GPT#5. The persistence-
+    // allowlist rule only scopes on `^src/` targets, so a file under
+    // `src/persistence/**` that imported a project-relative NON-src
+    // path (e.g. `../../../scripts/build/foo.ts`, `../../package.json`)
+    // would sail past it. The new `persistence-non-src-imports` rule
+    // closes that hole: only `docs/deck-file-schema-v1.json` and npm /
+    // node core packages are allowed outside `src/`. This fixture
+    // proves the rule fires when persistence reaches into `scripts/`.
+    label: 'BLOCK-2g: persistence reaches into scripts/ (non-src project file)',
+    path: 'src/persistence/__selftest__/non-src-scripts.ts',
+    contents: `// self-test fixture — MUST fail lint:boundaries (persistence-non-src-imports)
+import { stubHelper } from '../../../scripts/__selftest__/persistence-target';
+export const _ = stubHelper;
+`,
+    targets: [
+      {
+        path: 'scripts/__selftest__/persistence-target.ts',
+        contents: `// self-test target for BLOCK-2g — resolves the offending import
+export const stubHelper = 'stub';
+`,
+      },
+    ],
+    tool: 'depcruise',
+    expectedRule: 'persistence-non-src-imports',
     mustNameFile: true,
   },
   {

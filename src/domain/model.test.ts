@@ -31,12 +31,10 @@ import type {
   DeckDesign,
   Layout,
   LayoutMember,
-  LumberNominal,
-  MaterialRef,
   MemberKind,
-  Species,
   Warning,
 } from './model';
+import { deckDesignArb } from './__testing__/deck-design-arb';
 
 // ---------------------------------------------------------------------------
 // Golden fixture — hand-crafted DeckDesign used by the AC4 byte-for-byte
@@ -135,83 +133,11 @@ describe('model — AC4 DeckDesign JSON round-trip (golden fixture)', () => {
 // ---------------------------------------------------------------------------
 // AC4 — property test: any generated DeckDesign is round-trip stable.
 // ---------------------------------------------------------------------------
-
-// Value sets used by the arbitrary — kept as literal arrays (not read
-// from the catalog) so this test remains independent of any change to
-// the catalog module.
-const NOMINALS_2X: readonly LumberNominal[] = ['2x6', '2x8', '2x10', '2x12'];
-const POST_NOMINALS: readonly LumberNominal[] = ['4x4', '6x6'];
-const DECKING_NOMINALS: readonly LumberNominal[] = ['2x6', '5/4x6'];
-const PT_CEDAR: readonly Species[] = ['PT', 'Cedar'];
-
-/**
- * Small arbitrary that constructs a MaterialRef whose (nominal, species,
- * grade) triple is INTERNALLY consistent (Composite → grade "NA";
- * everything else → grade "No2"). Only the triples actually present in
- * the MVP catalog are generated so the fixture stays realistic — a
- * catalog lookup is NOT performed here, but the values are the ones
- * S5–S8 will see in real use.
- */
-function ptCedarNo2Arb(nominals: readonly LumberNominal[]): fc.Arbitrary<MaterialRef> {
-  return fc
-    .record({
-      nominal: fc.constantFrom(...nominals),
-      species: fc.constantFrom(...PT_CEDAR),
-    })
-    .map(
-      (r): MaterialRef => ({
-        nominal: r.nominal,
-        species: r.species,
-        grade: 'No2',
-      }),
-    );
-}
-
-function compositeDeckingArb(): fc.Arbitrary<MaterialRef> {
-  return fc.constantFrom(...DECKING_NOMINALS).map(
-    (nominal): MaterialRef => ({
-      nominal,
-      species: 'Composite',
-      grade: 'NA',
-    }),
-  );
-}
-
-const deckingMaterialArb: fc.Arbitrary<MaterialRef> = fc.oneof(
-  ptCedarNo2Arb(DECKING_NOMINALS),
-  compositeDeckingArb(),
-);
-
-const deckDesignArb: fc.Arbitrary<DeckDesign> = fc
-  .record({
-    id: fc.uuid({ version: 4 }),
-    createdAtEpochMs: fc.integer({ min: 0, max: 4102444800000 }), // ≤ year 2100
-    widthMm: fc.integer({ min: 1000, max: 20000 }),
-    lengthMm: fc.integer({ min: 1000, max: 20000 }),
-    heightMm: fc.integer({ min: 0, max: 3000 }),
-    joistMaterial: ptCedarNo2Arb(NOMINALS_2X),
-    joistSpacingMm: fc.constantFrom(305, 406, 610), // 12" / 16" / 24" o.c.
-    beamMaterial: ptCedarNo2Arb(NOMINALS_2X),
-    postMaterial: ptCedarNo2Arb(POST_NOMINALS),
-    deckingMaterial: deckingMaterialArb,
-    orientation: fc.constantFrom('parallel-to-length' as const, 'parallel-to-width' as const),
-    bayRemainderStrategy: fc.constantFrom(
-      'extra-bay-at-end' as const,
-      'centered' as const,
-    ),
-  })
-  .map(
-    (r): DeckDesign => ({
-      id: r.id,
-      createdAt: new Date(r.createdAtEpochMs).toISOString(),
-      footprint: { widthMm: r.widthMm, lengthMm: r.lengthMm, heightMm: r.heightMm },
-      joist: { material: r.joistMaterial, spacingMm: r.joistSpacingMm },
-      beam: { material: r.beamMaterial },
-      post: { material: r.postMaterial },
-      decking: { material: r.deckingMaterial, orientation: r.orientation },
-      layout: { bayRemainderStrategy: r.bayRemainderStrategy },
-    }),
-  );
+//
+// The `deckDesignArb` generator lives in `./__testing__/deck-design-arb.ts`
+// (shared with the S6 persistence round-trip tests) so both suites
+// exercise the SAME value space. See that module's header for the
+// catalog subset it draws from.
 
 describe('model — AC4 DeckDesign JSON round-trip (property test)', () => {
   it('stringify → parse → stringify is byte-for-byte identical for any generated DeckDesign', () => {

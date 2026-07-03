@@ -61,9 +61,29 @@ export async function readDeckFile(file: File): Promise<DeckDesign>;            
 
 // -------- Errors --------
 export class DeckFileError extends Error {
-  constructor(public code: "unknown-schema" | "invalid-json" | "schema-validation-failed" | "storage-full" | "storage-blocked", message: string, public cause?: unknown);
+  constructor(
+    public code:
+      | "unknown-schema"
+      | "invalid-json"
+      | "schema-validation-failed"
+      | "file-too-large"       // widened in PR #26 review — DoS cap hit before validation ran
+      | "file-read-failed"     // widened in PR #26 review — FileReader.onerror (not JSON parse)
+      | "storage-full"
+      | "storage-blocked",
+    message: string,
+    public cause?: unknown,
+  );
 }
 ```
+
+The `file-too-large` / `file-read-failed` codes were added during the S6
+review gate (PR #26, Code Review GPT #2 + Opus #1). Rationale: the
+previous mapping — oversize → `schema-validation-failed`, read error →
+`invalid-json` — was misleading (validation never ran; nothing was
+parsed). The seven-code union is now the frozen `DeckFileErrorCode`
+enum; expansion requires a further ticket revision. Consumers that
+`switch` on `.code` MUST include both new arms (TypeScript
+exhaustiveness enforces this at build time).
 
 **Input contract:** `DeckDesign` from domain, or raw JSON strings from user files.
 **Output contract:** JSON strings, `DeckDesign` values, or `DeckFileError`.
@@ -87,11 +107,36 @@ export class DeckFileError extends Error {
 
 ### Acceptance Criteria
 
-**AC1: Round-trip identity**
-- Given any `DeckDesign` `D`,
-- When `deserialize(serialize(D)).design` is compared to `D`,
-- Then they are deep-equal.
-- Additionally, `serialize(deserialize(serialize(D)).design) === serialize(D)` (byte-for-byte).
+**AC1: Round-trip identity (honest contract)**
+
+Envelope `createdAt` is FILE-GENERATION metadata (stamped from the wall
+clock at each `serialize` call) and `generatorVersion` is BUILD metadata
+— both are volatile by design and are intentionally NOT part of
+round-trip identity. The identity contract is stated over the design
+payload plus a metadata-preserving byte-identity, NOT over two
+independent default `serialize()` invocations (whose `createdAt` values
+differ on purpose).
+
+For any `DeckDesign` `D`:
+
+1. **Design round-trips** — `deserialize(serialize(D)).design` is deep-equal to `D`.
+2. **Metadata-preserving byte-identity** — given `s = serialize(D)` and
+   `{ design, meta } = deserialize(s)`, the invariant
+   `serialize(design, { createdAt: meta.createdAt, generatorVersion: meta.generatorVersion }) === s`
+   holds byte-for-byte. This preserves canonical field order (SC-006)
+   without pretending `createdAt` is stable.
+3. **Design payload JSON is byte-stable** — two `serialize(D, opts)` calls
+   with the same pinned `{ createdAt, generatorVersion }` produce
+   byte-identical envelopes (proves determinism of the design serializer
+   independent of clock drift).
+
+The prior wording of AC1 —
+`serialize(deserialize(serialize(D)).design) === serialize(D)` —
+was a weakened variant: it only "passed" in tests because they injected
+a pinned `createdAt` behind the scenes. Retaining that wording would
+encode a fake acceptance criterion. AC1 is now stated honestly over the
+three invariants above (see `schema-v1.test.ts` — "AC1 honest round-trip
+contract").
 
 **AC2: Envelope contents**
 - Given `serialize(D)` output,
@@ -136,7 +181,9 @@ export class DeckFileError extends Error {
 
 ### Edge Cases
 - LocalStorage disabled (private browsing on some browsers) → `saveDesignToLocalStorage` throws `code: "storage-blocked"`.
-- File > 10 MB → still handled (no artificial limit for MVP), but `readDeckFile` should reject `File`s with `.size > 10 * 1024 * 1024` with a `DeckFileError` to prevent DoS.
+- File > 10 MB → rejected by `readDeckFile` with `DeckFileError code: "file-too-large"` (dedicated code, widened in PR #26 review). The cap check runs BEFORE any `FileReader` byte is issued — `readFileAsText` is never called for oversize input (proven by test G5 which spies on `FileReader.prototype.readAsText`).
+- `FileReader.onerror` (permissions, network drive, unplugged USB) → `readDeckFile` rejects with `DeckFileError code: "file-read-failed"` (dedicated code — nothing was parsed, so `invalid-json` would be misleading).
+- Non-integer `schema` value in an envelope (e.g. `1.5`, string `"1"`, boolean) → `deserialize` throws `schema-validation-failed` via Ajv, NOT `unknown-schema`. `unknown-schema` is reserved for a `schema` value that is a positive INTEGER outside the known set (`{1}`); a structural mismatch is not "a version we don't know", it's a malformed file.
 - Filename with special chars → download filename is always generated (never derived from user input), so this is not a vector.
 
 ### User Flows
@@ -223,6 +270,9 @@ Must declare all required fields; MUST NOT declare `additionalProperties: false`
 | Full envelope (generator, version, createdAt, JSON Schema, `switch(schema)`) | Ceremony-heavy | Minimal `{ design: ... }` | **Full envelope** | Code Review Guardian finding #8 — cheapest at day one, painful to add later. |
 | Ajv (runtime validation) vs. hand-rolled type guard | Extra dep | Zero dep | **Ajv** | JSON Schema doubles as machine-readable documentation; validation errors are informative; small bundle. |
 | `additionalProperties: false` inside `design` | Strict | Lenient | **Strict** | Prevents silent field drops on load; consistent with "reject unknown, don't guess." |
+| Round-trip identity contract | `serialize(deserialize(serialize(D)).design) === serialize(D)` across two default calls | Deep-equal on design + metadata-preserving byte-identity | **B — honest contract** | Envelope `createdAt` is stamped from wall clock on every `serialize`; two default calls MUST differ by design (that's the file-generation timestamp). The prior wording only "passed" because tests injected pinned stamps — a weakened acceptance criterion. AC1 above states the three real invariants. |
+| Preserve unknown envelope-level keys through load → save (v1) | Passthrough | Drop | **Drop** | The envelope schema is lenient (accepts unknown top-level keys so a v2 producer can add `checksum`, `signature`, etc. without breaking v1 readers), BUT `deserialize` surfaces only the canonical five fields in `meta` and `serialize` re-emits only the canonical envelope. Additive metadata authored by a v2 producer is therefore accepted-but-lost on a v1 load → save cycle. Building passthrough now would freeze a shape we haven't designed; v2 loaders may choose to preserve extras if the metadata semantics demand it. If a caller needs to retain the raw file bytes today, they must keep the original JSON string themselves — do NOT rely on `deserialize → serialize`. |
+| Widen `DeckFileErrorCode` from 5 → 7 codes (add `file-too-large`, `file-read-failed`) | Keep 5 codes | Add dedicated codes | **B — 7 codes** | The 5-code union collapsed two distinct failure modes: oversized uploads (`>10 MB`) surfaced as `schema-validation-failed` (validation never ran), and `FileReader.onerror` surfaced as `invalid-json` (nothing was parsed). Both misled UX-layer authors and future contributors reading the code. Ratified in PR #26 review (Code Review GPT #2 + Opus #1) BEFORE S7 freezes the persistence public API. |
 
 ## 18. Testing Strategy
 - **Unit tests:** all ACs above.

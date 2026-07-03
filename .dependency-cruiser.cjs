@@ -98,6 +98,38 @@ module.exports = {
     allowlistRule('scene', ALLOWED_SRC_PATHS.scene),
     allowlistRule('ui', ALLOWED_SRC_PATHS.ui),
 
+    // ---- persistence: reaching outside src/ is restricted -----------------
+    //
+    // The `persistence-allowlist` rule above only governs `^src/` targets,
+    // so an accidental `import '../../../scripts/build/foo.ts'` from
+    // `src/persistence/**` would sail past it (finding Code Review GPT#5).
+    // This rule locks the outside-src/ surface down to exactly one file:
+    // the checked-in JSON Schema at `docs/deck-file-schema-v1.json`, which
+    // `validator.ts` legitimately imports as `with { type: 'json' }`.
+    //
+    // NPM packages resolve to `node_modules/...` and are excluded by the
+    // negative lookahead; Node core modules (`node:*`) do not appear in
+    // the graph as `to.path` matches (they are `core` dependency type,
+    // and dep-cruiser reports them with `node:` prefix — the negative
+    // lookahead on `[^/]` also skips them).
+    {
+      name: 'persistence-non-src-imports',
+      severity: 'error',
+      comment:
+        'src/persistence/** may only import project files under src/ (governed by ' +
+        'persistence-allowlist) plus the checked-in JSON Schema at ' +
+        'docs/deck-file-schema-v1.json. Any other project-relative import from ' +
+        'persistence/ is a boundary violation (Code Review GPT#5 hardening).',
+      from: { path: '^src/persistence/' },
+      to: {
+        // The negative lookahead admits (a) any src/... path, (b) any
+        // node_modules/... path, (c) the exact schema file. Anything
+        // else that starts with an ASCII character is a project-relative
+        // import outside the allowed surface — flag it.
+        path: '^(?!src/|node_modules/|docs/deck-file-schema-v1\\.json$|node:)[A-Za-z0-9._-]',
+      },
+    },
+
     // ---- framework ban (domain must stay React/Three/DOM-free) -------------
     {
       name: 'domain-no-react-three-dom',
@@ -160,6 +192,13 @@ module.exports = {
           '^src/(App|main)\\.tsx$',
           // Public facades — imported via directory resolution.
           '(^|/)index\\.(ts|tsx)$',
+          // Test-only helpers (shared arbitraries, fixture data) —
+          // imported ONLY from *.test.ts, which are excluded from the
+          // cruise, so these appear orphan from dep-cruiser's POV.
+          // The `__testing__/` and `__fixtures__/` markers make the
+          // intent unmistakable at grep time.
+          '(^|/)__testing__/',
+          '(^|/)__fixtures__/',
         ],
       },
       to: {},

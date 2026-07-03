@@ -143,7 +143,7 @@ Each `src/` sub-folder is owned by a specific story. This story (S1) creates onl
 | ----------------- | ------------- | ---------------------------------- |
 | `src/domain/`     | S2–S5         | `catalog`, `Layout`, `spanCheck`   |
 | `src/application/`| S7            | `useCases/*`                       |
-| `src/persistence/`| S6            | `localStorageRepo`, `deckFileIO`   |
+| `src/persistence/`| S6            | `serialize` / `deserialize`, `saveDesignToLocalStorage` / `loadDesignFromLocalStorage` / `clearDesignFromLocalStorage`, `downloadDeckFile` / `readDeckFile`, `STORAGE_KEY`, `DeckFileError` (barrel `src/persistence/index.ts`) |
 | `src/state/`      | S8            | `designStore`, `uiStore`           |
 | `src/scene/`      | S9–S11        | `DeckScene` (default export)       |
 | `src/ui/`         | S12–S15       | `AppShell` composition + panels (does NOT import `src/scene/` — see § 3a) |
