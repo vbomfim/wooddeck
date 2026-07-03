@@ -57,6 +57,7 @@ export {
   useStorageBanner,
   useUiUnits,
   useWarnings,
+  useWebglContextLost,
 } from './hooks';
 
 // ---- default-design factory ------------------------------------------------

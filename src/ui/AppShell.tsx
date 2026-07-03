@@ -66,6 +66,7 @@ import type { JSX, ReactNode } from 'react';
 import './styles/tokens.css';
 import './styles/app-shell.css';
 import { AppHeader } from './AppHeader';
+import { ContextLostBanner } from './ContextLostBanner';
 import { DisclaimerBanner } from './DisclaimerBanner';
 import { StorageBanner } from './StorageBanner';
 
@@ -98,6 +99,15 @@ export function AppShell(props: AppShellProps): JSX.Element {
        * div, no layout shift).
        */}
       <StorageBanner />
+
+      {/*
+       * ContextLostBanner (S12 pair-fix iter 1 — Fix C) — only
+       * renders when useUiStore.webglContextLost is true (a
+       * WebGL context-loss event fired somewhere in the scene).
+       * Orthogonal to StorageBanner: the two can coexist. Null
+       * when false, so no layout shift on the happy path.
+       */}
+      <ContextLostBanner />
 
       {/*
        * AppHeader — h1 name, version, spec link.

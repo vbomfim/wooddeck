@@ -81,6 +81,10 @@ describe('useUiStore — initial state', () => {
   it('starts with storageBanner=null', () => {
     expect(useUiStore.getState().storageBanner).toBeNull();
   });
+
+  it('starts with webglContextLost=false (Fix C — no crash on first paint)', () => {
+    expect(useUiStore.getState().webglContextLost).toBe(false);
+  });
 });
 
 describe('useUiStore — setUnits (AC7: UI-only)', () => {
@@ -98,6 +102,7 @@ describe('useUiStore — setUnits (AC7: UI-only)', () => {
     expect(after.layerVisibility).toBe(before.layerVisibility);
     expect(after.disclaimerAcknowledged).toBe(before.disclaimerAcknowledged);
     expect(after.storageBanner).toBe(before.storageBanner);
+    expect(after.webglContextLost).toBe(before.webglContextLost);
   });
 });
 
@@ -169,6 +174,27 @@ describe('useUiStore — storageBanner (AC6 + AC9)', () => {
       expect(useUiStore.getState().storageBanner).toBe(banner);
     },
   );
+});
+
+describe('useUiStore — webglContextLost (S12 pair-fix iter 1 — Fix C)', () => {
+  it('setWebglContextLost(true) flips the flag', () => {
+    act(() => {
+      useUiStore.getState().setWebglContextLost(true);
+    });
+    expect(useUiStore.getState().webglContextLost).toBe(true);
+  });
+
+  it('does not touch other fields', () => {
+    const before = useUiStore.getState();
+    act(() => {
+      useUiStore.getState().setWebglContextLost(true);
+    });
+    const after = useUiStore.getState();
+    expect(after.units).toBe(before.units);
+    expect(after.cameraPreset).toBe(before.cameraPreset);
+    expect(after.layerVisibility).toBe(before.layerVisibility);
+    expect(after.storageBanner).toBe(before.storageBanner);
+  });
 });
 
 describe('useUiStore — vanilla subscribe', () => {

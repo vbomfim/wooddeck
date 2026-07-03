@@ -197,6 +197,20 @@ The overlay MUST mount **after** `<DeckLayers />` so its highlights sort last in
 
 The 3D highlight is a visual indicator. Users who cannot see it rely on the **WarningsPanel (S14)** for the same information — the panel is the accessible surface. The overlay is a redundant visual cue on top of the accessible-first text listing, not a replacement for it.
 
+## 3d. Scene → state → ui reliability channels (S12 pair-fix iter 1)
+
+The MVP has two failure modes that must reach the user through UI, not just `console.error`:
+
+1. **Lazy chunk load failure** — a network hiccup or missing CDN asset while `React.lazy(() => import('./scene/DeckScene'))` resolves. Handled by **`<SceneErrorBoundary>`** (`src/ui/SceneErrorBoundary.tsx`) — a React class error boundary wrapping the `<Suspense>` in `App.tsx`. Chunk-load errors render a plain-text fallback with a **Reload page** button; the AppShell + DisclaimerBanner + side panels stay mounted so the user sees the disclaimer even when the 3D view can't load.
+2. **WebGL context loss** — GPU driver crash / power event / browser tab throttling triggering `webglcontextlost` on the canvas. Handled by a **scene → state → ui flow**:
+   - `src/scene/context-loss.ts` (S9) listens for `webglcontextlost` on the renderer's `domElement`. Fix C wired it to also call `useUiStore.getState().setWebglContextLost(true)` in addition to the existing `console.error` diagnostic.
+   - `src/state/ui-store.ts` owns a `webglContextLost: boolean` field (initial `false`) with a `setWebglContextLost(lost)` action. The field is **orthogonal** to `storageBanner` — the two banners can coexist (e.g. a page that's `storage-full` can also lose its WebGL context; the user needs both messages).
+   - `src/ui/ContextLostBanner.tsx` reads `useWebglContextLost()` via the granular hook and renders a `role="alert"` banner with a Reload button when the flag is true. Rendered inside AppShell between StorageBanner and AppHeader.
+
+**Why scene may write to state.** The `src/scene/**` layer already **reads** from `src/state/**` via granular hooks (`useCameraPreset`, `useLayoutBounds`). The scene→state channel is symmetric — writing an orthogonal surface via `useUiStore.getState().setWebglContextLost(true)` uses the same import edge (`src/scene/context-loss.ts → src/state`) the reads already use. Nothing in the ui or state layers imports from scene; the reverse direction stays fully forbidden. Verified by dep-cruiser `scene-allowlist` and boundary self-test.
+
+**Why NOT reuse StorageBanner.** `storageBanner` is a **discriminated union** (`'storage-full' | 'storage-blocked' | 'load-recompute-failed' | null`) — adding a `'webgl-context-lost'` variant would (a) force a mutually-exclusive relationship between graphics errors and persistence errors and (b) break the S8 tests that lock the exact union shape. A separate `boolean` flag + a separate component is the smallest correct surface.
+
 ## 4. Pinned 3D-stack version matrix
 
 The `three` / `@react-three/fiber` / `@react-three/drei` triad ships breaking changes across minor releases and must move together. Per Code Review Guardian answer C (spec § 15), these three packages are **exact-pinned** in `package.json` (no `^`, no `~`). React is pinned with a **tilde** (`~19.2.7`) so npm accepts patch bumps but blocks the 19.3 minor — required because r3f 9.x's `react` peer is `>=19 <19.3` and an accidental `^19` install would silently install React 19.3 the moment it releases and break r3f.

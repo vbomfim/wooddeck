@@ -87,3 +87,62 @@ describe('<DisclaimerBanner /> (S12 AC1 + AC2)', () => {
     expect(note.textContent).toContain('⚠');
   });
 });
+
+// ---------------------------------------------------------------------------
+// AC2 defense-in-depth — source-grep guard (S12 pair-fix iter 1 — Fix F).
+//
+// The interactive-control tests above cover "no dismiss BUTTON /
+// checkbox / labeled control." They do NOT cover a programmatic
+// auto-hide: a future maintainer could add `useState`, `useEffect`
+// + `setTimeout`, or a `useUiStore` subscription that conditionally
+// returns `null` — the banner would stop rendering after N seconds
+// and the interactive-control tests would STILL PASS. That's the
+// legal-liability regression Opus#2 + QA-AC2 flagged.
+//
+// The regression gate is a static source-grep: assert the module
+// text contains NONE of the primitives a hide mechanism would
+// need. Cheap + definitive for a file that MUST stay pure JSX.
+// ---------------------------------------------------------------------------
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+describe('DisclaimerBanner — source-grep programmatic-hide guard (Fix F)', () => {
+  const DISCLAIMER_MODULE_PATH = resolve(
+    process.cwd(),
+    'src',
+    'ui',
+    'DisclaimerBanner.tsx',
+  );
+  const source = readFileSync(DISCLAIMER_MODULE_PATH, 'utf8');
+
+  // Symbols that would be REQUIRED to implement any programmatic
+  // hide mechanism. Adding ANY of these to DisclaimerBanner.tsx
+  // fails this test — forcing the maintainer to justify the change
+  // in review (and update this guard to name the new allowed
+  // primitive, if any).
+  const FORBIDDEN_SYMBOLS = [
+    'useState',
+    'useReducer',
+    'useEffect',
+    'useLayoutEffect',
+    'useUiStore',
+    'useDesignStore',
+    'setTimeout',
+    'setInterval',
+    'requestAnimationFrame',
+    'localStorage',
+    'sessionStorage',
+    'document.cookie',
+  ];
+
+  for (const symbol of FORBIDDEN_SYMBOLS) {
+    it(`does NOT contain "${symbol}" (would enable programmatic auto-hide)`, () => {
+      // Strip block comments so a comment that explains the
+      // guarantee doesn't false-positive. Line-comment stripping
+      // uses a heuristic: `//` NOT preceded by `:` (URLs).
+      const strippedBlocks = source.replace(/\/\*[\s\S]*?\*\//g, '');
+      const strippedLines = strippedBlocks.replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+      expect(strippedLines).not.toContain(symbol);
+    });
+  }
+});

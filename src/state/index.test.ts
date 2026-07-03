@@ -31,6 +31,7 @@ describe('src/state/index.ts — frozen public surface', () => {
     expect(typeof StateBarrel.useCameraPreset).toBe('function');
     expect(typeof StateBarrel.useLayerVisibility).toBe('function');
     expect(typeof StateBarrel.useStorageBanner).toBe('function');
+    expect(typeof StateBarrel.useWebglContextLost).toBe('function');
   });
 
   it('exports the default-design factory + params', () => {

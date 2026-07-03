@@ -36,11 +36,48 @@
  *   - be deleted by `cleanup()` (fixture directory is `rm -rf`ed)
  */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(import.meta.url), '..', '..');
+
+/**
+ * S12 pair-fix iter 1 — Fix E (GPT#4 SHOULD-FIX).
+ *
+ * `npx depcruise` / `npx eslint` were the previous invocation
+ * shape. Those forms tell npm-exec to fall back to the network if
+ * the local binary "looks missing" (a heuristic that periodically
+ * misfires — most often after a partial cache clear or when npm
+ * decides to reinstall its own bootstrap). The observed failure
+ * mode: `npx` would try to install a placeholder `depcruise@1.0.0`
+ * from a NON-EXISTENT registry entry, or would resolve the local
+ * binary but fail with "Cannot find module 'chalk'" because it
+ * picked up a stale node_modules layout during a race.
+ *
+ * The deterministic fix: point directly at the LOCAL binary
+ * (`node_modules/.bin/…`), and fail FAST with a clear diagnostic
+ * if it isn't present (rather than falling back to a network
+ * install). CI must have already run `npm ci` — the binaries WILL
+ * exist. If they don't, the environment is broken and the harness
+ * should say so instead of masking the problem with a re-install.
+ */
+const DEPCRUISE_BIN = resolve(ROOT, 'node_modules', '.bin', 'depcruise');
+const ESLINT_BIN = resolve(ROOT, 'node_modules', '.bin', 'eslint');
+
+function assertLocalBinary(binPath, humanName) {
+  if (!existsSync(binPath)) {
+    console.error(
+      `\n[boundary-selftest] FATAL: local ${humanName} binary not found at ${binPath}.\n` +
+        `Run \`npm ci\` first. This harness deliberately does NOT fall\n` +
+        `back to \`npx\` (which spuriously reddens CI when it attempts\n` +
+        `a network re-install — the exact failure mode Fix E targets).\n`,
+    );
+    process.exit(2);
+  }
+}
+assertLocalBinary(DEPCRUISE_BIN, 'dependency-cruiser');
+assertLocalBinary(ESLINT_BIN, 'eslint');
 // Every layer that MIGHT host a fixture OR a fixture target. `rm -rf` on
 // setup + teardown makes cross-run pollution impossible.
 const SELFTEST_DIRS = [
@@ -602,9 +639,11 @@ function writeFixture(fixture) {
 
 function runLint(tool, targetPath) {
   if (tool === 'depcruise') {
+    // Fix E: local binary — no `npx` fallback. See top-of-file
+    // comment for the flaky-npx failure history this replaces.
     return spawnSync(
-      'npx',
-      ['depcruise', '--config', '.dependency-cruiser.cjs', 'src'],
+      DEPCRUISE_BIN,
+      ['--config', '.dependency-cruiser.cjs', 'src'],
       { cwd: ROOT, encoding: 'utf8' },
     );
   }
@@ -613,8 +652,8 @@ function runLint(tool, targetPath) {
     // Boundary rules for ESLint are the `src/domain/**` override which
     // applies regardless of the file path we lint here.
     return spawnSync(
-      'npx',
-      ['eslint', '--no-warn-ignored', targetPath],
+      ESLINT_BIN,
+      ['--no-warn-ignored', targetPath],
       { cwd: ROOT, encoding: 'utf8' },
     );
   }

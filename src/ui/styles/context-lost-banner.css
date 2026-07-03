@@ -1,0 +1,48 @@
+/*
+ * `src/ui/styles/context-lost-banner.css` — S12 pair-fix iter 1
+ * Fix C.
+ *
+ * Sticky under the disclaimer + storage banners; harder red than
+ * the storage banners to signal the graphics-crash is a more
+ * severe state than a disk-full autosave failure.
+ */
+.wd-context-lost {
+  position: sticky;
+  z-index: var(--wd-z-banner);
+  padding: var(--wd-space-3) var(--wd-space-4);
+  background: var(--wd-color-context-lost-bg);
+  color: var(--wd-color-context-lost-text);
+  border-bottom: 1px solid var(--wd-color-context-lost-border);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  display: flex;
+  gap: var(--wd-space-3);
+  align-items: center;
+  justify-content: center;
+}
+
+.wd-context-lost__message {
+  flex: 0 1 auto;
+  display: flex;
+  gap: var(--wd-space-2);
+  flex-wrap: wrap;
+}
+
+.wd-context-lost__title {
+  font-weight: 600;
+}
+
+.wd-context-lost__reload {
+  flex: 0 0 auto;
+  padding: var(--wd-space-1) var(--wd-space-3);
+  background: var(--wd-color-surface);
+  color: var(--wd-color-text);
+  border: 1px solid var(--wd-color-border);
+  border-radius: 4px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.wd-context-lost__reload:hover {
+  background: var(--wd-color-surface-alt);
+}

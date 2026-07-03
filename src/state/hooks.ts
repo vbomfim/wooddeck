@@ -165,3 +165,15 @@ export function useLayerVisibility(): LayerVisibility {
 export function useStorageBanner(): StorageBanner {
   return useUiStore((s) => s.storageBanner);
 }
+
+/**
+ * The current WebGL context-lost flag. S12's
+ * `<ContextLostBanner>` reads this to surface a user-facing
+ * "3D view crashed — please reload" banner when the GPU driver
+ * drops the context. Written by
+ * {@link installContextLossHandler} in `src/scene/context-loss.ts`
+ * (S12 pair-fix iter 1 — Fix C).
+ */
+export function useWebglContextLost(): boolean {
+  return useUiStore((s) => s.webglContextLost);
+}

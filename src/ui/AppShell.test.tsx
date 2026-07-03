@@ -17,7 +17,7 @@ import userEvent from '@testing-library/user-event';
 import { useUiStore } from '../state/ui-store';
 import { AppShell } from './AppShell';
 import { DISCLAIMER_TEXT } from './DisclaimerBanner';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
@@ -283,17 +283,80 @@ function readCss(basename: string): string {
   return readFileSync(resolve(CSS_DIR, basename), 'utf-8');
 }
 
+/**
+ * Removes every `@media (prefers-reduced-motion: no-preference) { ... }`
+ * block from a CSS source string. Uses a brace-aware scanner because
+ * nested selectors inside the media query would defeat a naive regex.
+ * Returns the CSS with those blocks (and their trailing whitespace)
+ * gone — any remaining `transition:` / `animation:` is definitively
+ * OUTSIDE the reduced-motion guard.
+ */
+function stripGuardedMotionBlocks(css: string): string {
+  const guardPattern = /@media\s*\(prefers-reduced-motion:\s*no-preference\)\s*\{/g;
+  let out = '';
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = guardPattern.exec(css)) !== null) {
+    out += css.slice(cursor, match.index);
+    // Walk from the position of the opening `{` and count braces
+    // until we find the matching close.
+    let depth = 1;
+    let i = match.index + match[0].length; // just past the opening `{`
+    while (i < css.length && depth > 0) {
+      const ch = css[i];
+      if (ch === '{') depth += 1;
+      else if (ch === '}') depth -= 1;
+      i += 1;
+    }
+    cursor = i;
+    guardPattern.lastIndex = i;
+  }
+  out += css.slice(cursor);
+  return out;
+}
+
 describe('<AppShell /> — CSS invariants (ticket §4 Edge cases)', () => {
-  it('gates transitions behind @media (prefers-reduced-motion: no-preference) — WCAG 2.3.3', () => {
-    // Static check on the stylesheet: any transition/animation MUST
-    // be inside a `@media (prefers-reduced-motion: no-preference)`
-    // block, so users with `prefers-reduced-motion: reduce` see no
-    // motion. The CSS parser here is intentionally naive — the
-    // test asserts (a) the guard block exists AND (b) no `transition`
-    // or `animation` property appears OUTSIDE such a block.
-    const css = readCss('app-shell.css');
-    if (/transition\s*:|animation\s*:/.test(css)) {
-      expect(css).toMatch(/@media\s*\(prefers-reduced-motion:\s*no-preference\)/);
+  it('gates transitions behind @media (prefers-reduced-motion: no-preference) — WCAG 2.3.3 (ALL stylesheets, Fix G)', () => {
+    // S12 pair-fix iter 1 — Fix G (Opus#1). The previous version
+    // of this test only checked `app-shell.css`. But since Fix B
+    // and Fix C added TWO more stylesheets with color transitions
+    // (scene-error-boundary.css, context-lost-banner.css), and
+    // the existing storage-banner/disclaimer-banner/app-header
+    // stylesheets could grow transitions later, we now iterate
+    // EVERY css file in the styles directory and assert:
+    //   (a) if it declares `transition:` or `animation:`, that
+    //       property MUST appear ONLY inside a
+    //       `@media (prefers-reduced-motion: no-preference)` block,
+    //   (b) stripping the guard blocks leaves ZERO
+    //       transition/animation declarations behind.
+    //
+    // The stripping approach is stronger than the previous
+    // "at least one media block exists" heuristic — it definitively
+    // catches a transition accidentally placed OUTSIDE the guard.
+    const cssFiles = readdirSync(CSS_DIR).filter((f) => f.endsWith('.css'));
+    expect(cssFiles.length).toBeGreaterThan(0);
+
+    for (const file of cssFiles) {
+      const css = readCss(file);
+      const hasMotion = /transition\s*:|animation\s*:/.test(css);
+      if (!hasMotion) continue; // no motion declared — trivially compliant
+
+      // Assert the guard block exists in this file.
+      expect(
+        css,
+        `${file} declares transition/animation but is missing the reduced-motion guard`,
+      ).toMatch(/@media\s*\(prefers-reduced-motion:\s*no-preference\)/);
+
+      // Strip every `@media (prefers-reduced-motion: no-preference)
+      // { ... }` block using a brace-aware scanner (naive regex would
+      // fail on nested braces). Then assert no motion declarations
+      // survive outside the guards.
+      const stripped = stripGuardedMotionBlocks(css);
+      const outsideMotion = /transition\s*:|animation\s*:/.exec(stripped);
+      expect(
+        outsideMotion,
+        `${file} declares transition/animation OUTSIDE @media (prefers-reduced-motion: no-preference) — WCAG 2.3.3 regression`,
+      ).toBeNull();
     }
   });
 

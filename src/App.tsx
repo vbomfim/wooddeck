@@ -54,7 +54,7 @@
  * cross-layer. Every OTHER file in the codebase is boundary-checked.
  */
 import { lazy, Suspense, useEffect, type JSX } from 'react';
-import { AppShell } from './ui';
+import { AppShell, SceneErrorBoundary } from './ui';
 import { useDesignStore } from './state';
 
 /**
@@ -73,11 +73,23 @@ const DeckScene = lazy(() => import('./scene/DeckScene'));
 
 /**
  * The scene composition — DeckLayers + WarningOverlay inside
- * DeckScene. Also lazy-loaded (bundled into the same chunk as
- * DeckScene by manual-chunk grouping in vite.config.ts).
+ * DeckScene. Both lazy-loaded (Vite's advancedChunks groups them
+ * into the same `r3f` chunk as DeckScene by regex match, so the
+ * three dynamic imports resolve as one network round-trip).
+ *
+ * ## Import discipline (S12 pair-fix iter 1 — Opus#4 nit)
+ *
+ * All three lazy targets import from DIRECT module paths, NOT via
+ * `./scene` (the barrel). The barrel re-exports every scene
+ * symbol; a lazy `import('./scene')` would drag the whole surface
+ * into the chunk and defeat the tree-shaking that keeps the
+ * shell TTI-clean. The default-export unwrapping shape is
+ * consistent across all three: `mod.default` or a named unwrap
+ * to `{ default: mod.Xxx }`. See vite.config.ts §"advancedChunks"
+ * for the group configuration that ensures they share a chunk.
  */
 const DeckLayers = lazy(async () => {
-  const mod = await import('./scene/layers');
+  const mod = await import('./scene/layers/DeckLayers');
   return { default: mod.DeckLayers };
 });
 const WarningOverlay = lazy(async () => {
@@ -159,20 +171,30 @@ export function App(): JSX.Element {
       leftPanel={<LeftPanelPlaceholder />}
       rightPanel={<RightPanelPlaceholder />}
       main={
-        <Suspense fallback={<SceneFallback />}>
-          <DeckScene>
-            <DeckLayers />
-            {/*
-             * WarningOverlay is a PEER of DeckLayers, mounted
-             * AFTER them so its highlights sort last in the
-             * transparent-material pass (S11 AC3 finding #7).
-             * Structural separation is enforced by dep-cruiser
-             * (`warning-overlay-no-layers` rule) — the overlay
-             * cannot import from `scene/layers/**`.
-             */}
-            <WarningOverlay />
-          </DeckScene>
-        </Suspense>
+        // SceneErrorBoundary (S12 pair-fix iter 1 — Fix B / GPT#2
+        // HIGH) traps chunk-load failures and any r3f/three
+        // rendering exception INSIDE the scene subtree so the
+        // shell + disclaimer + panels stay usable. It wraps
+        // <Suspense> (not the other way around) so a rejected
+        // dynamic import — which surfaces as a thrown promise
+        // Suspense re-throws when timed out — reaches the
+        // boundary as an Error rather than an unhandled rejection.
+        <SceneErrorBoundary>
+          <Suspense fallback={<SceneFallback />}>
+            <DeckScene>
+              <DeckLayers />
+              {/*
+               * WarningOverlay is a PEER of DeckLayers, mounted
+               * AFTER them so its highlights sort last in the
+               * transparent-material pass (S11 AC3 finding #7).
+               * Structural separation is enforced by dep-cruiser
+               * (`warning-overlay-no-layers` rule) — the overlay
+               * cannot import from `scene/layers/**`.
+               */}
+              <WarningOverlay />
+            </DeckScene>
+          </Suspense>
+        </SceneErrorBoundary>
       }
     />
   );
