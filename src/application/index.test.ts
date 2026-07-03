@@ -65,19 +65,23 @@ describe('application/index.ts — barrel surface (issue #8 §2)', () => {
 // ---------------------------------------------------------------------------
 
 /**
- * The four use-case files. For each one we assert that every exported
- * top-level function's body (definition line + body lines up to the
- * matching brace at column 0) is ≤ 40 lines.
+ * Measure the line-length of every exported function in a source
+ * file. Returns a map of function-name → line-count.
  *
- * The heuristic:
- *   - Find lines starting with `export function <name>(` OR
- *     `export async function <name>(`.
- *   - Count from that line down to the FIRST closing brace at column
- *     0 (`^}$`). That is the body length INCLUSIVE of the signature
- *     and closing brace.
+ * Detects TWO export shapes:
  *
- * This mirrors the way a human counts "how big is this function"
- * during review — signature line to matching brace.
+ *   1. `export function foo(...)` / `export async function foo(...)`
+ *      — the standard declaration; body ends at the first column-0
+ *      `}`.
+ *   2. `export const foo = (...)` / `export const foo = async (...)`
+ *      — the arrow-function alternative; body ends at the first
+ *      column-0 `};` (arrow bodies end with a semicolon after the
+ *      close brace).
+ *
+ * A source file that used any OTHER export shape (e.g. `export
+ * default function`, `export { foo }` re-exports of a class
+ * method) would be silently missed; the barrel-surface tests below
+ * catch that via the "no extras" assertion.
  */
 interface UseCaseFile {
   readonly relPath: string;
@@ -105,25 +109,39 @@ const USE_CASE_FILES: readonly UseCaseFile[] = [
 
 /**
  * Measure the line-length of every exported function in a source
- * file. Returns a map of function-name → line-count.
+ * file. Returns a map of function-name → line-count. See the
+ * `UseCaseFile` comment for the recognized export shapes and the
+ * body-end heuristic (column-0 `}` for declarations, column-0 `};`
+ * for arrow constants).
  */
 function measureExportedFunctions(source: string): Map<string, number> {
   const lines = source.split('\n');
   const measured = new Map<string, number>();
-  const startPattern = /^export (?:async )?function (\w+)\s*\(/;
+  const declPattern = /^export (?:async )?function (\w+)\s*\(/;
+  // `export const foo = (…) =>` OR `export const foo = async (…) =>`
+  // The RHS `(` may sit on the same line as the `=` — we only need
+  // to recognise the START of an arrow-function assignment; the body
+  // scan below finds its terminating brace regardless.
+  const arrowPattern = /^export const (\w+)\s*=\s*(?:async\s*)?\(/;
 
   for (let i = 0; i < lines.length; i++) {
-    const match = startPattern.exec(lines[i]!);
-    if (match === null) continue;
-    const name = match[1]!;
+    const declMatch = declPattern.exec(lines[i]!);
+    const arrowMatch = arrowPattern.exec(lines[i]!);
+    if (declMatch === null && arrowMatch === null) continue;
+    const name = (declMatch ?? arrowMatch)![1]!;
+    // Arrow-function bodies end with `};` at column 0 (const
+    // assignment terminator); declaration bodies end with `}` at
+    // column 0.
+    const closingLine = arrowMatch !== null ? '};' : '}';
 
-    // Walk forward to the first column-0 `}` — the matching close of
-    // the function body. This works because our use-case files use
-    // 2-space indentation for the body and NO left-flush braces
-    // inside a function (a convention verified in the current tree).
+    // Walk forward to the first column-0 closing marker — the
+    // matching close of the function body. This works because our
+    // use-case files use 2-space indentation for the body and NO
+    // left-flush closing brace inside a function (a convention
+    // verified in the current tree).
     let end = i;
     for (let j = i + 1; j < lines.length; j++) {
-      if (lines[j] === '}') {
+      if (lines[j] === closingLine) {
         end = j;
         break;
       }

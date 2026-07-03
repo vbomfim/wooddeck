@@ -42,14 +42,15 @@
  * and `LayoutError` (from `computeLayout` via `computeLayoutAndCheck`)
  * unchanged — the state store pattern-matches on both.
  *
- * `loadDesignFromLocalStorage` NEVER throws — the persistence loader
- * already returns `null` on any parse/schema failure (its documented
- * contract), so any null propagates straight through as a null bundle.
- * If the loaded design nevertheless fails `computeLayout` (a design
- * that passed the JSON Schema but is nonsensical for the layout
- * engine — e.g. widthMm too small), the `LayoutError` is allowed to
- * escape: this is a boot-time bug the store should surface rather
- * than silently drop.
+ * `loadDesignFromLocalStorage` returns `null` when the persistence
+ * loader returns `null` (no stored design, or a DeckFileError
+ * swallowed and reported as `null` per persistence's documented
+ * contract). It PROPAGATES `LayoutError` unchanged: a stored
+ * design that parses and schema-validates but fails `computeLayout`
+ * is a genuine boot-time bug (not a "storage lost my design"
+ * silent-failure), and the S8 store should surface it. S8 will
+ * catch this at boot and fall back to a fresh default design plus
+ * a banner — see issue #8 defer-note re: boot-time recovery.
  */
 
 import type { SpanTable } from '../domain/spans';

@@ -36,7 +36,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { computeLayout } from '../domain/layout';
+import { computeLayout, LayoutError } from '../domain/layout';
 import { spanCheck, IrcSpanTable } from '../domain/spans';
 import { FIXTURE_DESIGNS } from '../domain/layout/__fixtures__/fixtures-data';
 import {
@@ -177,11 +177,13 @@ describe('loadDesignFromFile — DoS cap propagates before layout compute', () =
 });
 
 // ---------------------------------------------------------------------------
-// Edge — material triple not in catalog → LayoutError propagation
+// Edge — designs that pass persistence's schema but fail computeLayout
+// (dimensional invalidity OR unknown material triple) MUST propagate
+// `LayoutError` from the layout engine unchanged.
 // ---------------------------------------------------------------------------
 
-describe('loadDesignFromFile — invalid material triple → LayoutError', () => {
-  it('propagates LayoutError when the persisted design references a size < min deck dim', async () => {
+describe('loadDesignFromFile — LayoutError propagation from computeLayout', () => {
+  it('propagates LayoutError when a persisted design has a dimensionally-invalid footprint', () => {
     // Build a v1-schema-valid envelope with a footprint too small for
     // the layout engine (widthMm = 100). Persistence accepts it (the
     // JSON schema doesn't currently enforce the min-4ft rule), so the
@@ -193,7 +195,26 @@ describe('loadDesignFromFile — invalid material triple → LayoutError', () =>
     };
     const file = makeDeckFile(serialize(invalid));
     // The use-case does not rewrap; `LayoutError` reaches the caller.
-    await expect(loadDesignFromFile(file, table)).rejects.toThrow(/LayoutError|below|minimum/i);
+    return expect(loadDesignFromFile(file, table)).rejects.toThrow(/LayoutError|below|minimum/i);
+  });
+
+  it('propagates LayoutError when a persisted design references a material triple absent from the catalog', () => {
+    // Composite species is a REAL enum value AND grade "No2" is a
+    // real enum value — so the JSON schema (which only checks the
+    // enums, not the (species, grade) coupling) accepts this design.
+    // But `lookupMaterial` rejects the triple `(5/4x6, Composite,
+    // No2)` because Composite is only ever paired with grade "NA"
+    // in the catalog. The failure surfaces from `computeLayout` as
+    // `LayoutError` and MUST propagate unchanged.
+    const unknownMaterial = {
+      ...FIXTURE.design,
+      decking: {
+        material: { nominal: '5/4x6' as const, species: 'Composite' as const, grade: 'No2' as const },
+        orientation: FIXTURE.design.decking.orientation,
+      },
+    };
+    const file = makeDeckFile(serialize(unknownMaterial));
+    return expect(loadDesignFromFile(file, table)).rejects.toBeInstanceOf(LayoutError);
   });
 });
 

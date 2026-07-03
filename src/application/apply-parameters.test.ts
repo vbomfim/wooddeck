@@ -294,39 +294,241 @@ describe('applyParameters — invalid resulting design propagates LayoutError', 
 });
 
 // ---------------------------------------------------------------------------
-// Coverage — `isPlainObject` non-object branches (REPLACE fallback)
+// Coverage — plain-object-required semantics for the patch value
+// (nested __proto__ attack, class instances, arrays, null subtrees).
+// These used to REPLACE silently; they now MUST throw with a path.
 // ---------------------------------------------------------------------------
 
-describe('applyParameters — REPLACE semantics for non-plain-object patch values', () => {
-  it('replaces (rather than merges) when the patch value is null', () => {
-    // Patch { footprint: null } — the deep-merge helper's
-    // `isPlainObject(null)` returns false, so the value is REPLACED
-    // outright. The downstream layout engine then blows up trying to
-    // destructure `design.footprint` (whichever error type it emits).
-    // The merge itself does NOT throw ApplyParametersError — null is
-    // a "valid value shape" for the FIELD, just not for the domain
-    // validator downstream. We assert the negative: no
-    // ApplyParametersError from the merge, and SOME error surfaces
-    // from the downstream compute.
-    const patch = { footprint: null } as unknown as DeepPartial<DeckDesign>;
-    expect(() => applyParameters(FIXTURE, patch, table)).toThrow();
-    expect(() => applyParameters(FIXTURE, patch, table)).not.toThrow(
-      ApplyParametersError,
-    );
+describe('applyParameters — plain-object-required subtree semantics', () => {
+  it('rejects a nested JS-literal `__proto__` in a subtree that current has as an object', () => {
+    // Attack: `{footprint:{__proto__:{widthMm,lengthMm,heightMm}}}`
+    // — `patch.footprint` is a prototype-backed object with ZERO
+    // own keys. Before the fix a naive `else`-branch REPLACE swapped
+    // `current.footprint` for this prototype-backed value; reads
+    // worked via the prototype at runtime, but `JSON.stringify`
+    // dropped the data → silent autosave corruption. Now this MUST
+    // throw ApplyParametersError with `.path === 'footprint'`.
+    const patch = {
+      footprint: {
+        __proto__: { widthMm: 9999, lengthMm: 9999, heightMm: 9999 },
+      },
+    } as unknown as DeepPartial<DeckDesign>;
+    try {
+      applyParameters(FIXTURE, patch, table);
+      throw new Error('expected ApplyParametersError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApplyParametersError);
+      expect((err as ApplyParametersError).path).toBe('footprint');
+    }
+    // Belt-and-suspenders: Object.prototype MUST remain clean.
+    expect(({} as { widthMm?: unknown }).widthMm).toBeUndefined();
   });
 
-  it('replaces (rather than merges) when the patch value is an array', () => {
-    // Arrays intentionally REPLACE — `isPlainObject([]) === false`.
-    // This matches the DeepPartial docstring on array semantics: an
-    // array patch overwrites, never element-merges.
+  it('rejects a null subtree where current has a plain object (no silent REPLACE)', () => {
+    // Before the fix `{footprint:null}` REPLACED the whole subtree
+    // and let downstream compute blow up. Now the merge itself
+    // rejects the null with an ApplyParametersError naming the path
+    // — a much better developer experience.
+    const patch = { footprint: null } as unknown as DeepPartial<DeckDesign>;
+    try {
+      applyParameters(FIXTURE, patch, table);
+      throw new Error('expected ApplyParametersError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApplyParametersError);
+      expect((err as ApplyParametersError).path).toBe('footprint');
+    }
+  });
+
+  it('rejects an array subtree where current has a plain object', () => {
     const patch = { footprint: [1, 2, 3] } as unknown as DeepPartial<DeckDesign>;
-    // The downstream `computeLayout` sees an array-shaped footprint
-    // — some form of Error surfaces; we don't pin the exact class,
-    // only that the merge succeeded without ApplyParametersError.
-    expect(() => applyParameters(FIXTURE, patch, table)).toThrow();
-    expect(() => applyParameters(FIXTURE, patch, table)).not.toThrow(
-      ApplyParametersError,
-    );
+    try {
+      applyParameters(FIXTURE, patch, table);
+      throw new Error('expected ApplyParametersError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApplyParametersError);
+      expect((err as ApplyParametersError).path).toBe('footprint');
+    }
+  });
+
+  it('rejects a Date subtree where current has a plain object', () => {
+    const patch = { footprint: new Date() } as unknown as DeepPartial<DeckDesign>;
+    try {
+      applyParameters(FIXTURE, patch, table);
+      throw new Error('expected ApplyParametersError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApplyParametersError);
+      expect((err as ApplyParametersError).path).toBe('footprint');
+    }
+  });
+
+  it('rejects a class-instance subtree where current has a plain object', () => {
+    class Widget {
+      public widthMm = 42;
+    }
+    const patch = { footprint: new Widget() } as unknown as DeepPartial<DeckDesign>;
+    try {
+      applyParameters(FIXTURE, patch, table);
+      throw new Error('expected ApplyParametersError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApplyParametersError);
+      expect((err as ApplyParametersError).path).toBe('footprint');
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Root-patch guard — non-object roots must throw ApplyParametersError,
+// not a raw TypeError from Object.keys(null).
+// ---------------------------------------------------------------------------
+
+describe('applyParameters — root patch guard (non-plain-object rejection)', () => {
+  it('rejects null root patch with ApplyParametersError (empty path)', () => {
+    try {
+      applyParameters(FIXTURE, null as unknown as DeepPartial<DeckDesign>, table);
+      throw new Error('expected ApplyParametersError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApplyParametersError);
+      expect((err as ApplyParametersError).path).toBe('');
+    }
+  });
+
+  it('rejects undefined root patch with ApplyParametersError', () => {
+    try {
+      applyParameters(FIXTURE, undefined as unknown as DeepPartial<DeckDesign>, table);
+      throw new Error('expected ApplyParametersError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApplyParametersError);
+      expect((err as ApplyParametersError).path).toBe('');
+    }
+  });
+
+  it('rejects a primitive root patch with ApplyParametersError', () => {
+    try {
+      applyParameters(FIXTURE, 42 as unknown as DeepPartial<DeckDesign>, table);
+      throw new Error('expected ApplyParametersError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApplyParametersError);
+      expect((err as ApplyParametersError).path).toBe('');
+    }
+  });
+
+  it('rejects an array root patch with ApplyParametersError', () => {
+    try {
+      applyParameters(
+        FIXTURE,
+        [1, 2, 3] as unknown as DeepPartial<DeckDesign>,
+        table,
+      );
+      throw new Error('expected ApplyParametersError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApplyParametersError);
+      expect((err as ApplyParametersError).path).toBe('');
+    }
+  });
+
+  it('rejects a prototype-backed root patch with ApplyParametersError', () => {
+    // The JS-literal form `{__proto__: {...}}` at the root sets the
+    // new patch's prototype (zero own keys, prototype-backed). The
+    // root guard MUST reject this same as any other non-plain-object
+    // — otherwise the merge would produce a no-op success (nothing
+    // to iterate), silently swallowing the caller's intent.
+    const patch = { __proto__: { footprint: { widthMm: 9999 } } } as unknown as DeepPartial<DeckDesign>;
+    try {
+      applyParameters(FIXTURE, patch, table);
+      throw new Error('expected ApplyParametersError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApplyParametersError);
+      expect((err as ApplyParametersError).path).toBe('');
+    }
+    // Belt-and-suspenders: Object.prototype MUST remain clean.
+    expect(({} as { footprint?: unknown }).footprint).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Editable-surface restriction — id and createdAt are OWN keys of
+// DeckDesign but must be REJECTED. See ticket §4 + module docs.
+// ---------------------------------------------------------------------------
+
+describe('applyParameters — editable-surface restriction (id, createdAt)', () => {
+  it('rejects a patch touching `id` with ApplyParametersError', () => {
+    const patch = { id: '00000000-0000-0000-0000-000000000000' } as unknown as DeepPartial<DeckDesign>;
+    try {
+      applyParameters(FIXTURE, patch, table);
+      throw new Error('expected ApplyParametersError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApplyParametersError);
+      expect((err as ApplyParametersError).path).toBe('id');
+      expect((err as ApplyParametersError).message).toMatch(/id/);
+    }
+  });
+
+  it('rejects a patch touching `createdAt` with ApplyParametersError', () => {
+    const patch = { createdAt: '2000-01-01T00:00:00.000Z' } as unknown as DeepPartial<DeckDesign>;
+    try {
+      applyParameters(FIXTURE, patch, table);
+      throw new Error('expected ApplyParametersError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApplyParametersError);
+      expect((err as ApplyParametersError).path).toBe('createdAt');
+      expect((err as ApplyParametersError).message).toMatch(/createdAt/);
+    }
+  });
+
+  it('preserves the current design.id and .createdAt across a normal edit', () => {
+    // The complement of the two rejection tests above: a normal
+    // editable-field patch must leave id and createdAt bit-identical.
+    const bundle = applyParameters(FIXTURE, { footprint: { widthMm: 4000 } }, table);
+    expect(bundle.design.id).toBe(FIXTURE.id);
+    expect(bundle.design.createdAt).toBe(FIXTURE.createdAt);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Structural-sharing — untouched subtrees are reference-shared with
+// `current` (safe due to readonly domain types). See types.ts +
+// apply-parameters.ts `deepMerge` docstring.
+// ---------------------------------------------------------------------------
+
+describe('applyParameters — structural sharing of untouched subtrees', () => {
+  it('reference-shares an untouched top-level subtree with `current`', () => {
+    // A patch that only touches `footprint` must NOT clone `beam`,
+    // `post`, `decking`, or `layout` — they should be `===` the
+    // originals. This is the standard immutable-update pattern and
+    // enables cheap structural equality checks (React memo, zundo
+    // snapshot diff) downstream. Safety comes from every field of
+    // DeckDesign being `readonly` at the type level — a mutation
+    // via a shared reference is a compile error.
+    const bundle = applyParameters(FIXTURE, { footprint: { widthMm: 4000 } }, table);
+    expect(bundle.design.beam).toBe(FIXTURE.beam);
+    expect(bundle.design.post).toBe(FIXTURE.post);
+    expect(bundle.design.decking).toBe(FIXTURE.decking);
+    expect(bundle.design.layout).toBe(FIXTURE.layout);
+    // The touched subtree IS a fresh object — reference-inequal to
+    // the original.
+    expect(bundle.design.footprint).not.toBe(FIXTURE.footprint);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Coverage — `isPlainObject` returns true for null-prototype objects.
+// A patch built with `Object.create(null)` (a legitimate "safe bag"
+// pattern) must be accepted, exercising the `proto === null` branch.
+// ---------------------------------------------------------------------------
+
+describe('applyParameters — Object.create(null) patches (null-prototype "safe bags")', () => {
+  it('accepts an Object.create(null) root patch (null prototype is a plain object per our definition)', () => {
+    // `Object.create(null)` produces an object with NO prototype —
+    // the safest way to build a "bag of keys" without inheriting
+    // Object.prototype pollution. isPlainObject returns true for
+    // this case (proto === null branch), so the root guard passes
+    // and the merge proceeds. This exercises the else-branch of the
+    // `proto === Object.prototype` identity check.
+    const patch = Object.create(null) as DeepPartial<DeckDesign>;
+    (patch as Record<string, unknown>)['footprint'] = { widthMm: 4000 };
+    const bundle = applyParameters(FIXTURE, patch, table);
+    expect(bundle.design.footprint.widthMm).toBe(4000);
+    expect(bundle.design.footprint.lengthMm).toBe(FIXTURE.footprint.lengthMm);
   });
 });
 

@@ -26,22 +26,55 @@
  * keys — `__proto__`, `constructor`, `prototype` — that a naive
  * merge would treat as normal fields and thereby mutate
  * `Object.prototype` (a classic supply-chain / prototype-pollution
- * vector). This module defends via THREE overlapping strategies:
+ * vector). This module defends via TWO real strategies (each with
+ * a helper property):
  *
- *   1. **Explicit rejection at the key level** — every merge step
- *      checks whether `key` is in the FORBIDDEN_KEYS set BEFORE
- *      inspecting the patch value. A hit throws
- *      `ApplyParametersError`; the merge is aborted.
- *   2. **Own-enumerable-only iteration** — we walk `Object.keys(patch)`,
- *      which returns only own enumerable string keys. This alone
- *      excludes JS-literal `{__proto__: ...}` (which invokes the
- *      __proto__ setter — no own key is created), and combined with
- *      #1 also excludes JSON.parse-preserved `__proto__` own props.
- *   3. **Own-property guard on validation** — `Object.hasOwn(current,
- *      key)` uses the reliable own-check (does NOT walk the prototype
- *      chain), so a rogue key masquerading as a Object.prototype
- *      method (e.g. `toString`) is rejected as "unknown key" rather
- *      than falsely accepted.
+ *   1. **Explicit key-level rejection** (`FORBIDDEN_KEYS`) — every
+ *      merge step checks whether `key` is in the FORBIDDEN_KEYS set
+ *      BEFORE inspecting the patch value. A hit throws
+ *      `ApplyParametersError`; the merge is aborted. This catches
+ *      the JSON.parse-preserved `__proto__` own-property form and
+ *      the `constructor` / `prototype` variants.
+ *   2. **Plain-object-required semantics** — every patch object
+ *      (root and nested) MUST be a "plain object" (prototype ===
+ *      `Object.prototype` or `null` — see `isPlainObject`). This
+ *      closes a subtler attack surface: the JS-literal form
+ *      `{ __proto__: { widthMm, lengthMm, heightMm } }` sets the
+ *      new object's PROTOTYPE (zero own keys), so `Object.keys`
+ *      alone would treat it as an empty patch. Without the
+ *      plain-object requirement a naive `else`-branch REPLACE
+ *      would swap `current.footprint` for a prototype-backed
+ *      object with no own JSON fields — reads work at runtime but
+ *      `JSON.stringify` drops the data, silent-corrupting the
+ *      autosave slot. Additionally: when `current[key]` is a plain
+ *      object, `patch[key]` MUST also be a plain object (not null,
+ *      array, Date, class instance, prototype-backed object) — a
+ *      mismatch throws `ApplyParametersError`, never silently
+ *      REPLACES a domain subtree with a non-plain value.
+ *
+ * Helpers (not standalone defences):
+ *
+ *   - **Own-enumerable-only iteration** — `Object.keys(patch)` skips
+ *     inherited methods (`toString`, `hasOwnProperty`, etc). Alone
+ *     this does NOT stop `__proto__` — a JSON.parse-derived `__proto__`
+ *     IS an own key. Strategy #1 handles that; iteration just avoids
+ *     spurious "unknown key" errors on inherited names.
+ *   - **`Object.hasOwn(current, key)`** — the "unknown key" check
+ *     does NOT walk the prototype chain, so a rogue key
+ *     masquerading as an `Object.prototype` method (e.g. `toString`)
+ *     is rejected as "unknown key" rather than falsely accepted.
+ *
+ * ## Editable-surface restriction (issue #8 §4)
+ *
+ * `id` and `createdAt` are OWN keys of `DeckDesign` — so the
+ * unknown-key check alone would ACCEPT a `{ id: '...' }` patch.
+ * That's semantically wrong: `applyParameters` is "edit design
+ * PARAMETERS", not "rewrite identity". A patched `id` would
+ * desynchronize `layout.designId` (which is copied from
+ * `design.id` at the next `computeLayout`), silently break
+ * undo/redo replay identity, and break the correlation the S13
+ * warnings panel relies on. `NON_EDITABLE_TOP_KEYS` explicitly
+ * rejects them with an `ApplyParametersError` naming the field.
  *
  * ## Runtime unknown-key validation vs TypeScript
  *
@@ -149,20 +182,35 @@ const FORBIDDEN_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Top-level `DeckDesign` keys that are OWN keys but NOT semantically
+ * editable via `applyParameters`. Patching them would either desync
+ * `layout.designId` (which is copied from `design.id` at layout
+ * time) or rewrite audit metadata (`createdAt`). These are rejected
+ * at the top-level of the patch with an `ApplyParametersError` so
+ * the S8 store surfaces a loud error rather than silently accepting
+ * an identity change.
+ *
+ * The alternative — an `EDITABLE_TOP_KEYS` allowlist — would need
+ * a manual update every time `DeckDesign` grew a new editable
+ * subtree (adds friction against the shape). A denylist protects
+ * the two known-non-editable fields with no other maintenance cost.
+ */
+const NON_EDITABLE_TOP_KEYS: ReadonlySet<string> = new Set(['id', 'createdAt']);
+
+/**
  * Runtime type guard: is `value` a merge-eligible plain object?
  *
- * We only recurse into values that are BOTH object-typed AND descend
- * from `Object.prototype` (or `null`). This excludes:
+ * "Plain object" here means: an object whose prototype is either
+ * `Object.prototype` (the everyday `{...}` literal or `JSON.parse`
+ * output) OR `null` (an `Object.create(null)` bag). Anything else
+ * — `null`, arrays, class instances (Date, Map, custom classes),
+ * or objects with a non-Object.prototype prototype — is rejected.
  *
- *   - `null` (typeof 'object' but not an object we can merge)
- *   - arrays (`isArray`), which would otherwise merge element-by-
- *     element — REPLACE is the correct array semantics.
- *   - class instances (e.g. `new Date()`), whose semantic identity
- *     is destroyed by a spread merge.
- *
- * Any non-plain-object value on either side (patch or current) falls
- * through to REPLACE semantics — the patch value overwrites the
- * current value.
+ * This is the load-bearing check for the plain-object-required
+ * strategy in the module docstring's prototype-pollution defence
+ * section: a JS-literal `{ __proto__: {...} }` produces a
+ * prototype-backed object with zero own keys, and `isPlainObject`
+ * returns `false` for it.
  */
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== 'object') return false;
@@ -176,13 +224,19 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 /**
  * Recursive deep-merge of `patch` into `current`. Produces a NEW
- * object at every level (immutability guarantee — AC4). Throws
- * `ApplyParametersError` on the first forbidden or unknown key,
- * naming the full dotted path.
+ * top-level object at every level of the patch (immutability
+ * guarantee — AC4). Untouched subtrees are structurally SHARED
+ * with `current` (reference-equal): this is the standard
+ * immutable-update pattern used by Redux/zundo/Immer's `produce`
+ * and is safe because every field of `DeckDesign` is declared
+ * `readonly` at the type level (a mutation via a shared reference
+ * would be a compile error). See `types.ts` `DesignBundle` docs.
  *
- * `pathPrefix` accumulates the dotted path so far — an empty string
- * at the root, otherwise ending in `.`. The offending key is
- * appended to this prefix in the error message.
+ * @throws {ApplyParametersError} on the first forbidden or unknown
+ *   key, OR when `patch[key]` is a non-plain-object where
+ *   `current[key]` is a plain object (would silently corrupt the
+ *   domain subtree). The error's `.path` names the FULL dotted
+ *   path from the patch root.
  */
 function deepMerge<T extends object>(
   current: T,
@@ -217,7 +271,18 @@ function deepMerge<T extends object>(
     const patchValue = (patch as Record<string, unknown>)[key];
     const currentValue = (current as Record<string, unknown>)[key];
 
-    if (isPlainObject(patchValue) && isPlainObject(currentValue)) {
+    if (isPlainObject(currentValue)) {
+      // The current subtree is a plain object → the patch MUST also
+      // be a plain object. A REPLACE with null / array / class
+      // instance / prototype-backed object would silently corrupt a
+      // domain subtree (nested `__proto__` attack, or accidentally
+      // pass an array where an object is required). Fail LOUD.
+      if (!isPlainObject(patchValue)) {
+        throw new ApplyParametersError(
+          `${pathPrefix}${key}`,
+          `Expected a plain object at '${pathPrefix}${key}' — refusing to REPLACE a domain subtree with a non-plain value (prototype-pollution defence — see apply-parameters.ts module docs)`,
+        );
+      }
       // Recurse: extend the path prefix so nested errors report the
       // full dotted path (e.g. `footprint.rogueField`).
       result[key] = deepMerge(
@@ -226,13 +291,60 @@ function deepMerge<T extends object>(
         `${pathPrefix}${key}.`,
       );
     } else {
-      // REPLACE semantics for primitives / arrays / class instances
-      // — see `isPlainObject` docs.
+      // Leaf value in `current` (primitive / array / non-plain
+      // object) — REPLACE semantics. Domain leaves are primitives
+      // (`Mm` numbers, `Species` strings) so the patch value simply
+      // overwrites. If the caller passes a nonsense value (e.g. a
+      // string where an `Mm` is expected) the downstream
+      // `computeLayout` surfaces it as `LayoutError`.
       result[key] = patchValue;
     }
   }
 
   return result as T;
+}
+
+/**
+ * Guard that the root `patch` is a plain object. A non-object patch
+ * (`null`, primitive, array, class instance, prototype-backed
+ * object) breaks the whole merge contract — `Object.keys(null)`
+ * throws a raw `TypeError`, an array patch would silently iterate
+ * numeric indices as "keys" of DeckDesign, and a prototype-backed
+ * root would be a top-level version of the JS-literal `__proto__`
+ * attack. Extracted from `applyParameters` to keep the use-case at
+ * ≤ 40 lines per issue #8 §15.
+ *
+ * @throws {ApplyParametersError} with `path === ''` when the guard
+ *   fails. Empty path signals a root-level problem to the S8 UI.
+ */
+function assertPatchIsPlainObject(patch: unknown): asserts patch is Record<string, unknown> {
+  if (!isPlainObject(patch)) {
+    throw new ApplyParametersError(
+      '',
+      'patch must be a plain object (received null, primitive, array, or prototype-backed value — see apply-parameters.ts module docs)',
+    );
+  }
+}
+
+/**
+ * Guard that the patch does not touch identity/audit metadata.
+ * `id` and `createdAt` are OWN keys of `DeckDesign` — so the
+ * unknown-key check alone would accept them. Reject them BEFORE
+ * the merge starts. Extracted from `applyParameters` to keep the
+ * use-case at ≤ 40 lines per issue #8 §15.
+ *
+ * @throws {ApplyParametersError} naming the first offending
+ *   non-editable top-level key.
+ */
+function assertPatchTopKeysEditable(patch: Record<string, unknown>): void {
+  for (const key of Object.keys(patch)) {
+    if (NON_EDITABLE_TOP_KEYS.has(key)) {
+      throw new ApplyParametersError(
+        key,
+        `Field '${key}' is not editable via applyParameters — identity/audit metadata is set at design creation only (see apply-parameters.ts module docs)`,
+      );
+    }
+  }
 }
 
 /**
@@ -244,11 +356,16 @@ function deepMerge<T extends object>(
  * @param patch   Path-based partial. Every key must be a legitimate
  *                field of DeckDesign at its nesting depth; unknown
  *                keys throw `ApplyParametersError` naming the path.
+ *                `id` and `createdAt` are OWN keys of DeckDesign
+ *                but explicitly not editable — patching them throws.
  * @param table   `SpanTable` instance owned by the state store
  *                (issue #8 §17 Open Question — option (b): pass at
  *                every call site rather than a module singleton).
  *
- * @throws {ApplyParametersError} on an unknown or forbidden key.
+ * @throws {ApplyParametersError} on an unknown, forbidden, or
+ *   non-editable-metadata key, on a non-plain-object root patch,
+ *   or on a non-plain-object patch where the current subtree is a
+ *   plain object.
  * @throws {LayoutError} on a merged design that fails
  *   `computeLayout` (dimensionally invalid or unknown catalog
  *   material — issue #8 §4 Edge cases).
@@ -258,6 +375,8 @@ export function applyParameters(
   patch: DeepPartial<DeckDesign>,
   table: SpanTable,
 ): DesignBundle {
+  assertPatchIsPlainObject(patch);
+  assertPatchTopKeysEditable(patch);
   const merged = deepMerge(current, patch, '');
   const { layout, warnings } = computeLayoutAndCheck(merged, table);
   return { design: merged, layout, warnings };
