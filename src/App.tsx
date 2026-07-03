@@ -54,7 +54,7 @@
  * cross-layer. Every OTHER file in the codebase is boundary-checked.
  */
 import { lazy, Suspense, useEffect, type JSX } from 'react';
-import { AppShell, SceneErrorBoundary } from './ui';
+import { AppShell, ParameterPanel, SceneErrorBoundary } from './ui';
 import { useDesignStore } from './state';
 
 /**
@@ -123,25 +123,20 @@ function SceneFallback(): JSX.Element {
 }
 
 /**
- * Placeholder for the S13 parameters panel. Renders an `<h2>` so
- * the shell's `<aside>` landmark has an accessible section title
- * NOW (before S13 lands). S13 REPLACES this component — it MUST
- * keep the `<h2>` title so screen-reader users experience the same
- * landmark structure.
+ * S13 placeholder REPLACED — the leftPanel now hosts the real
+ * `<ParameterPanel />`. Kept the S14 placeholder alone.
+ *
+ * `LeftPanelPlaceholder` is removed; `<ParameterPanel />` is the
+ * S13 landing per issue #14 §2 (renders `<h2>Parameters</h2>` so
+ * the leftPanel landmark still carries an accessible section
+ * title). The panel reads `useDesign()`/`useUiUnits()` and writes
+ * via `useDesignStore.getState().applyParameters(...)`.
  */
-function LeftPanelPlaceholder(): JSX.Element {
-  return (
-    <>
-      <h2>Parameters</h2>
-      <p>The parameters panel arrives in S13.</p>
-    </>
-  );
-}
 
 /**
  * Placeholder for the S14 tools panel (toggles + warnings + BOM +
- * export). Same contract as LeftPanelPlaceholder: keep the `<h2>`
- * heading when S14 lands.
+ * export). Same contract as the (former) LeftPanelPlaceholder:
+ * keep the `<h2>` heading when S14 lands.
  */
 function RightPanelPlaceholder(): JSX.Element {
   return (
@@ -168,7 +163,7 @@ export function App(): JSX.Element {
 
   return (
     <AppShell
-      leftPanel={<LeftPanelPlaceholder />}
+      leftPanel={<ParameterPanel />}
       rightPanel={<RightPanelPlaceholder />}
       main={
         // SceneErrorBoundary (S12 pair-fix iter 1 — Fix B / GPT#2

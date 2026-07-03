@@ -12,7 +12,10 @@
  *   persistence → only src/(persistence|domain)/**
  *   state       → only src/(state|application|domain)/**
  *   scene       → only src/(scene|state|domain)/**
- *   ui          → only src/(ui|state)/**             (S12 issue #13 — dumb view layer)
+ *   ui          → only src/(ui|state|domain)/**      (S13 issue #14 loosened —
+ *                    ui/ may consume domain/units, domain/materials-catalog,
+ *                    and domain/model types; the dedicated `ui-no-domain-layout`
+ *                    rule below still forbids ui/ → domain/layout/**)
  *
  * Why state does NOT include persistence (revised in S8 pair-fix): the
  * state store needs `instanceof DeckFileError` narrowing on save
@@ -60,16 +63,31 @@ const ALLOWED_SRC_PATHS = {
   persistence: '^src/(persistence|domain)/',
   state: '^src/(application|domain|state)/',
   scene: '^src/(domain|scene|state)/',
-  // S12 issue #13 — the `ui/` layer is the DUMB view: it composes React
-  // panels off the Zustand stores and nothing else. Application-layer
-  // use-cases are the state store's concern (actions on the store), so
-  // ui/ MUST NOT reach into `application/` (bypassing the store) or
-  // `domain/` (rendering raw domain types would leak business logic
-  // into JSX). Composition of `ui/` + `scene/` + `application/`
-  // happens at the root (`src/App.tsx`) — see docs/ARCHITECTURE.md
-  // § 3a. Boundary self-test probes BLOCK-2r..2u enforce this rule
-  // with fixture violations.
-  ui: '^src/(state|ui)/',
+  // S13 issue #14 (Boundary Resolution comment) LOOSENED the ui
+  // allowlist to include `domain/`. Rationale: `ParameterPanel`
+  // legitimately needs to parse / format lengths via `domain/units`,
+  // discover valid SKUs via `domain/materials-catalog`, and read
+  // domain TYPES (`DeckDesign`, `MaterialRef`, `LumberNominal`,
+  // `Species`, `Grade`) via `domain/model`. Those three modules are
+  // stateless VALUE-OBJECT helpers — importing them does NOT drag
+  // business logic into JSX.
+  //
+  // What is STILL forbidden:
+  //   - `application/` — panels must go through the state store
+  //     (BLOCK-2s enforces).
+  //   - `persistence/` — I/O flows through state + application only
+  //     (BLOCK-2t enforces).
+  //   - `scene/` — the shell is dumb and never reaches into the 3D
+  //     subtree (BLOCK-2d enforces).
+  //   - `domain/layout/**` — the layout engine's throw contract is
+  //     surfaced through `useDesignStatus().lastError` from the
+  //     store; the UI never PRE-COMPUTES a min/max locally. Enforced
+  //     by the dedicated `ui-no-domain-layout` rule below +
+  //     BLOCK-2v probe.
+  //
+  // Composition of `ui/` + `scene/` + `application/` still happens
+  // at the root (`src/App.tsx`) — see docs/ARCHITECTURE.md § 3a.
+  ui: '^src/(state|ui|domain)/',
 };
 
 // NPM package prefixes that domain/ must NEVER import (spec § NFR-010).
@@ -185,6 +203,39 @@ module.exports = {
         'never on irc-2018-tables.ts (Code Review Guardian PR#24 finding #4).',
       from: { path: '^src/domain/spans/(?:__selftest__/)?span-check\\.ts$' },
       to: { path: '^src/domain/spans/irc-2018-tables' },
+    },
+
+    // ---- ui: MUST NOT reach into the layout engine ------------------------
+    //
+    // S13 issue #14 (Boundary Resolution comment §1 + §3). The ui
+    // allowlist now permits `^src/domain/` so ParameterPanel can
+    // import `domain/units`, `domain/materials-catalog`, and
+    // `domain/model` (types). But `domain/layout/**` is a STRICT
+    // exception: material-dependent minimums (structural height,
+    // joist-spacing floor, 4 ft width/length floor, etc.) must NOT
+    // be pre-computed in the UI. Instead, an invalid value flows
+    // through `useDesignStore.getState().applyParameters(patch)`,
+    // the store catches the `LayoutError` (with S4's UI-ready
+    // messages), and the panel surfaces `useDesignStatus().lastError`
+    // inline. That single-source-of-truth discipline forbids the
+    // UI from importing ANY module under `src/domain/layout/`
+    // (including `MIN_DECK_DIMENSION_MM` and
+    // `computeMinStructuralHeightMm`) — which the loosened
+    // `ui-allowlist` would otherwise permit.
+    //
+    // A boundary self-test probe (BLOCK-2v) exercises this rule
+    // with a fixture violation so the gate can't silently degrade.
+    {
+      name: 'ui-no-domain-layout',
+      severity: 'error',
+      comment:
+        'S13 issue #14 (Boundary Resolution §1): src/ui/** MUST NOT import from ' +
+        'src/domain/layout/** — the layout engine\'s throw contract is surfaced via ' +
+        'useDesignStatus().lastError from the state store; the UI never pre-computes ' +
+        'a min/max locally. Rely on applyParameters → LayoutError → status:\'error\' ' +
+        'and read lastError.message inline near the offending field.',
+      from: { path: '^src/ui/' },
+      to: { path: '^src/domain/layout(/|$)' },
     },
 
     // ---- scene: layers must not couple to the layout engine ---------------

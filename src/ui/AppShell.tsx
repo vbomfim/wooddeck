@@ -19,8 +19,15 @@
  *   (`src/App.tsx`) is the ONE place allowed to wire scene into
  *   the shell. Enforced by `.dependency-cruiser.cjs` `ui-allowlist`
  *   + boundary self-test BLOCK-2d.
- * - Not a domain consumer — MUST NOT import from `src/domain/**`.
- *   Enforced by BLOCK-2r.
+ * - Not a domain-layout consumer — MUST NOT import from
+ *   `src/domain/layout/**` (the layout engine's throw contract is
+ *   surfaced through `useDesignStatus().lastError` from the state
+ *   store — the UI never pre-computes mins locally). Enforced by
+ *   the `ui-no-domain-layout` rule + boundary self-test BLOCK-2v.
+ *   NOTE: `ui/` MAY import `src/domain/units`,
+ *   `src/domain/materials-catalog`, and `src/domain/model` (types
+ *   only) — this shell doesn't need them, but S13's ParameterPanel
+ *   does (per Boundary Resolution §1 for issue #14).
  * - Not an application consumer — use-cases are the state store's
  *   concern. BLOCK-2s enforces.
  * - Not a persistence consumer — I/O flows through state + application.
