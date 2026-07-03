@@ -26,7 +26,8 @@ This document is normative for **module layout, layer boundaries, and third-part
               ┌───────────────────▼─────┐  │
               │        scene/            │  │  r3f Canvas, camera,
               │  (DeckScene, layers,     │  │  6 layer components,
-              │   WarningOverlay)        │  │  WarningOverlay (S9–S11)
+              │   WarningOverlay +       │  │  WarningOverlay (S9–S11)
+              │   highlights/)           │  │  PEER of layers, not consumer
               └────────┬─────────────────┘  │
                        │                    │
                   ┌────▼────────────────────▼────┐
@@ -122,6 +123,46 @@ The scene is authored at **millimeter world scale** — `1 three.js unit = 1 mm`
 - `src/scene/layers/shared/BoxMember.tsx` renders every rectangular member as a `<boxGeometry args={[1,1,1]}/>` scaled by `member.size`. Full-extent (not half-extent) matches `THREE.BoxGeometry`'s `(width, height, depth)` constructor convention.
 - `src/scene/DeckScene.tsx` mounts the Canvas at mm world scale; the `## Scene coordinate frame & units` note in that file's module header pins the same statement at the code entry point.
 - No layer file may derive coordinates arithmetically from `member.position`, `member.size`, or `member.rotation` — the layout engine (`src/domain/layout/**`) owns every derivation. Enforced by `src/scene/layers/no-geometry-math.test.ts` + the `scene-no-domain-layout` dep-cruiser rule.
+
+## 3c. WarningOverlay is a peer of layers (S11 finding #7)
+
+`src/scene/WarningOverlay.tsx` + everything under `src/scene/highlights/**` **MUST NOT** import from `src/scene/layers/**` — not the layer components, not the shared primitives (`BoxMember`, `layers/shared/geometries.ts`, `layers/shared/materials.ts`). The overlay is a **peer** of the layers in the scene graph, not a consumer.
+
+**Why the boundary is structural, not conventional:**
+
+- **AC2 independence.** The whole point of the story: a joist's over-span highlight must remain visible when the user toggles the Joists layer off. Reusing a layer's mesh (or its shared primitives) would create a coupling that any future refactor could invisibly turn into a visibility dependency. A hard boundary makes the property un-regressable.
+- **Rewritability.** Both components stay rewritable from their interfaces alone. Someone rewriting the layers cannot silently break the overlay, and vice versa.
+
+**Enforcement (three gates, defense in depth):**
+
+1. **dep-cruiser rule** `warning-overlay-no-layers` in `.dependency-cruiser.cjs` forbids `^src/scene/(WarningOverlay\.tsx|highlights/)` → `^src/scene/layers/`.
+2. **Boundary self-test** `BLOCK-2q` in `scripts/boundary-selftest.mjs` writes a fixture violation and asserts the dep-cruiser rule fires with a non-zero exit + the rule name in the report.
+3. **Grep guard** `src/scene/highlights/no-geometry-math.test.ts` scans every non-test file under `src/scene/highlights/**` plus `src/scene/WarningOverlay.tsx` for (a) inline arithmetic on `member.position/size/rotation` (the finding #3 discipline) AND (b) any relative import whose specifier ends in `layers` or `layers/<anything>`.
+
+**Highlight style choice (AC3 § 17 open question resolution).**
+
+The S11 ticket §17 offered three highlight-style options: (a) translucent bounding box, (b) wireframe outline, (c) glow shader. We chose **(a) translucent red bounding box** — `MeshBasicMaterial` (unlit for consistent brightness regardless of scene lighting), `color=0xff0000`, `transparent=true`, `opacity=0.35`, `depthTest=false`, `depthWrite=false`, `side=DoubleSide`, plus a mesh `renderOrder=999` so the highlight sorts last in the transparent pass and draws on top of every opaque primitive. The three property pins are exported from `src/scene/highlights/highlight-primitives.ts` (`HIGHLIGHT_COLOR_HEX`, `HIGHLIGHT_OPACITY`, `HIGHLIGHT_RENDER_ORDER`) so a future palette tweak stays in one place. See `src/scene/highlights/highlight-primitives.ts` module header for the trade-offs.
+
+**Warnings-visible flag decision (S11 §17).**
+
+The ticket §2 mentioned `useUiStore.layerVisibility.warnings` for future extensibility. We do **NOT** add a `warnings` key to `LayerVisibility` — that would disrupt `DECK_LAYER_ORDER` and the S8/S10 tests that assert the exact six-key layer set (`environment` / `decking` / `joists` / `beams` / `posts` / `footings`). For MVP the overlay renders **always-on** (ticket §2: "no toggle UI required, but the flag exists for future extensibility"). No separate `warningsVisible` field either — YAGNI until a user story demands one. A future story that wants a toggle should add a **distinct** `warningsVisible: boolean` (default `true`) to `useUiStore` **outside** the `layerVisibility` record and bind the overlay group's `visible` to it.
+
+**S12 composition contract.**
+
+S12's AppShell composes the scene as:
+
+```tsx
+<DeckScene>
+  <DeckLayers />
+  <WarningOverlay />
+</DeckScene>
+```
+
+The overlay MUST mount **after** `<DeckLayers />` so its highlights sort last in the scene-graph traversal AND draw last in the transparent-material pass. Combined with the highlight's `depthTest=false` + high `renderOrder`, this guarantees the decoration renders visually on top (AC3).
+
+**Accessibility (WCAG 2.2 § 10 accessible surface).**
+
+The 3D highlight is a visual indicator. Users who cannot see it rely on the **WarningsPanel (S14)** for the same information — the panel is the accessible surface. The overlay is a redundant visual cue on top of the accessible-first text listing, not a replacement for it.
 
 ## 4. Pinned 3D-stack version matrix
 
