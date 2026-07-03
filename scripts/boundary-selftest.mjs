@@ -302,6 +302,79 @@ export const stubUi = 'stub';
     mustNameFile: true,
   },
   {
+    // S9 issue #10 boundary rule: scene/ MUST NOT import from ui/
+    // (scene is view-only, view-of-3D — no React DOM components,
+    // no AppShell references). The dep-cruiser scene-allowlist
+    // already excludes `ui/`; this fixture LOCKS THAT IN so a
+    // future edit that widens the allowlist gets caught by CI.
+    label: 'BLOCK-2m: scene reaches into src/ui (view leak)',
+    path: 'src/scene/__selftest__/allowlist-ui.ts',
+    contents: `// self-test fixture — MUST fail lint:boundaries (allowlist)
+import { stubUi } from '../../ui/__selftest__/target';
+export const _ = stubUi;
+`,
+    targets: [
+      {
+        path: 'src/ui/__selftest__/target.ts',
+        contents: `// self-test target for BLOCK-2m — resolves the offending import
+export const stubUi = 'stub';
+`,
+      },
+    ],
+    tool: 'depcruise',
+    expectedRule: 'scene-allowlist',
+    mustNameFile: true,
+  },
+  {
+    // S9 issue #10 boundary rule: scene/ MUST NOT import from
+    // application/ (scene is a view layer — I/O and use-case
+    // orchestration are the state store's job, mediated by the
+    // application layer). A scene component that reached into
+    // `application/` would blur the boundary between "read from
+    // Zustand" and "invoke a use-case" — those are the state
+    // store's actions, not scene concerns.
+    label: 'BLOCK-2n: scene reaches into src/application (use-case leak)',
+    path: 'src/scene/__selftest__/allowlist-application.ts',
+    contents: `// self-test fixture — MUST fail lint:boundaries (allowlist)
+import { stubApp } from '../../application/__selftest__/scene-target';
+export const _ = stubApp;
+`,
+    targets: [
+      {
+        path: 'src/application/__selftest__/scene-target.ts',
+        contents: `// self-test target for BLOCK-2n — resolves the offending import
+export const stubApp = 'stub';
+`,
+      },
+    ],
+    tool: 'depcruise',
+    expectedRule: 'scene-allowlist',
+    mustNameFile: true,
+  },
+  {
+    // S9 issue #10 boundary rule: scene/ MUST NOT import from
+    // persistence/ (persistence is I/O; scene must not touch
+    // localStorage or the .deck file directly — all persistence
+    // flows through the state store via the application layer).
+    label: 'BLOCK-2o: scene reaches into src/persistence (I/O leak)',
+    path: 'src/scene/__selftest__/allowlist-persistence.ts',
+    contents: `// self-test fixture — MUST fail lint:boundaries (allowlist)
+import { stubPers } from '../../persistence/__selftest__/scene-target';
+export const _ = stubPers;
+`,
+    targets: [
+      {
+        path: 'src/persistence/__selftest__/scene-target.ts',
+        contents: `// self-test target for BLOCK-2o — resolves the offending import
+export const stubPers = 'stub';
+`,
+      },
+    ],
+    tool: 'depcruise',
+    expectedRule: 'scene-allowlist',
+    mustNameFile: true,
+  },
+  {
     // PR#26 pair-fix iter 1 — Code Review GPT#5. The persistence-
     // allowlist rule only scopes on `^src/` targets, so a file under
     // `src/persistence/**` that imported a project-relative NON-src
