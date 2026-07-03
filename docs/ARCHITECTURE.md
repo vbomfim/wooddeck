@@ -100,7 +100,28 @@ Key properties:
 - **The scene is rendered as a `ReactNode` prop or `children`** in the UI shell. The shell may lay it out (position, size), style around it, and gate its visibility, but never construct or configure it.
 - **This is the classic "composition root" pattern** (Mark Seemann): dependencies are wired at the outermost layer where all the concrete types are known; every inner layer stays free of the graph-construction concern.
 
-If a future story genuinely needs a shared composition helper, put it in a new top-level folder (e.g. `src/composition/`) — the boundary rules will require an update to include it, which forces the discussion.
+If a future story genuinely needs a shared composition helper, put it in a new top-level folder (e.g. `src/composition`) — the boundary rules will require an update to include it, which forces the discussion.
+
+## 3b. Scene coordinate frame & units (S10 pinned)
+
+The scene is authored at **millimeter world scale** — `1 three.js unit = 1 mm`. Every `LayoutMember.position` / `size` field (see `domain/model.ts` "LAYOUT COORDINATE FRAME") flows into `<mesh position={[...]}` / `scale={[...]}` **unchanged** — no conversion, no rescale.
+
+**Frame (right-handed, Euler XYZ, radians):**
+
+| Axis | Direction | Convention |
+| ---- | --------- | ---------- |
+| +x   | width     | horizontal along the deck's short side |
+| +y   | up        | `y = 0` is the ground plane; deck framing lives at positive `y` |
+| +z   | length    | horizontal along the deck's long side |
+
+**Origin:** the ground-level footprint center. Positive `y` is up; the environment layer's ground plane sits at `y = 0`; footings extend into `-y`.
+
+**Consequences for scene code:**
+
+- Camera near / far planes in `src/scene/camera-presets.ts` are mm-scaled (`CAMERA_NEAR_MM` / `CAMERA_FAR_MM`); default r3f `near=0.1 / far=1000` would clip every deck member.
+- `src/scene/layers/shared/BoxMember.tsx` renders every rectangular member as a `<boxGeometry args={[1,1,1]}/>` scaled by `member.size`. Full-extent (not half-extent) matches `THREE.BoxGeometry`'s `(width, height, depth)` constructor convention.
+- `src/scene/DeckScene.tsx` mounts the Canvas at mm world scale; the `## Scene coordinate frame & units` note in that file's module header pins the same statement at the code entry point.
+- No layer file may derive coordinates arithmetically from `member.position`, `member.size`, or `member.rotation` — the layout engine (`src/domain/layout/**`) owns every derivation. Enforced by `src/scene/layers/no-geometry-math.test.ts` + the `scene-no-domain-layout` dep-cruiser rule.
 
 ## 4. Pinned 3D-stack version matrix
 

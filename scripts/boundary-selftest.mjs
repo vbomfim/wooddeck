@@ -402,6 +402,24 @@ export const stubHelper = 'stub';
     mustNameFile: true,
   },
   {
+    // S10 issue #11 boundary rule: scene/ MUST NOT import from
+    // src/domain/layout/** — scene layers consume the pre-computed
+    // Layout from state only. The generic `scene-allowlist` rule
+    // permits `^src/domain/`, so this specific `scene-no-domain-
+    // layout` rule closes the gap for the layout sub-tree. Fixture
+    // proves the rule fires; the target `src/domain/layout/index.ts`
+    // exists in-tree so no target directive is needed.
+    label: 'BLOCK-2p: scene reaches into src/domain/layout (layout-engine leak)',
+    path: 'src/scene/__selftest__/no-domain-layout.ts',
+    contents: `// self-test fixture — MUST fail lint:boundaries (scene-no-domain-layout)
+import { computeLayout } from '../../domain/layout';
+export const _ = computeLayout;
+`,
+    tool: 'depcruise',
+    expectedRule: 'scene-no-domain-layout',
+    mustNameFile: true,
+  },
+  {
     // Code Review Guardian PR#24 Opus finding #1 — the layer allowlist
     // does NOT catch intra-src/domain/spans/ imports. This fixture
     // proves the belt-and-suspenders `span-check-no-irc-tables` rule

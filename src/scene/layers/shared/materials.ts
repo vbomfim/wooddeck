@@ -1,0 +1,146 @@
+/**
+ * `src/scene/layers/shared/materials.ts` — shared per-species
+ * `MeshStandardMaterial` cache.
+ *
+ * ## Responsibility (single)
+ *
+ * Provide ONE `MeshStandardMaterial` instance per {@link Species}
+ * for every scene mesh in {@link BoxMember} to bind to. Callers
+ * NEVER `new MeshStandardMaterial(...)` themselves — that would
+ * defeat the "shared per species" trade-off in issue #11 §17 and
+ * balloon the GPU material count with `N` copies of one colour.
+ *
+ * ## Palette (AC6 pinned)
+ *
+ * The three MVP species map to distinct base colours picked to be
+ * recognisable in an unlit-ish scene under a soft ambient + a
+ * single key light (see `../lighting.tsx`):
+ *
+ *   PT         → `0x6b7a4a`  — greenish-brown olive/tan. Southern-
+ *                              pine PT boards fresh from the mill
+ *                              read as an olive-tan under natural
+ *                              light; the copper-based treatment
+ *                              adds a mild green cast.
+ *   Cedar      → `0xa0623c`  — reddish-brown warm cinnamon/salmon.
+ *                              Western Red Cedar's characteristic
+ *                              warm heartwood tone.
+ *   Composite  → `0x7a7a7a`  — neutral gray. Composite decking is
+ *                              available in many colours in reality,
+ *                              but the MVP catalog is a single grey
+ *                              tone (Trex "Clam Shell"–like).
+ *
+ * The `MATERIAL_COLORS` map is EXPORTED so `materials.test.ts` can
+ * assert the numerical property (green-dominant / red-dominant /
+ * neutral) rather than pinning a fragile exact hex — a future
+ * palette tweak still needs to preserve the recognisable species
+ * cast, but the tests won't fight cosmetic adjustments.
+ *
+ * ## Why MeshStandardMaterial (not MeshBasicMaterial)
+ *
+ * `MeshStandardMaterial` responds to the ambient + directional
+ * lights from `lighting.tsx`, giving each member shape and
+ * shadow-side depth (SIDES read darker than the top). A
+ * `MeshBasicMaterial` would draw every face at the same brightness,
+ * flattening the visual read of the framing stack — the whole
+ * "peel back the layers" UX depends on the visual depth cue.
+ *
+ * `metalness: 0` + a mid roughness match the natural-material
+ * appearance and avoid PBR "wet plastic" artifacts.
+ *
+ * ## Memoization contract
+ *
+ * The module-scope `SHARED_MATERIALS` `Map` seeds materials
+ * lazily on first request. Subsequent calls return the SAME
+ * instance. Referential equality is the whole point — every joist
+ * shares one material, every beam shares one, and so on.
+ *
+ * ## Disposal
+ *
+ * `disposeSharedMaterials()` is exported for HMR scenarios and
+ * tests that want to prove the cache is not leaking across
+ * renders. Real users never call it — the browser's process
+ * teardown reclaims GPU handles when the tab closes.
+ *
+ * ## Boundary discipline
+ *
+ * Imports only `three` (the shared MeshStandardMaterial) and the
+ * `Species` type from `../../../domain/model`. No React, no state
+ * store, no drei — pure three.js utility that any scene component
+ * can consume.
+ */
+import { MeshStandardMaterial } from 'three';
+
+import type { LayoutMember, Species } from '../../../domain/model';
+
+/**
+ * The canonical hex colours for each species. Exported so tests
+ * can assert the palette without hard-coding the same numbers in
+ * two places. See module header for the perceptual rationale.
+ */
+export const MATERIAL_COLORS: Readonly<Record<Species, number>> = Object.freeze({
+  PT: 0x6b7a4a,
+  Cedar: 0xa0623c,
+  Composite: 0x7a7a7a,
+});
+
+/**
+ * Roughness applied to every species. A mid value reads as
+ * "real wood" in the r3f Standard shader — 0 is chrome-mirror,
+ * 1 is chalky matte. Roughness of 0.85 lands close to weathered
+ * matte lumber.
+ */
+const WOOD_ROUGHNESS = 0.85;
+
+/**
+ * Metalness of every species. Wood and composite are non-metallic
+ * — the Standard shader's PBR metal path is skipped when this is
+ * 0, giving a natural diffuse look.
+ */
+const WOOD_METALNESS = 0;
+
+/**
+ * Module-scope cache. `Map` (not a plain object) so `.get` returns
+ * `undefined` — the strictly-typed `Species | undefined` union
+ * matches the code path more clearly than `k in obj` sniffing.
+ */
+const SHARED_MATERIALS = new Map<Species, MeshStandardMaterial>();
+
+/**
+ * Return the shared `MeshStandardMaterial` for a species,
+ * constructing it on first request. Every subsequent call returns
+ * the SAME instance — asserted by `materials.test.ts`.
+ */
+export function materialForSpecies(species: Species): MeshStandardMaterial {
+  const cached = SHARED_MATERIALS.get(species);
+  if (cached !== undefined) return cached;
+  const material = new MeshStandardMaterial({
+    color: MATERIAL_COLORS[species],
+    roughness: WOOD_ROUGHNESS,
+    metalness: WOOD_METALNESS,
+  });
+  SHARED_MATERIALS.set(species, material);
+  return material;
+}
+
+/**
+ * Convenience helper — every {@link BoxMember} calls this to pick
+ * its species-specific material from its `LayoutMember.material.species`
+ * field. Delegates to {@link materialForSpecies}; keeps `BoxMember`
+ * unaware of the cache implementation.
+ */
+export function materialForMember(member: LayoutMember): MeshStandardMaterial {
+  return materialForSpecies(member.material.species);
+}
+
+/**
+ * Test-only helper — dispose every cached material and clear the
+ * cache. Used by `materials.test.ts` to prove the cache is
+ * rebuild-friendly. Real users never call this: the browser's
+ * process teardown reclaims GPU handles.
+ */
+export function disposeSharedMaterials(): void {
+  for (const mat of SHARED_MATERIALS.values()) {
+    mat.dispose();
+  }
+  SHARED_MATERIALS.clear();
+}
