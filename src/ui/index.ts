@@ -56,3 +56,14 @@ export type { SceneErrorBoundaryProps } from './SceneErrorBoundary';
 export { reloadPage } from './reload-page';
 
 export { APP_VERSION_FALLBACK, getAppVersion } from './version';
+
+// ---- S13 issue #14 — ParameterPanel + UnitSwitcher ----------------------
+//
+// The `ui/` barrel re-exports the two panel-level components. Field
+// components (`LengthField`, `SelectField`) are INTERNAL — consumers
+// use the panel, not the fields directly. Keeping fields off the
+// barrel means a future rewrite that changes the field split (e.g.
+// combining LengthField + SelectField into a generic FieldRow) does
+// not break external callers.
+export { ParameterPanel } from './ParameterPanel';
+export { UnitSwitcher } from './UnitSwitcher';

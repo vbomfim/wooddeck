@@ -84,7 +84,7 @@ afterEach(() => {
 });
 
 describe('<App /> — AC6 real keyboard tab order (Fix D — GPT#3 HIGH)', () => {
-  it('tabs through header → left → main(canvas) → right', async () => {
+  it('tabs through header → left(ParameterPanel) → main(canvas) → right', async () => {
     render(<App />);
 
     // The lazy DeckScene must resolve before the canvas mounts —
@@ -98,24 +98,38 @@ describe('<App /> — AC6 real keyboard tab order (Fix D — GPT#3 HIGH)', () =>
 
     // Focus the spec link (first focusable in the header). The
     // rest of the shell follows in DOM order: header → left aside
-    // → main canvas → right aside.
+    // (ParameterPanel) → main canvas → right aside.
     const specLink = screen.getByRole('link', { name: /spec/i });
     specLink.focus();
     expect(document.activeElement).toBe(specLink);
 
     const user = userEvent.setup();
 
+    // S13 filled the left panel with <ParameterPanel />. The FIRST
+    // focusable child in the panel is the "Imperial" button in the
+    // UnitSwitcher (rendered above the fields). After tabbing from
+    // the spec link, focus must land there — proving the header →
+    // left ordering is preserved (S12 AC6 invariant, updated for
+    // the S13 population of the leftPanel slot).
     await user.tab();
-    // Left panel placeholder has no focusable children (S13 fills
-    // it), so tab skips to the next focusable element — the canvas.
-    // If the LEFT panel gains a focusable child later, we assert
-    // the LEFT focus lands first and update this test.
-    expect(document.activeElement).toBe(canvas);
+    const imperialBtn = screen.getByRole('button', { name: /imperial/i });
+    expect(document.activeElement).toBe(imperialBtn);
 
-    // Nothing focusable exists after the canvas in the right
-    // panel placeholder (S14 fills it) → tab moves to <body>.
-    // The critical assertion here is: the canvas WAS reached
-    // before the tab loop ended. Everything else is placeholder
-    // scaffolding that S13/S14 will replace.
+    // Continue tabbing until we reach the canvas. Cap the loop at
+    // a generous limit so a regression that skips the canvas fails
+    // loudly instead of hanging the test. The exact tab count is
+    // an implementation detail (depends on how many inputs the
+    // panel exposes) — what matters is the canvas is REACHABLE by
+    // keyboard, in DOM order after the left panel.
+    const MAX_TABS = 32;
+    let reachedCanvas = false;
+    for (let i = 0; i < MAX_TABS; i++) {
+      await user.tab();
+      if (document.activeElement === canvas) {
+        reachedCanvas = true;
+        break;
+      }
+    }
+    expect(reachedCanvas).toBe(true);
   });
 });

@@ -1,0 +1,168 @@
+/*
+ * `src/ui/styles/parameter-panel.css` — S13 issue #14.
+ *
+ * ## Layout
+ *
+ * The panel is a vertical stack:
+ *   1. `<h2>Parameters</h2>`
+ *   2. `<UnitSwitcher />` — two-button toggle group
+ *   3. `<div role="alert">` — inline LayoutError (when status='error')
+ *   4. `<div class="wd-parameter-panel__fields">` — vertical field list
+ *
+ * Each field (LengthField / SelectField) is its own row with a
+ * label above the control. Fields have a max width so a wide
+ * panel doesn't stretch inputs into empty space.
+ *
+ * ## Accessibility
+ *
+ *   - Every input/select is associated with its label via
+ *     htmlFor/id (React `useId`) — see LengthField.tsx /
+ *     SelectField.tsx.
+ *   - The unit switcher's two buttons carry aria-pressed so screen
+ *     readers announce the active state.
+ *   - Focus indicators use the global :focus-visible from tokens.css.
+ *   - Inline errors use role="alert" (aria-live="polite" downshift
+ *     for LengthField, "polite" for the panel-level error).
+ *   - Contrast ≥ 4.5:1 for every text/bg pair (Fix I gate covers
+ *     the tokens; text here inherits --wd-color-text on
+ *     --wd-color-surface-alt = 17.7:1).
+ *
+ * ## Reduced-motion (WCAG 2.3.3)
+ *
+ * There are NO transitions or animations in this stylesheet. If a
+ * future revision adds any, they MUST live inside the
+ * `@media (prefers-reduced-motion: no-preference)` block at the
+ * bottom — see the AppShell.test.tsx "Fix G" test which iterates
+ * every CSS file in `styles/` and asserts the guard.
+ */
+
+/* -------------------------------------------------------------------------
+ * Panel container.
+ * ------------------------------------------------------------------------- */
+.wd-parameter-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wd-space-3);
+}
+
+/* -------------------------------------------------------------------------
+ * Field list.
+ * ------------------------------------------------------------------------- */
+.wd-parameter-panel__fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wd-space-3);
+}
+
+/* -------------------------------------------------------------------------
+ * Inline LayoutError banner (near the fields).
+ * ------------------------------------------------------------------------- */
+.wd-parameter-panel__error {
+  padding: var(--wd-space-2) var(--wd-space-3);
+  background: var(--wd-color-banner-full-bg);
+  border: 1px solid var(--wd-color-banner-full-border);
+  color: var(--wd-color-banner-full-text);
+  border-radius: 4px;
+  font-size: 0.875rem;
+}
+
+/* -------------------------------------------------------------------------
+ * LengthField / SelectField shared row layout.
+ * ------------------------------------------------------------------------- */
+.wd-length-field,
+.wd-select-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--wd-space-1);
+}
+
+.wd-length-field__label,
+.wd-select-field__label {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--wd-color-text);
+}
+
+.wd-length-field__input,
+.wd-select-field__select {
+  padding: var(--wd-space-2) var(--wd-space-3);
+  font-size: 1rem;
+  color: var(--wd-color-text);
+  background: var(--wd-color-surface);
+  border: 1px solid var(--wd-color-border);
+  border-radius: 4px;
+  /* Full-width within the panel — the panel itself is 320px wide
+   * (--wd-panel-width in tokens.css minus padding). */
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.wd-length-field__input[aria-invalid='true'] {
+  border-color: var(--wd-color-banner-full-border);
+}
+
+.wd-length-field__hint {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--wd-color-text-muted);
+}
+
+.wd-length-field__error {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--wd-color-banner-full-text);
+}
+
+.wd-select-field__select:disabled {
+  color: var(--wd-color-text-muted);
+  background: var(--wd-color-surface-alt);
+  cursor: not-allowed;
+}
+
+/* -------------------------------------------------------------------------
+ * UnitSwitcher — two-button group.
+ * ------------------------------------------------------------------------- */
+.wd-unit-switcher {
+  display: inline-flex;
+  border: 1px solid var(--wd-color-border);
+  border-radius: 4px;
+  overflow: hidden;
+  /* Give it enough width to look like a segmented control. */
+  align-self: flex-start;
+}
+
+.wd-unit-switcher__btn {
+  padding: var(--wd-space-2) var(--wd-space-3);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--wd-color-text);
+  background: var(--wd-color-surface);
+  border: none;
+  cursor: pointer;
+}
+
+.wd-unit-switcher__btn + .wd-unit-switcher__btn {
+  border-left: 1px solid var(--wd-color-border);
+}
+
+/* Pressed state — the active unit. Uses --wd-color-text-muted as
+ * background for a subtle "selected chip" look. Contrast between
+ * --wd-color-text (#111) and --wd-color-surface-alt (#f5f5f5) is
+ * 17.7:1 (Fix I gate), well above WCAG AA 4.5:1. */
+.wd-unit-switcher__btn[aria-pressed='true'] {
+  background: var(--wd-color-surface-alt);
+  font-weight: 600;
+}
+
+/* -------------------------------------------------------------------------
+ * Reduced-motion gate (WCAG 2.3.3).
+ *
+ * Currently empty — reserved for future transitions. All future
+ * transition/animation properties on .wd-parameter-panel__* /
+ * .wd-length-field__* / .wd-select-field__* / .wd-unit-switcher__*
+ * MUST live inside this @media block. AppShell.test.tsx "Fix G"
+ * asserts this per stylesheet.
+ * ------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: no-preference) {
+  /* Empty. */
+}

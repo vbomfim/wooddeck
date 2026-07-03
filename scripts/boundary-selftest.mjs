@@ -83,6 +83,7 @@ assertLocalBinary(ESLINT_BIN, 'eslint');
 const SELFTEST_DIRS = [
   resolve(ROOT, 'src', 'domain', '__selftest__'),
   resolve(ROOT, 'src', 'domain', 'spans', '__selftest__'),
+  resolve(ROOT, 'src', 'domain', 'layout', '__selftest__'),
   resolve(ROOT, 'src', 'application', '__selftest__'),
   resolve(ROOT, 'src', 'persistence', '__selftest__'),
   resolve(ROOT, 'src', 'state', '__selftest__'),
@@ -267,31 +268,34 @@ export const StubDeckScene = 'stub';
     mustNameFile: true,
   },
   {
-    // S12 issue #13 boundary rule: ui/ MUST NOT import from
-    // domain/. The dumb-view layer renders JSX from Zustand state
-    // only; a `ui/` import of `../../domain/...` would drag business
-    // logic (layout math, span-check) into the JSX render path.
-    // Domain data flows through `state/` (which owns the DesignBundle);
-    // panels read shaped view models from state hooks. Pair-fix with
-    // BLOCK-2d (ui→scene), BLOCK-2s (ui→application), BLOCK-2t
-    // (ui→persistence) — the four together lock down the dumb-view
-    // boundary structurally, not by convention.
-    label: 'BLOCK-2r: ui reaches into src/domain (business-logic leak)',
-    path: 'src/ui/__selftest__/allowlist-domain.ts',
-    contents: `// self-test fixture — MUST fail lint:boundaries (allowlist)
-import { stubDomain } from '../../domain/__selftest__/ui-target';
-export const _ = stubDomain;
+    // S13 issue #14 (Boundary Resolution comment §1 + §3) boundary
+    // rule: `ui/` MAY import `domain/units`, `domain/materials-catalog`,
+    // `domain/model` (loosened `ui-allowlist`) — BUT `domain/layout/**`
+    // is a STRICT exception. Material-dependent minimums (structural
+    // height, joist-spacing floor, 4 ft footprint floor) must NOT be
+    // pre-computed in the UI. The panel relies on
+    // `applyParameters → LayoutError → status:'error' + lastError`
+    // and surfaces the store's `lastError.message` inline near the
+    // offending field. The `ui-no-domain-layout` rule enforces this;
+    // this fixture proves the rule fires. Replaces the old BLOCK-2r
+    // (which asserted the entire `ui → domain` edge — now permitted
+    // per the boundary resolution).
+    label: 'BLOCK-2v: ui reaches into src/domain/layout (pre-computed min/max leak)',
+    path: 'src/ui/__selftest__/no-domain-layout.ts',
+    contents: `// self-test fixture — MUST fail lint:boundaries (ui-no-domain-layout)
+import { stubLayout } from '../../domain/layout/__selftest__/ui-target';
+export const _ = stubLayout;
 `,
     targets: [
       {
-        path: 'src/domain/__selftest__/ui-target.ts',
-        contents: `// self-test target for BLOCK-2r — resolves the offending import
-export const stubDomain = 'stub';
+        path: 'src/domain/layout/__selftest__/ui-target.ts',
+        contents: `// self-test target for BLOCK-2v — resolves the offending import
+export const stubLayout = 'stub';
 `,
       },
     ],
     tool: 'depcruise',
-    expectedRule: 'ui-allowlist',
+    expectedRule: 'ui-no-domain-layout',
     mustNameFile: true,
   },
   {
