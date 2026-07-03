@@ -50,6 +50,7 @@ const SELFTEST_DIRS = [
   resolve(ROOT, 'src', 'persistence', '__selftest__'),
   resolve(ROOT, 'src', 'state', '__selftest__'),
   resolve(ROOT, 'src', 'scene', '__selftest__'),
+  resolve(ROOT, 'src', 'scene', 'highlights', '__selftest__'),
   resolve(ROOT, 'src', 'ui', '__selftest__'),
   // Non-src fixture target dir — used by BLOCK-2g to prove the
   // persistence-non-src-imports rule fires when persistence reaches
@@ -417,6 +418,26 @@ export const _ = computeLayout;
 `,
     tool: 'depcruise',
     expectedRule: 'scene-no-domain-layout',
+    mustNameFile: true,
+  },
+  {
+    // S11 issue #12 finding #7 boundary rule: the WarningOverlay
+    // + `src/scene/highlights/**` MUST NOT import from
+    // `src/scene/layers/**`. The generic `scene-allowlist` permits
+    // any `^src/scene/` target — this specific rule closes the gap
+    // by forbidding the layers sub-tree for the overlay + highlight
+    // primitives. The fixture lives under
+    // `src/scene/highlights/__selftest__/` so it exercises the
+    // exact `from.path` regex the rule uses. Target module
+    // (`src/scene/layers/index.ts`) exists in-tree from S10.
+    label: 'BLOCK-2q: highlights/ reaches into src/scene/layers (overlay-layers coupling)',
+    path: 'src/scene/highlights/__selftest__/no-layers.ts',
+    contents: `// self-test fixture — MUST fail lint:boundaries (warning-overlay-no-layers)
+import { BoxMember } from '../../layers';
+export const _ = BoxMember;
+`,
+    tool: 'depcruise',
+    expectedRule: 'warning-overlay-no-layers',
     mustNameFile: true,
   },
   {

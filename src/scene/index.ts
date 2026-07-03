@@ -32,6 +32,8 @@
  *   component  FootingsLayer        — S10 kind === "footing" meshes
  *   component  DeckLayers           — S10 six-layer bundle (fixed order)
  *   component  BoxMember            — S10 reusable rectangular-member mesh
+ *   component  WarningOverlay       — S11 over-span warning decorator (peer of layers)
+ *   component  OverSpanHighlight    — S11 leaf highlight primitive
  *   function   isWebGL2Available    — client-side detection
  *   function   installContextLossHandler — §5 GL-loss diagnostic
  *   function   computePresetCamera  — pure preset math
@@ -50,9 +52,14 @@
  *   constant   CAMERA_NEAR_MM, CAMERA_FAR_MM
  *   constant   GROUND_PLANE_SIZE_MM, GROUND_GRID_DIVISIONS
  *   constant   MATERIAL_COLORS      — S10 per-species palette (AC6)
+ *   constant   WARNING_OVERLAY_USER_DATA_KEY — S11 well-known userData
+ *                                     key stamped on the overlay group
+ *                                     (mirrors LAYER_USER_DATA_KEY)
+ *   constant   WARNING_OVERLAY_USER_DATA_VALUE — S11 canonical value
+ *                                     stamped under the key above
  *   types      DeckSceneProps, CameraRigProps, WebGLFallbackProps,
  *              CameraPose, BoundsMm, CameraPreset, ContextLossTarget,
- *              BoxMemberProps
+ *              BoxMemberProps, OverSpanHighlightProps
  */
 
 // ---- components ------------------------------------------------------------
@@ -110,3 +117,25 @@ export {
   materialForSpecies,
 } from './layers';
 export type { BoxMemberProps } from './layers';
+
+// ---- S11 warning overlay (peer of layers, not a consumer) -----------------
+//
+// The S11 WarningOverlay is a top-level scene decorator that draws
+// one highlight per over-span warning. S12's AppShell composes it
+// as `<DeckScene><DeckLayers/><WarningOverlay/></DeckScene>` — the
+// overlay MUST mount AFTER `<DeckLayers />` so its highlights sort
+// last in the transparent-material pass and draw on top per AC3.
+//
+// The `warning-overlay-no-layers` dep-cruiser rule (finding #7)
+// forbids the overlay + everything under `./highlights/` from
+// importing any file under `./layers/`. The overlay is a PEER of
+// the layers, not a consumer — that's how AC2 (visibility
+// independence) is guaranteed structurally, not by convention.
+export {
+  WARNING_OVERLAY_USER_DATA_KEY,
+  WARNING_OVERLAY_USER_DATA_VALUE,
+  WarningOverlay,
+} from './WarningOverlay';
+
+export { OverSpanHighlight } from './highlights/OverSpanHighlight';
+export type { OverSpanHighlightProps } from './highlights/OverSpanHighlight';

@@ -33,7 +33,7 @@
  * (`domain/model.ts` "LAYOUT COORDINATE FRAME").
  */
 
-import type { Layout, LayoutMember, MaterialRef, MemberKind } from '../../../domain/model';
+import type { Layout, LayoutMember, MaterialRef, MemberKind, Warning } from '../../../domain/model';
 
 /**
  * Default material — used when a fixture caller does not care about
@@ -104,4 +104,34 @@ export function makeMembers(kind: MemberKind, count: number): LayoutMember[] {
     );
   }
   return out;
+}
+
+/**
+ * Build one `Warning` with sensible defaults. `memberId` is the
+ * required field — every warning references the LayoutMember it
+ * decorates. Callers override any field via the partial argument.
+ *
+ * ## Why this helper lives with the layout fixtures
+ *
+ * S11's `<WarningOverlay>` tests need `Warning[]` fixtures paired
+ * with the members they reference. Rather than replicate the
+ * `makeMember` / `makeLayout` builders in a separate `highlights/
+ * __testing__/` folder, we keep the whole "small scene fixture"
+ * kit in ONE file — every scene test (layer OR overlay) imports
+ * from this one path. Test files are excluded from dep-cruiser
+ * (see `.dependency-cruiser.cjs` `exclude.path: '\\.test\\.'`),
+ * so a highlight test file importing from
+ * `../layers/__testing__/fixtures` is legal even though the S11
+ * `warning-overlay-no-layers` production rule forbids the same
+ * import from a non-test file.
+ */
+export function makeWarning(overrides: Partial<Warning> & Pick<Warning, 'memberId'>): Warning {
+  return {
+    kind: 'over-span-joist',
+    actualMm: 3200,
+    allowableMm: 3000,
+    tableReference: 'IRC-2018 Table R502.3.1(1) — SPF No2 2x8 @ 406 mm o.c.',
+    message: 'Joist span 3200 mm exceeds allowable 3000 mm',
+    ...overrides,
+  };
 }

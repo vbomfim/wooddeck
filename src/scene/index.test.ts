@@ -50,4 +50,24 @@ describe('scene barrel', () => {
     // banner surfacing story.
     expect(typeof scene.installContextLossHandler).toBe('function');
   });
+
+  it('exports the S11 WarningOverlay + its user-data marker', () => {
+    // S11 issue #12: the overlay is a top-level peer of the layers.
+    // S12's AppShell composes it as
+    //   <DeckScene><DeckLayers/><WarningOverlay/></DeckScene>
+    // so it MUST be exported from the scene barrel. The
+    // WARNING_OVERLAY_USER_DATA_KEY constant is exported so scene-
+    // graph inspection tests can pick out the overlay group by
+    // its logical id (mirrors LAYER_USER_DATA_KEY).
+    expect(typeof scene.WarningOverlay).toBe('function');
+    expect(typeof scene.WARNING_OVERLAY_USER_DATA_KEY).toBe('string');
+  });
+
+  it('exports the S11 OverSpanHighlight primitive', () => {
+    // The leaf decorator that draws one highlight per warning.
+    // Exported so downstream consumers (post-MVP: a stretch
+    // highlight-tooltip story) can compose against the same
+    // decorator without reaching into the highlights/ folder.
+    expect(typeof scene.OverSpanHighlight).toBe('function');
+  });
 });

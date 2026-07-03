@@ -205,7 +205,38 @@ module.exports = {
       to: { path: '^src/domain/layout(/|$)' },
     },
 
-    // ---- generic hygiene ---------------------------------------------------
+    // ---- scene: WarningOverlay is a PEER of layers, not a consumer -------
+    //
+    // S11 issue #12 §2 (Code Review Guardian finding #7): the
+    // WarningOverlay draws its OWN highlight decoration and must
+    // remain visible when a layer is toggled off. To make that
+    // property STRUCTURAL (not just a code-review promise), the
+    // overlay's source file + its highlight-primitive folder are
+    // forbidden from importing ANY file under `src/scene/layers/`.
+    // That includes the shared primitives (`BoxMember`,
+    // `geometries.ts`, `materials.ts`) — the overlay owns a
+    // self-contained highlight geometry + material stack so a
+    // regression that reuses layer primitives (and thereby
+    // couples visibility) is caught at CI, not review.
+    //
+    // A boundary self-test probe (BLOCK-2q) exercises this rule
+    // with a fixture violation so the gate can't silently degrade.
+    // A grep-based unit test at
+    // `src/scene/highlights/no-geometry-math.test.ts` is the third
+    // gate (belt + suspenders — matches the S10 layers pattern).
+    {
+      name: 'warning-overlay-no-layers',
+      severity: 'error',
+      comment:
+        'S11 issue #12 finding #7: WarningOverlay + highlights/ MUST NOT import from ' +
+        'src/scene/layers/**. The overlay is a peer of the layers — not a consumer — so ' +
+        'toggling a layer off can never accidentally hide a highlight. Move any shared ' +
+        'primitive you need into src/scene/highlights/ (self-contained copy).',
+      from: { path: '^src/scene/(WarningOverlay\\.tsx|highlights/)' },
+      to: { path: '^src/scene/layers/' },
+    },
+
+
     {
       name: 'no-circular',
       severity: 'error',
