@@ -61,12 +61,14 @@
  * suffix so a grep audit can find and remove test-only surface in
  * a future rewrite if the timing model changes.
  *
- * ## AC9 — boot-time LayoutError recovery
+ * ## AC9 — boot-time load recovery (uniform catch)
  *
  * `loadFromLocalStorage()` wraps the S7 application-layer loader in
- * a `try/catch`. When the loader propagates `LayoutError` (a stored
- * design that PARSES + SCHEMA-VALIDATES but fails
- * `computeLayoutAndCheck` under current rules), the catch:
+ * a `try/catch`. When the loader propagates ANY error (the pinned
+ * AC9 spec calls out `LayoutError` from a stored design that PARSES
+ * + SCHEMA-VALIDATES but fails `computeLayoutAndCheck` under current
+ * rules; the pair-fix review widened this to include ANY thrown
+ * error so no boot failure is ever silent), the catch:
  *
  *   1. Seeds `bundle` from the DEFAULT design (AC8 fallback).
  *   2. Sets `status: 'error'` + `lastError` so a developer console
@@ -74,7 +76,10 @@
  *   3. Calls `useUiStore.setStorageBanner('load-recompute-failed')`
  *      so S12's banner surfaces "we couldn't load your saved design
  *      — starting fresh".
- *   4. Does NOT re-throw — an unhandled rejection at boot would
+ *   4. Clears `temporal` history — the user never edited the default,
+ *      so a stray undo() must NOT rewind to an ephemeral pre-load
+ *      state.
+ *   5. Does NOT re-throw — an unhandled rejection at boot would
  *      take the whole shell down. The pinned AC9 comment on issue
  *      #9 is unambiguous on this point.
  *
@@ -93,17 +98,19 @@
  *
  * This module imports from:
  *   - `zustand`, `zundo`                — middleware & store type
- *   - `../application`                  — use-case orchestrators
- *   - `../persistence`                  — instanceof DeckFileError (type narrowing on AC6)
+ *   - `../application`                  — use-case orchestrators + DeckFileError (re-exported)
  *   - `../domain/spans`                 — SpanTable instance
  *   - `../domain/id`                    — makeDeckDesignId
  *   - `../domain/layout`                — instanceof LayoutError (type narrowing on AC9)
  *   - `./ui-store`                      — sibling
  *   - `./default-design`                — seeding factory
  *
- * NEVER imports from `../scene/` or `../ui/` (enforced by
- * `.dependency-cruiser.cjs` `state-allowlist` + probe fixtures in
- * `scripts/boundary-selftest.mjs`).
+ * NEVER imports from `../scene/`, `../ui/`, or `../persistence/`
+ * (enforced by `.dependency-cruiser.cjs` `state-allowlist` + probe
+ * fixtures in `scripts/boundary-selftest.mjs`). `DeckFileError`
+ * comes THROUGH the application barrel (re-export) rather than
+ * direct from persistence — that's what keeps the "state routes
+ * all I/O through application" rule machine-checked.
  */
 
 import { create } from 'zustand';
@@ -113,6 +120,7 @@ import {
   ApplyParametersError,
   applyParameters as appApplyParameters,
   computeLayoutAndCheck,
+  DeckFileError,
   downloadDesign as appDownloadDesign,
   loadDesignFromFile as appLoadDesignFromFile,
   loadDesignFromLocalStorage as appLoadDesignFromLocalStorage,
@@ -124,7 +132,6 @@ import { makeDeckDesignId } from '../domain/id';
 import { LayoutError } from '../domain/layout';
 import { IrcSpanTable } from '../domain/spans';
 import type { DeckDesign } from '../domain/model';
-import { DeckFileError } from '../persistence';
 
 import { makeDefaultDesign } from './default-design';
 import { useUiStore } from './ui-store';
@@ -344,33 +351,34 @@ export const useDesignStore = create(
             return;
           }
           set({ bundle, status: 'idle', lastError: null });
+          // Pair-fix Review MEDIUM (B): the successful storage-load
+          // branch REPLACES the design, so any prior undo history
+          // (built up before the load) would rewind to a design the
+          // user never edited. Match the loadFromFile discipline
+          // and clear temporal history on this boundary.
+          useDesignStore.temporal.getState().clear();
         } catch (err) {
-          // AC9: the S7 loader propagates `LayoutError` when the
-          // stored design is now-invalid under current rules
-          // (e.g. a min-width tightening). Recover to defaults +
-          // banner. NO throw at boot.
-          if (err instanceof LayoutError) {
-            const defaultBundle = makeDefaultBundle(
-              makeDeckDesignId(),
-              new Date().toISOString(),
-            );
-            set({ bundle: defaultBundle, status: 'error', lastError: err });
-            useUiStore.getState().setStorageBanner('load-recompute-failed');
-            return;
-          }
-          // Any other error is unexpected — the persistence layer's
-          // load path swallows DeckFileError already. Surface it in
-          // state but do NOT throw (same reasoning as AC9).
-          if (err instanceof Error) {
-            set({ status: 'error', lastError: err });
-            return;
-          }
-          set({
-            status: 'error',
-            lastError: new Error(
-              `loadFromLocalStorage: non-Error thrown: ${String(err)}`,
-            ),
-          });
+          // Pair-fix Review MEDIUM (D): uniform AC9 catch. Prior
+          // code only banner'd LayoutError; any other boot error
+          // set status silently. Now EVERY error during recompute
+          // → seed default + status:'error' + lastError + banner +
+          // clear temporal history. Never throws, never silent.
+          const wrappedErr =
+            err instanceof Error
+              ? err
+              : new Error(`loadFromLocalStorage: non-Error thrown: ${String(err)}`);
+          const defaultBundle = makeDefaultBundle(
+            makeDeckDesignId(),
+            new Date().toISOString(),
+          );
+          set({ bundle: defaultBundle, status: 'error', lastError: wrappedErr });
+          useUiStore.getState().setStorageBanner('load-recompute-failed');
+          // Pair-fix Review MEDIUM (B): the AC9 recovery replaces
+          // the design with a default the user never edited. Clear
+          // temporal history for the same reason as the success
+          // branch — otherwise the user's first undo() rolls back
+          // to some other default.
+          useDesignStore.temporal.getState().clear();
         }
       },
 

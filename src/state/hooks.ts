@@ -49,6 +49,7 @@
  */
 
 import type { DeckDesign, Layout, Warning } from '../domain/model';
+import { useShallow } from 'zustand/react/shallow';
 
 import { useDesignStore } from './design-store';
 import type { CameraPreset, LayerVisibility, StorageBanner } from './ui-store';
@@ -83,18 +84,20 @@ export function useWarnings(): readonly Warning[] {
 
 /**
  * The `{status, lastError}` diagnostic tuple. Grouped so error
- * banners read both slots with ONE subscription. The returned
- * object is CONSTRUCTED per render — consumers should destructure
- * (`const { status } = useDesignStatus()`) rather than reference-
- * compare across renders.
+ * banners read both slots with ONE subscription. Pair-fix Review
+ * NIT F: uses `useShallow` so the selector return is
+ * reference-stable between renders when neither slot changes —
+ * without this wrapper, the fresh `{...}` object constructed each
+ * render would flip Zustand's default referential equality and
+ * force a re-render on every unrelated store write.
  */
 export function useDesignStatus(): {
   status: 'idle' | 'loading' | 'error';
   lastError: Error | null;
 } {
-  const status = useDesignStore((s) => s.status);
-  const lastError = useDesignStore((s) => s.lastError);
-  return { status, lastError };
+  return useDesignStore(
+    useShallow((s) => ({ status: s.status, lastError: s.lastError })),
+  );
 }
 
 // ---- ui-store selectors ----------------------------------------------------

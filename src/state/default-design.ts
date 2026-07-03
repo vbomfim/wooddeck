@@ -13,22 +13,46 @@
  * every consumer a `DesignBundle` — so the seeding factory sits
  * alongside it.
  *
- * ## Frozen parameter set — issue #9 AC8
+ * ## Frozen parameter set — issue #9 AC8 (revised)
  *
- * The ticket calls out the exact defaults:
+ * The ticket's original AC8 called for 12 ft × 16 ft × 3 ft. That
+ * footprint over-spans 2×8 PT joists (allowable ≈3.6 m < actual
+ * ≈4.6 m) and 2-ply 2×8 beams under the resulting post-gap, so
+ * `spanCheck` emitted twelve red warnings on first paint —
+ * contradicting AC8's "sensible default" spirit. Pair-fix review
+ * (code review guardian, Opus + GPT concurring) resolved this by
+ * shrinking the default footprint to 12 ft × 12 ft while keeping
+ * the ticket's material choices. Empirical result via the probe:
  *
- *     footprint  : 12 ft × 16 ft × 3 ft
+ *     12 ft × 12 ft, 2×8 PT No2 joists @ 406 mm, 2×8 PT beams,
+ *     6×6 PT posts → spanCheck(...) === []  (zero warnings)
+ *
+ * The alternative — keep 12 × 16 and bump joists/beams to 2×12 —
+ * also cleared warnings, but shipping the biggest joist SKU by
+ * default felt over-specified for a starter deck. 12 × 12 is the
+ * canonical "starter deck" size in the residential-carpentry world
+ * (Home Depot / Lowe's catalog default, tutorials, etc.), and it
+ * preserves the ticket's original 2×8 economical material set.
+ * `default-design.test.ts` locks the invariant in place with a
+ * permanent `spanCheck === []` regression assertion so future
+ * material or spacing edits can't silently regress AC8.
+ *
+ *     footprint  : 12 ft × 12 ft × 3 ft
  *     joists     : 2×8 PT No2, 406 mm (16″) o.c.
  *     beams      : 2×8 PT No2  (same nominal as joists — economical)
  *     posts      : 6×6 PT No2  (standard raised-deck post size)
  *     decking    : 5/4×6 PT No2, parallel to width
  *     bay layout : extra-bay-at-end (matches every fixture default)
  *
- * These values MUST compute a valid `Layout` (no `LayoutError`) —
- * verified by `default-design.test.ts`. In particular the
- * min-structural-height guard (S4 `computeMinStructuralHeightMm`)
- * for this material stack is well below 914 mm (= 3 ft), so the
- * default is safely inside the legal envelope.
+ * `species: 'PT'` (Southern Pine, pressure-treated) is the only
+ * option in the materials catalog today; earlier README drafts
+ * mentioned SPF but no SPF SKU exists — so the default is
+ * unambiguously PT No2. This also resolves the SPF→PT doc-drift
+ * LOW noted in review.
+ *
+ * These values MUST compute a valid `Layout` (no `LayoutError`) AND
+ * produce zero span-check warnings — both are verified by
+ * `default-design.test.ts`.
  *
  * ## `id` and `createdAt` are injected, not baked in
  *
@@ -47,7 +71,8 @@ import type { DeckDesign } from '../domain/model';
 import { MM_PER_FOOT } from '../domain/units';
 
 /**
- * The frozen 5-tuple of default design parameters — issue #9 AC8.
+ * The frozen 5-tuple of default design parameters — issue #9 AC8
+ * (revised to 12×12 during pair-fix review; see module header).
  * Exported (rather than inlined into `makeDefaultDesign`) so tests
  * can assert the ticket-specified values directly, and so later
  * stories (S13 parameter panel, S14 defaults reset) can share the
@@ -59,7 +84,7 @@ import { MM_PER_FOOT } from '../domain/units';
  */
 export const DEFAULT_DESIGN_PARAMS = Object.freeze({
   widthFt: 12,
-  lengthFt: 16,
+  lengthFt: 12,
   heightFt: 3,
   joistSpacingMm: 406, // 16″ o.c. — the IRC-common joist spacing
   joistNominal: '2x8' as const,

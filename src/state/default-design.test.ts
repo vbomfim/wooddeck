@@ -3,7 +3,7 @@
  *
  * ## Coverage map (issue #9 acceptance criteria)
  *
- *   - AC8  Frozen parameter set — 12 ft × 16 ft × 3 ft, 2×8 PT
+ *   - AC8  Frozen parameter set — 12 ft × 12 ft × 3 ft, 2×8 PT
  *          joists @ 406 mm o.c., 5/4×6 PT decking. Assertions match
  *          the ticket wording verbatim so a spec-tightening (change
  *          the defaults) fail-first here rather than silently drift.
@@ -12,6 +12,12 @@
  *          min-4-ft-dimension guards satisfied). This is the
  *          load-bearing assertion: if the default fails, boot
  *          silently or otherwise falls apart.
+ *   - AC8-A (pair-fix regression): `spanCheck` on the default's
+ *          layout MUST return `[]`. Twelve span warnings on first
+ *          paint (the pre-fix behavior with 12×16 + 2×8 material)
+ *          contradicts AC8's "sensible default" spirit. This
+ *          assertion is the permanent guard against re-introducing
+ *          the regression via a material or footprint edit.
  *   - Edge Injected `id` and `createdAt` flow through — pure factory,
  *          no clock reads inside.
  *
@@ -27,6 +33,7 @@ import { computeLayout, LayoutError } from '../domain/layout';
 // exclude *.test.ts). If a later story surfaces the constant on
 // the barrel (e.g. S13's height-input clamp), switch to that path.
 import { computeMinStructuralHeightMm } from '../domain/layout/layout-engine';
+import { IrcSpanTable, spanCheck } from '../domain/spans';
 import { MM_PER_FOOT } from '../domain/units';
 
 import { DEFAULT_DESIGN_PARAMS, makeDefaultDesign } from './default-design';
@@ -35,12 +42,13 @@ const FIXED_ID = '00000000-0000-4000-8000-000000000001';
 const FIXED_CREATED_AT = '2026-07-03T10:00:00.000Z';
 
 describe('DEFAULT_DESIGN_PARAMS — AC8 frozen values', () => {
-  it('matches the ticket defaults exactly', () => {
-    // The values below are lifted verbatim from issue #9 AC8. A
-    // change here MUST be paired with a ticket revision — this
-    // assertion is the RED gate that catches accidental drift.
+  it('matches the (pair-fix revised) ticket defaults exactly', () => {
+    // The values below are the pair-fix-revised AC8 (12×12 instead
+    // of the original 12×16 that over-spanned 2×8 joists). A change
+    // here MUST be paired with a ticket revision — this assertion
+    // is the RED gate that catches accidental drift.
     expect(DEFAULT_DESIGN_PARAMS.widthFt).toBe(12);
-    expect(DEFAULT_DESIGN_PARAMS.lengthFt).toBe(16);
+    expect(DEFAULT_DESIGN_PARAMS.lengthFt).toBe(12);
     expect(DEFAULT_DESIGN_PARAMS.heightFt).toBe(3);
     expect(DEFAULT_DESIGN_PARAMS.joistSpacingMm).toBe(406);
     expect(DEFAULT_DESIGN_PARAMS.joistNominal).toBe('2x8');
@@ -68,7 +76,7 @@ describe('makeDefaultDesign — AC8 factory', () => {
   it('converts foot dimensions to mm using MM_PER_FOOT', () => {
     const design = makeDefaultDesign(FIXED_ID, FIXED_CREATED_AT);
     expect(design.footprint.widthMm).toBe(12 * MM_PER_FOOT);
-    expect(design.footprint.lengthMm).toBe(16 * MM_PER_FOOT);
+    expect(design.footprint.lengthMm).toBe(12 * MM_PER_FOOT);
     expect(design.footprint.heightMm).toBe(3 * MM_PER_FOOT);
   });
 
@@ -119,5 +127,23 @@ describe('makeDefaultDesign — AC8 computes without LayoutError', () => {
     }
     expect(thrown).toBeNull();
     expect(thrown).not.toBeInstanceOf(LayoutError);
+  });
+});
+
+describe('makeDefaultDesign — AC8-A pair-fix regression (zero span warnings)', () => {
+  // Pair-fix Review, HIGH: the default MUST produce zero span-check
+  // warnings on first paint. The pre-fix default (12×16 + 2×8
+  // joists/beams) emitted twelve warnings — a wall of red on boot
+  // that contradicts the "sensible default" spirit of AC8. This
+  // test locks the invariant permanently so a future material or
+  // footprint edit that reintroduces over-spans fails RED here
+  // before it can reach a user.
+  it('spanCheck on the default layout returns [] (zero warnings)', () => {
+    const design = makeDefaultDesign(FIXED_ID, FIXED_CREATED_AT);
+    const layout = computeLayout(design, { now: () => FIXED_CREATED_AT });
+    const warnings = spanCheck(layout, new IrcSpanTable());
+    // Emit the offenders in the failure message so a future
+    // regression is diagnosable without re-running a probe by hand.
+    expect(warnings, `default produced ${warnings.length} warning(s): ${JSON.stringify(warnings)}`).toEqual([]);
   });
 });

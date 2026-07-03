@@ -252,6 +252,33 @@ export const StubDeckScene = 'stub';
     mustNameFile: true,
   },
   {
+    // PR#28 pair-fix iter 1 — Code Review Opus+GPT#C. After reverting
+    // the S8 state→persistence allowlist widening (application/
+    // barrel now re-exports DeckFileError so state doesn't need a
+    // direct persistence edge), this fixture LOCKS IN the revert:
+    // any future re-introduction of a persistence import from
+    // state/ MUST fail lint:boundaries. The convention "state
+    // routes all I/O through application" is now machine-checked
+    // rather than a grep convention.
+    label: 'BLOCK-2l: state reaches into src/persistence (routes bypass application)',
+    path: 'src/state/__selftest__/allowlist-persistence.ts',
+    contents: `// self-test fixture — MUST fail lint:boundaries (allowlist)
+import { StubPersistence } from '../../persistence/__selftest__/state-target';
+export const _ = StubPersistence;
+`,
+    targets: [
+      {
+        path: 'src/persistence/__selftest__/state-target.ts',
+        contents: `// self-test target for BLOCK-2l — resolves the offending import
+export const StubPersistence = 'stub';
+`,
+      },
+    ],
+    tool: 'depcruise',
+    expectedRule: 'state-allowlist',
+    mustNameFile: true,
+  },
+  {
     // S8 issue #9 boundary rule: state/ MUST NOT import from ui/
     // (state is view-free — no React components, no view helpers).
     // This fixture proves the state-allowlist rule fires when state

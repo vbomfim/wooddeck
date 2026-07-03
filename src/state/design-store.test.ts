@@ -14,7 +14,10 @@
  *   - AC3  Autosave debounced — 5 `applyParameters` calls within
  *          100 ms produce ≤ 1 `saveDesignToLocalStorage` invocation
  *          within 500 ms after the last. Uses `vi.useFakeTimers`
- *          so the 500 ms is deterministic.
+ *          so the 500 ms is deterministic. Also: single
+ *          `applyParameters` + advance 10× window → EXACTLY one
+ *          `setItem` (pair-fix Review E: no delayed second fire
+ *          proves the debounce is not subscription-recursive).
  *   - AC4  `downloadDeckFile()` serializes ONLY `design` — no
  *          camera/layer/unit fields. Verified by spying on the
  *          persistence-layer `downloadDeckFile` shim and asserting
@@ -22,13 +25,16 @@
  *          UI state.
  *   - AC5  `loadFromFile(file)` replaces the bundle with the
  *          file's design plus its recomputed layout/warnings.
+ *          Also clears `temporal` history (edge case).
  *   - AC6  Save fails with `code: "storage-full"` → uiStore
  *          `storageBanner === 'storage-full'`.
  *   - AC8  Fresh app load, no localStorage → `bundle.design`
  *          matches the default from `makeDefaultDesign`.
  *   - AC9  Stored design that recomputes to `LayoutError` on load
  *          → catch, seed default, set `status: 'error'` +
- *          `lastError`, ui-store banner set. No throw at mount.
+ *          `lastError`, ui-store banner set, temporal history
+ *          cleared. No throw at mount. Pair-fix Review D: same
+ *          treatment for ANY thrown error, not just `LayoutError`.
  *
  * ## Edge cases
  *
@@ -36,27 +42,44 @@
  *     seed default.
  *   - Undo across a file-load boundary → temporal history cleared
  *     on `loadFromFile` (issue #9 §4 Edge cases).
+ *   - Undo across a successful storage-load boundary → temporal
+ *     history cleared (pair-fix Review B).
+ *   - Undo across the AC9 recovery boundary → temporal history
+ *     cleared (pair-fix Review B).
  *   - `applyParameters` with a bad patch (unknown key /
  *     `ApplyParametersError`) → `status: 'error'`, previous
  *     bundle intact.
  *   - `LayoutError` from `applyParameters` (dimension below
  *     min-4-ft) → same graceful handling — no throw, previous
  *     bundle intact.
+ *   - Non-Error thrown from `applyParameters` → wrapped as `Error`,
+ *     never leaked (pair-fix Review I coverage of the defensive
+ *     branch).
+ *   - No `.subscribe(` calls on the design store from anywhere
+ *     under `src/state/**` (pair-fix Review E belt-and-suspenders
+ *     — a future refactor that reintroduces subscription-based
+ *     autosave would fail RED here).
  *
  * ## Test env
  *
  * jsdom (default per `vite.config.ts`). Every test resets the
  * store (`resetDesignStoreForTests`) and localStorage in `beforeEach`
  * so state does not bleed. Autosave uses fake timers by default;
- * tests that need real time-of-day sit `vi.useRealTimers()` in an
- * `afterEach`.
+ * tests that need real time-of-day flush the pending debounce first
+ * (pair-fix Review G: timer hygiene) then switch modes.
  */
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as appApi from '../application';
+import type { DeepPartial } from '../application';
+import { DeckFileError } from '../application';
 import { LayoutError } from '../domain/layout';
 import type { DeckDesign } from '../domain/model';
-import { STORAGE_KEY, DeckFileError, serialize } from '../persistence';
-import type { DeepPartial } from '../application';
+import { MM_PER_FOOT } from '../domain/units';
+import { STORAGE_KEY, serialize } from '../persistence';
 
 import {
   useDesignStore,
@@ -71,6 +94,25 @@ const FIXED_ID = '00000000-0000-4000-8000-000000000abc';
 const FIXED_CREATED_AT = '2026-07-03T10:00:00.000Z';
 
 const UI_INITIAL_STATE = useUiStore.getInitialState();
+
+const DEFAULT_WIDTH_MM = DEFAULT_DESIGN_PARAMS.widthFt * MM_PER_FOOT;
+
+/**
+ * Small helper for AC5 tests that need to switch between fake and
+ * real timers. Pair-fix Review G: any pending autosave scheduled
+ * under fake timers MUST be flushed / cancelled before switching
+ * to real timers so a native 500 ms setTimeout doesn't leak
+ * across the test boundary.
+ */
+function switchToRealTimers(): void {
+  flushAutosaveForTests();
+  vi.useRealTimers();
+}
+
+function switchToFakeTimers(): void {
+  vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+  vi.setSystemTime(new Date(FIXED_CREATED_AT));
+}
 
 beforeEach(() => {
   // Deterministic clock so `makeDefaultDesign`'s injected
@@ -165,13 +207,13 @@ describe('useDesignStore — AC2 zundo undo/redo scaffold', () => {
 
   it('three applyParameters mutations put at least 3 entries in pastStates', () => {
     useDesignStore.getState().applyParameters({
-      footprint: { widthMm: DEFAULT_DESIGN_PARAMS.widthFt * 304.8 + 100 },
+      footprint: { widthMm: DEFAULT_WIDTH_MM + 100 },
     });
     useDesignStore.getState().applyParameters({
-      footprint: { widthMm: DEFAULT_DESIGN_PARAMS.widthFt * 304.8 + 200 },
+      footprint: { widthMm: DEFAULT_WIDTH_MM + 200 },
     });
     useDesignStore.getState().applyParameters({
-      footprint: { widthMm: DEFAULT_DESIGN_PARAMS.widthFt * 304.8 + 300 },
+      footprint: { widthMm: DEFAULT_WIDTH_MM + 300 },
     });
     const { pastStates } = useDesignStore.temporal.getState();
     expect(pastStates.length).toBeGreaterThanOrEqual(3);
@@ -339,11 +381,12 @@ describe('useDesignStore — AC5 loadFromFile replaces bundle', () => {
     const file = new File([envelope], 'test.deck.json', { type: 'application/json' });
 
     // Real timers here — File.text() awaits a microtask cycle that
-    // fake-timer setups can stall on.
-    vi.useRealTimers();
+    // fake-timer setups can stall on. Pair-fix Review G: flush any
+    // pending fake-timer autosave FIRST so no native 500 ms timer
+    // leaks across the mode switch.
+    switchToRealTimers();
     await useDesignStore.getState().loadFromFile(file);
-    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
-    vi.setSystemTime(new Date(FIXED_CREATED_AT));
+    switchToFakeTimers();
 
     const bundle = useDesignStore.getState().bundle;
     expect(bundle.design.id).toBe('11111111-1111-4111-8111-111111111111');
@@ -357,12 +400,11 @@ describe('useDesignStore — AC5 loadFromFile replaces bundle', () => {
 
   it('DeckFileError (invalid-json) on load → status "error" + lastError set + no throw', async () => {
     const junkFile = new File(['not-json'], 'bad.deck.json', { type: 'application/json' });
-    vi.useRealTimers();
+    switchToRealTimers();
     // The action returns a resolved Promise (it never rejects) —
     // failures are surfaced via state, not by throwing.
     await expect(useDesignStore.getState().loadFromFile(junkFile)).resolves.toBeUndefined();
-    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
-    vi.setSystemTime(new Date(FIXED_CREATED_AT));
+    switchToFakeTimers();
     expect(useDesignStore.getState().status).toBe('error');
     const err = useDesignStore.getState().lastError;
     expect(err).toBeInstanceOf(DeckFileError);
@@ -383,10 +425,9 @@ describe('useDesignStore — AC5 loadFromFile replaces bundle', () => {
     const file = new File([serialize(validDesign)], 'ok.deck.json', {
       type: 'application/json',
     });
-    vi.useRealTimers();
+    switchToRealTimers();
     await useDesignStore.getState().loadFromFile(file);
-    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
-    vi.setSystemTime(new Date(FIXED_CREATED_AT));
+    switchToFakeTimers();
 
     expect(useDesignStore.temporal.getState().pastStates).toEqual([]);
   });
@@ -446,7 +487,7 @@ describe('useDesignStore — loadFromLocalStorage AC8 fallback', () => {
     localStorage.clear();
     useDesignStore.getState().loadFromLocalStorage();
     const design = useDesignStore.getState().bundle.design;
-    expect(design.footprint.widthMm).toBe(DEFAULT_DESIGN_PARAMS.widthFt * 304.8);
+    expect(design.footprint.widthMm).toBe(DEFAULT_WIDTH_MM);
     expect(useDesignStore.getState().status).toBe('idle');
   });
 
@@ -454,11 +495,20 @@ describe('useDesignStore — loadFromLocalStorage AC8 fallback', () => {
     localStorage.setItem(STORAGE_KEY, 'this is not JSON at all');
     useDesignStore.getState().loadFromLocalStorage();
     const design = useDesignStore.getState().bundle.design;
-    expect(design.footprint.widthMm).toBe(DEFAULT_DESIGN_PARAMS.widthFt * 304.8);
+    expect(design.footprint.widthMm).toBe(DEFAULT_WIDTH_MM);
     expect(useDesignStore.getState().status).toBe('idle');
   });
 
-  it('valid stored design → loads it into bundle (round trip)', () => {
+  it('valid stored design → loads it into bundle (round trip) AND clears temporal history', () => {
+    // Seed some undoable history BEFORE the storage-load so we can
+    // prove pair-fix Review B: the successful storage-load branch
+    // clears zundo history so a stray undo() can't rewind to
+    // pre-load state the user never edited.
+    useDesignStore.getState().applyParameters({
+      footprint: { widthMm: DEFAULT_WIDTH_MM + 200 },
+    });
+    expect(useDesignStore.temporal.getState().pastStates.length).toBeGreaterThan(0);
+
     const stored = makeDefaultDesign(
       '33333333-3333-4333-8333-333333333333',
       '2026-07-03T09:00:00.000Z',
@@ -472,10 +522,13 @@ describe('useDesignStore — loadFromLocalStorage AC8 fallback', () => {
     const design = useDesignStore.getState().bundle.design;
     expect(design.id).toBe('33333333-3333-4333-8333-333333333333');
     expect(design.footprint.widthMm).toBe(6000);
+    // Pair-fix Review B: undo history MUST be empty after a
+    // successful storage-load.
+    expect(useDesignStore.temporal.getState().pastStates).toEqual([]);
   });
 });
 
-describe('useDesignStore — AC9 boot-time LayoutError recovery', () => {
+describe('useDesignStore — AC9 boot-time load recovery', () => {
   it('stored design that recomputes to LayoutError → default seeded, banner set, no throw', () => {
     // The stored design PARSES + SCHEMA-VALIDATES (S6 allows any
     // strategy value; MIN_DECK_DIMENSION_MM is enforced by S4 at
@@ -504,13 +557,98 @@ describe('useDesignStore — AC9 boot-time LayoutError recovery', () => {
     // Bundle is seeded from the DEFAULT design, not from the stored
     // (broken) one.
     const design = useDesignStore.getState().bundle.design;
-    expect(design.footprint.widthMm).toBe(DEFAULT_DESIGN_PARAMS.widthFt * 304.8);
+    expect(design.footprint.widthMm).toBe(DEFAULT_WIDTH_MM);
     // Status carries the error + last error is a LayoutError.
     expect(useDesignStore.getState().status).toBe('error');
     expect(useDesignStore.getState().lastError).toBeInstanceOf(LayoutError);
     // UI banner shows the AC9 discriminator (reuse of storageBanner
     // — documented in ui-store.ts).
     expect(useUiStore.getState().storageBanner).toBe('load-recompute-failed');
+  });
+
+  it('AC9 recovery clears temporal history (pair-fix Review B)', () => {
+    // Seed some undoable history first so we can prove the recovery
+    // path clears it — otherwise the user's first undo() would
+    // rewind to a design they never saw AFTER the boot-time
+    // "we couldn't load your saved design, starting fresh" banner.
+    useDesignStore.getState().applyParameters({
+      footprint: { widthMm: DEFAULT_WIDTH_MM + 100 },
+    });
+    expect(useDesignStore.temporal.getState().pastStates.length).toBeGreaterThan(0);
+
+    // Trigger the AC9 recovery path.
+    const invalidStored = makeDefaultDesign(
+      '55555555-5555-4555-8555-555555555555',
+      '2026-07-03T09:00:00.000Z',
+    );
+    const belowMin = {
+      ...invalidStored,
+      footprint: { ...invalidStored.footprint, widthMm: 100 },
+    };
+    localStorage.setItem(STORAGE_KEY, serialize(belowMin));
+    useDesignStore.getState().loadFromLocalStorage();
+
+    // History cleared.
+    expect(useDesignStore.temporal.getState().pastStates).toEqual([]);
+  });
+
+  it('non-LayoutError thrown from load use-case → same recovery (uniform catch, pair-fix Review D)', () => {
+    // Pair-fix Review MEDIUM D: the previous implementation ONLY
+    // handled `LayoutError` with a banner; any other error set
+    // status silently (no banner). The new catch is uniform: any
+    // thrown error → seed default + status:'error' + lastError +
+    // banner + no throw. This test spies the application-layer
+    // loader to throw a generic Error and asserts the store lands
+    // in the same recovered state.
+    const spy = vi
+      .spyOn(appApi, 'loadDesignFromLocalStorage')
+      .mockImplementation(() => {
+        throw new Error('simulated infrastructure failure');
+      });
+
+    localStorage.setItem(STORAGE_KEY, 'anything — the spy intercepts before this matters');
+
+    expect(() => {
+      useDesignStore.getState().loadFromLocalStorage();
+    }).not.toThrow();
+
+    const design = useDesignStore.getState().bundle.design;
+    expect(design.footprint.widthMm).toBe(DEFAULT_WIDTH_MM);
+    expect(useDesignStore.getState().status).toBe('error');
+    const err = useDesignStore.getState().lastError;
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(LayoutError);
+    expect(err?.message).toBe('simulated infrastructure failure');
+    // Banner is set — this is the key regression the review caught.
+    expect(useUiStore.getState().storageBanner).toBe('load-recompute-failed');
+    expect(useDesignStore.temporal.getState().pastStates).toEqual([]);
+
+    spy.mockRestore();
+  });
+
+  it('non-Error thrown from load use-case → wrapped as Error, still recovers (defensive branch)', () => {
+    // Belt-and-suspenders: even a non-Error throw (a raw string,
+    // a plain object) must not corrupt state. Wrapping is done
+    // inside the catch — this test exercises the `else` branch of
+    // the `err instanceof Error ? err : new Error(...)` ternary.
+    const spy = vi
+      .spyOn(appApi, 'loadDesignFromLocalStorage')
+      .mockImplementation(() => {
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        throw 'raw string error — not an Error instance';
+      });
+
+    expect(() => {
+      useDesignStore.getState().loadFromLocalStorage();
+    }).not.toThrow();
+
+    const err = useDesignStore.getState().lastError;
+    expect(err).toBeInstanceOf(Error);
+    expect(err?.message).toContain('non-Error thrown');
+    expect(err?.message).toContain('raw string error');
+    expect(useUiStore.getState().storageBanner).toBe('load-recompute-failed');
+
+    spy.mockRestore();
   });
 });
 
@@ -547,6 +685,34 @@ describe('useDesignStore — applyParameters error handling', () => {
     expect(after.lastError).toBeInstanceOf(LayoutError);
     expect(after.bundle).toBe(before);
   });
+
+  it('non-Error thrown from applyParameters use-case → wrapped Error, bundle intact (Review I)', () => {
+    // Pair-fix Review I: prefer a real test over `/* c8 ignore */`
+    // for the defensive non-Error catch branch. Mocking the
+    // application-layer applyParameters to throw a raw string
+    // exercises the `err instanceof Error === false` branch in
+    // the store's `applyParameters` catch, so coverage tracks a
+    // realistic path rather than skipping defensive code.
+    const before = useDesignStore.getState().bundle;
+    const spy = vi.spyOn(appApi, 'applyParameters').mockImplementation(() => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      throw 42; // a number, deliberately not an Error
+    });
+
+    useDesignStore.getState().applyParameters({
+      footprint: { widthMm: DEFAULT_WIDTH_MM + 10 },
+    });
+
+    const after = useDesignStore.getState();
+    expect(after.status).toBe('error');
+    expect(after.lastError).toBeInstanceOf(Error);
+    expect(after.lastError?.message).toContain('non-Error thrown');
+    expect(after.lastError?.message).toContain('42');
+    // Bundle unchanged — the store did NOT partially corrupt state.
+    expect(after.bundle).toBe(before);
+
+    spy.mockRestore();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -564,12 +730,64 @@ describe('useDesignStore — reset()', () => {
     useDesignStore.getState().reset();
 
     // Default width restored.
-    expect(useDesignStore.getState().bundle.design.footprint.widthMm).toBe(
-      DEFAULT_DESIGN_PARAMS.widthFt * 304.8,
-    );
+    expect(useDesignStore.getState().bundle.design.footprint.widthMm).toBe(DEFAULT_WIDTH_MM);
     // History cleared.
     expect(useDesignStore.temporal.getState().pastStates).toEqual([]);
     // Status back to idle.
     expect(useDesignStore.getState().status).toBe('idle');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pair-fix Review E — autosave feedback-loop regression
+// ---------------------------------------------------------------------------
+
+describe('useDesignStore — pair-fix Review E: autosave has no feedback loop', () => {
+  it('single applyParameters + advance 10× debounce window → setItem called EXACTLY once', () => {
+    // The intent: prove a single mutation does NOT trigger a
+    // recursive autosave. A subscription-based autosave (which
+    // issue #9 §15 explicitly rules out) would fire, mutate the
+    // state via a saved-marker, and re-fire — leading to an
+    // extra setItem within the extended window. This test locks
+    // that pattern out permanently: even after 10× the debounce
+    // window, the count MUST stay at exactly one.
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
+
+    useDesignStore.getState().applyParameters({
+      footprint: { widthMm: DEFAULT_WIDTH_MM + 10 },
+    });
+
+    vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS * 10);
+
+    expect(setItemSpy).toHaveBeenCalledTimes(1);
+    expect(setItemSpy.mock.calls[0]?.[0]).toBe(STORAGE_KEY);
+  });
+
+  it('no design-store file under src/state/ contains a .subscribe( call on the design store', () => {
+    // Belt-and-suspenders regression guard. If a future refactor
+    // reintroduces the subscription-based autosave loop (issue #9
+    // §15 forbids), this test fails RED before the runtime test
+    // above has a chance to reveal an off-by-one debounce edge
+    // case. Grep-based tests are a project-recognized pattern —
+    // see span-check.test.ts for a similar convention.
+    const stateDir = join(__dirname);
+    const files = readdirSync(stateDir).filter(
+      (f) =>
+        f.endsWith('.ts') &&
+        !f.endsWith('.test.ts') &&
+        // Skip the barrel — it only re-exports, no runtime code.
+        f !== 'index.ts',
+    );
+    for (const file of files) {
+      const src = readFileSync(join(stateDir, file), 'utf-8');
+      // The pattern we're forbidding: `useDesignStore.subscribe(...)`
+      // OR any bare `.subscribe(` call. Real Zustand stores DO
+      // expose `subscribe` — but state-layer INTERNAL code should
+      // never call it (that's what the ticket flagged as a
+      // feedback loop). External consumers (react components) use
+      // hooks, not `.subscribe()`.
+      const forbidden = /\.subscribe\s*\(/.test(src);
+      expect(forbidden, `${file} uses .subscribe(...) — autosave feedback loop hazard`).toBe(false);
+    }
   });
 });
