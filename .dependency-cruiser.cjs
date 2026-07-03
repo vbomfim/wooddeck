@@ -14,6 +14,16 @@
  *   scene       → only src/(scene|state|domain)/**
  *   ui          → only src/(ui|state|application|domain)/**
  *
+ * Why state does NOT include persistence (revised in S8 pair-fix): the
+ * state store needs `instanceof DeckFileError` narrowing on save
+ * failures (AC6: storage-full / storage-blocked → ui-store banner).
+ * Rather than widen the state allowlist by one entry (which weakens
+ * "state routes all I/O through application" from a machine-checked
+ * rule to a grep convention), the application barrel now RE-EXPORTS
+ * `DeckFileError` from `../persistence`. State imports it via
+ * `../application` and the boundary rule stays tight. See
+ * `src/application/index.ts` for the re-export.
+ *
  * Note on the application → persistence edge: `application/` composes
  * domain use-cases with persistence-layer I/O (see S7 issue #8 §2).
  * Without this edge, `loadDesignFromFile` / `saveDesignToLocalStorage`

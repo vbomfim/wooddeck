@@ -21,6 +21,7 @@
  *   fn   saveDesignToLocalStorage, downloadDesign
  *   fn   applyParameters
  *   class ApplyParametersError
+ *   class DeckFileError (re-export from persistence)
  *
  * ## Name collisions with `../persistence`
  *
@@ -53,3 +54,16 @@ export {
   ApplyParametersError,
   applyParameters,
 } from './apply-parameters';
+
+/**
+ * Re-export of the persistence-layer `DeckFileError` so downstream
+ * layers (state, ui) can `instanceof` narrow save/load failures
+ * WITHOUT taking a direct import edge on `../persistence`. Keeping
+ * this on the application barrel lets `.dependency-cruiser.cjs`
+ * enforce the "state routes all I/O through application" invariant
+ * (the `state-allowlist` deliberately excludes `persistence/`).
+ *
+ * The re-export is intentionally value-side (not `export type`) —
+ * `instanceof DeckFileError` requires the class at runtime.
+ */
+export { DeckFileError } from '../persistence';
