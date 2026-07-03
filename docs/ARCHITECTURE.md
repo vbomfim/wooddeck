@@ -65,7 +65,7 @@ Spec § NFR-011. Violation → CI failure → merge blocked. Rules are expressed
 | `persistence/`| `src/persistence/**`, `src/domain/**`          | Every other `src/**` path                                                                                    |
 | `state/`      | `src/state/**`, `src/application/**`, `src/domain/**` | Every other `src/**` path (including `persistence/` — go through `application`)                       |
 | `scene/`      | `src/scene/**`, `src/state/**`, `src/domain/**` | Every other `src/**` path (including `application/`, `persistence/`, `ui/`)                                 |
-| `ui/`         | `src/ui/**`, `src/state/**`, `src/application/**`, `src/domain/**` | Every other `src/**` path — **including all of `src/scene/**`** and all of `src/persistence/**`   |
+| `ui/`         | `src/ui/**`, `src/state/**`                    | Every other `src/**` path — **including `src/scene/**`, `src/persistence/**`, `src/application/**`, and `src/domain/**`** (S12 issue #13 — dumb-view discipline) |
 
 **Rationale for each:**
 
@@ -74,7 +74,7 @@ Spec § NFR-011. Violation → CI failure → merge blocked. Rules are expressed
 - **`persistence → domain only`** — persistence produces / consumes the domain model. If it needs a use-case (e.g., migration on load), invert: expose a repository interface from `domain`, implement in `persistence`, wire in `application`.
 - **`state → no persistence`** — stores react to user intent by calling application use-cases. Use-cases decide when to persist; the store does not know about `localStorage`.
 - **`scene → no ui`** — the scene renders the world; the DOM overlay renders panels. They compose at the **root** (see § 3a), they do not reach into each other.
-- **`ui → no scene, no persistence`** — `ui/` renders panels only. It MUST NOT import ANY module under `src/scene/` — not even the `DeckScene` facade. Composition happens at the root (see § 3a).
+- **`ui → only ui + state`** — S12 issue #13 tightened `ui/` to a DUMB VIEW LAYER: panels render from Zustand hooks and render JSX. `ui/` MUST NOT import from `scene/` (composition happens at the root), `application/` (use-cases are the state store's concern — actions on the store), `persistence/` (I/O flows through state + application), or `domain/` (rendering raw domain types would leak business logic into JSX). Enforced by dep-cruiser `ui-allowlist` + boundary self-test probes BLOCK-2d / 2r / 2s / 2t.
 
 Tests (`.test.tsx` / `.spec.tsx`) are exempt from the boundary rule; they may import across layers for fixtures and doubles. The rule targets production code paths.
 
@@ -84,13 +84,34 @@ Because `ui/` may not import `scene/`, the two are wired together **at the compo
 
 ```tsx
 // src/App.tsx (composition root — outside every layer folder)
-import { AppShell } from './ui/AppShell';     // ui/ knows nothing about scene/
-import { DeckScene } from './scene/DeckScene'; // scene/ knows nothing about ui/
+// This is the actual S12 shape — see src/App.tsx for the full module.
+import { lazy, Suspense, useEffect } from 'react';
+import { AppShell } from './ui';                    // ui/ knows nothing about scene/
+import { useDesignStore } from './state';
+
+// Lazy-loaded — lands in a SEPARATE dist/ chunk (SC-009 code-split budget).
+const DeckScene = lazy(() => import('./scene/DeckScene'));
 
 export function App(): JSX.Element {
-  // The root passes the scene INTO the shell as a child. The shell
-  // renders it in its layout slot without importing from scene/.
-  return <AppShell scene={<DeckScene />} />;
+  // Boot: hydrate the design store from localStorage (S7 flow).
+  // AC9 recovery lives INSIDE the store — a broken stored design
+  // → state:'error' + banner via useUiStore.setStorageBanner(...).
+  useEffect(() => { useDesignStore.getState().loadFromLocalStorage(); }, []);
+
+  return (
+    <AppShell
+      leftPanel={<LeftPanelPlaceholder />}       // S13 replaces
+      rightPanel={<RightPanelPlaceholder />}     // S14 replaces
+      main={
+        <Suspense fallback={<SceneFallback />}>
+          <DeckScene>
+            <DeckLayers />
+            <WarningOverlay />                   {/* peer, mounted AFTER layers */}
+          </DeckScene>
+        </Suspense>
+      }
+    />
+  );
 }
 ```
 
@@ -98,10 +119,22 @@ Key properties:
 
 - **`src/App.tsx` and `src/main.tsx` are NOT under any layer folder.** They are the only files allowed to import both `ui/` and `scene/` (or `application/` and `persistence/`, etc.).
 - **The boundary lint enforces this by allowlist**, not by a hand-written exception list. A future `src/AppRoot.tsx` would be allowed by default; a `src/ui/AppShell.tsx` reaching into `src/scene/` would be flagged.
-- **The scene is rendered as a `ReactNode` prop or `children`** in the UI shell. The shell may lay it out (position, size), style around it, and gate its visibility, but never construct or configure it.
+- **The scene is rendered as a `ReactNode` prop (the `main` slot)** in the UI shell. The shell may lay it out (position, size), style around it, and gate its visibility, but never construct or configure it.
+- **The scene is lazy-loaded** via `React.lazy(() => import('./scene/DeckScene'))` so three.js + r3f + our scene components land in a SEPARATE `dist/` chunk. The `scripts/check-build-artifacts.mjs` node script enforces the split at CI time (invoked after `npm run build` — see `.github/workflows/ci.yml`).
 - **This is the classic "composition root" pattern** (Mark Seemann): dependencies are wired at the outermost layer where all the concrete types are known; every inner layer stays free of the graph-construction concern.
 
 If a future story genuinely needs a shared composition helper, put it in a new top-level folder (e.g. `src/composition`) — the boundary rules will require an update to include it, which forces the discussion.
+
+## 3aa. textContent constraint (S6 security — binds S12 and S14)
+
+Every user-visible message rendered in `src/ui/**` MUST be emitted via React's default `children`-as-textContent path — NEVER via `dangerouslySetInnerHTML`. This is a defence-in-depth constraint against XSS via error strings, `.deck`-file metadata, and any other data that crosses a trust boundary.
+
+Applies to:
+
+- **S12** — `<DisclaimerBanner />` renders a compile-time constant (safe by construction, but the invariant applies uniformly). `<StorageBanner />` renders compile-time strings from `STORAGE_BANNER_MESSAGES`.
+- **S14** — the tools panel will render `DeckFileError.message` for `.deck` file load failures. That message is derived from user-supplied file input; a raw `{err.message}` render is SAFE (React escapes it) but `dangerouslySetInnerHTML={{ __html: err.message }}` would be a critical vulnerability.
+
+Regression tests: `DisclaimerBanner.test.tsx` and `StorageBanner.test.tsx` both assert the visible text round-trips via `textContent`. S14 tests must extend the same discipline.
 
 ## 3b. Scene coordinate frame & units (S10 pinned)
 

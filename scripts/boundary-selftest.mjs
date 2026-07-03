@@ -230,6 +230,84 @@ export const StubDeckScene = 'stub';
     mustNameFile: true,
   },
   {
+    // S12 issue #13 boundary rule: ui/ MUST NOT import from
+    // domain/. The dumb-view layer renders JSX from Zustand state
+    // only; a `ui/` import of `../../domain/...` would drag business
+    // logic (layout math, span-check) into the JSX render path.
+    // Domain data flows through `state/` (which owns the DesignBundle);
+    // panels read shaped view models from state hooks. Pair-fix with
+    // BLOCK-2d (ui→scene), BLOCK-2s (ui→application), BLOCK-2t
+    // (ui→persistence) — the four together lock down the dumb-view
+    // boundary structurally, not by convention.
+    label: 'BLOCK-2r: ui reaches into src/domain (business-logic leak)',
+    path: 'src/ui/__selftest__/allowlist-domain.ts',
+    contents: `// self-test fixture — MUST fail lint:boundaries (allowlist)
+import { stubDomain } from '../../domain/__selftest__/ui-target';
+export const _ = stubDomain;
+`,
+    targets: [
+      {
+        path: 'src/domain/__selftest__/ui-target.ts',
+        contents: `// self-test target for BLOCK-2r — resolves the offending import
+export const stubDomain = 'stub';
+`,
+      },
+    ],
+    tool: 'depcruise',
+    expectedRule: 'ui-allowlist',
+    mustNameFile: true,
+  },
+  {
+    // S12 issue #13 boundary rule: ui/ MUST NOT import from
+    // application/. Use-cases are invoked via state store actions
+    // (the store is the sole caller of the application layer); a
+    // panel that reached directly into `application/` would bypass
+    // the store, breaking undo/redo (zundo tracks store mutations)
+    // and cross-store coordination (banner set on save-fail).
+    label: 'BLOCK-2s: ui reaches into src/application (bypasses state store)',
+    path: 'src/ui/__selftest__/allowlist-application.ts',
+    contents: `// self-test fixture — MUST fail lint:boundaries (allowlist)
+import { stubApp } from '../../application/__selftest__/ui-target';
+export const _ = stubApp;
+`,
+    targets: [
+      {
+        path: 'src/application/__selftest__/ui-target.ts',
+        contents: `// self-test target for BLOCK-2s — resolves the offending import
+export const stubApp = 'stub';
+`,
+      },
+    ],
+    tool: 'depcruise',
+    expectedRule: 'ui-allowlist',
+    mustNameFile: true,
+  },
+  {
+    // S12 issue #13 boundary rule: ui/ MUST NOT import from
+    // persistence/. Every persistence action flows through the state
+    // store (which routes through application/); a panel reaching
+    // directly into localStorage/file-io would bypass the AC6/AC9
+    // storage banner + the autosave debounce. This fixture LOCKS IN
+    // that separation.
+    label: 'BLOCK-2t: ui reaches into src/persistence (I/O bypass)',
+    path: 'src/ui/__selftest__/allowlist-persistence.ts',
+    contents: `// self-test fixture — MUST fail lint:boundaries (allowlist)
+import { stubPers } from '../../persistence/__selftest__/ui-target';
+export const _ = stubPers;
+`,
+    targets: [
+      {
+        path: 'src/persistence/__selftest__/ui-target.ts',
+        contents: `// self-test target for BLOCK-2t — resolves the offending import
+export const stubPers = 'stub';
+`,
+      },
+    ],
+    tool: 'depcruise',
+    expectedRule: 'ui-allowlist',
+    mustNameFile: true,
+  },
+  {
     // S8 issue #9 boundary rule: state/ MUST NOT import from scene/
     // (state is view-free — no three.js, no scene graph). This
     // fixture proves the state-allowlist rule fires when state

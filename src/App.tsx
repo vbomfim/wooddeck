@@ -1,31 +1,179 @@
-import type { JSX } from 'react';
+/**
+ * `src/App.tsx` — the composition root.
+ *
+ * `App.tsx` sits OUTSIDE every layer folder (`domain/`,
+ * `application/`, `persistence/`, `state/`, `scene/`, `ui/`) — it
+ * is the ONE place allowed to import from all of them at once and
+ * wire everything together. That's the classic composition-root
+ * pattern (Mark Seemann): dependencies are constructed at the
+ * outermost layer where every concrete type is in scope; every
+ * inner layer stays free of the graph-construction concern.
+ *
+ * ## What this file does (S12)
+ *
+ *   1. Lazy-imports `<DeckScene />` via `React.lazy(() =>
+ *      import('./scene/DeckScene'))` so the three.js + r3f + drei
+ *      bundle (~500 KB gzipped) ships as a SEPARATE chunk from the
+ *      shell (SC-009 code-split budget). A build-artifacts check
+ *      (`scripts/check-build-artifacts.mjs`) asserts the split
+ *      lands in `dist/`.
+ *   2. Passes the scene into `<AppShell />` as the `main` slot,
+ *      wrapped in `<Suspense>` so the chunk load doesn't hard-fault
+ *      the shell.
+ *   3. Renders placeholder left/right panels (S13 params, S14
+ *      toggles/warnings/BOM/export) — each carries an `<h2>` title
+ *      so the aside landmarks have accessible names now, not after
+ *      S13/S14 lands.
+ *   4. Calls `useDesignStore.getState().loadFromLocalStorage()` in
+ *      a boot `useEffect` (once, on mount) so a returning user's
+ *      autosaved design is restored (S7 boot flow + inherited
+ *      obligation #4). The store owns AC9 recovery — a stored
+ *      design that fails to recompute at boot lands in `state:
+ *      'error'` and surfaces the `'load-recompute-failed'` banner
+ *      via `<StorageBanner />` (mounted inside AppShell).
+ *
+ * ## Why the useEffect uses `getState()` instead of a hook
+ *
+ * `useDesignStore.getState().loadFromLocalStorage()` reads the store
+ * OUT-OF-BAND — the component doesn't SUBSCRIBE to the store, so
+ * the effect fires exactly once (React 19 useEffect is NOT
+ * double-invoked in production; StrictMode DOES double-invoke in
+ * dev/test, but `loadFromLocalStorage()` is IDEMPOTENT — a second
+ * call re-reads localStorage and either re-hydrates the same
+ * bundle or hits the no-op "no stored design" branch). Using
+ * `useDesignStore(s => s.loadFromLocalStorage)` inside a component
+ * would rerun the effect every time the action reference changed
+ * (never, but the wiring adds unnecessary re-render pressure).
+ *
+ * ## Boundary
+ *
+ * `App.tsx` is unrestricted by `.dependency-cruiser.cjs` — the
+ * per-layer allowlists match `^src/${layer}/` with a trailing
+ * slash, so the root file at `^src/App.tsx` falls through every
+ * rule. That's intentional: the composition root is by definition
+ * cross-layer. Every OTHER file in the codebase is boundary-checked.
+ */
+import { lazy, Suspense, useEffect, type JSX } from 'react';
+import { AppShell } from './ui';
+import { useDesignStore } from './state';
 
 /**
- * Scaffold placeholder for the wooddeck app shell.
+ * The scene bundle — three.js + r3f + drei + our own scene
+ * components. Lazy-imported so it lands in a SEPARATE `dist/`
+ * chunk from the shell (SC-009 code-split budget). The default
+ * export of `./scene/DeckScene` is the React.lazy contract.
  *
- * This is Story S1 (project scaffold, tooling & CI) — its sole purpose is
- * to prove the Vite + React + TypeScript + Vitest wiring works end-to-end.
- * The r3f `<Canvas>`, layout engine, parameter panel, warning overlay, etc.
- * arrive in later stories (S9 for the scene shell, S13 for the parameter
- * panel). The disclaimer text is rendered from day one because spec US3
- * AC2 requires it to be present for the "duration of the session" and
- * "cannot be dismissed" — no reason to defer that guarantee.
- *
- * NOTE: this file lives at `src/App.tsx` — OUTSIDE all layer folders
- * (`domain/`, `application/`, `persistence/`, `state/`, `scene/`, `ui/`).
- * It IS the composition root. Later stories will introduce
- * `src/ui/AppShell.tsx` and `src/scene/DeckScene`, and this root file
- * will wire them together WITHOUT `ui/` ever importing `scene/`
- * (see docs/ARCHITECTURE.md § "Composition root").
+ * IMPORTANT: import from `./scene/DeckScene` DIRECTLY, NOT via
+ * `./scene` — the barrel drags every named export into the initial
+ * chunk (Rollup can't tree-shake through a barrel that re-exports
+ * `three`-using symbols). See `src/scene/index.ts` "Lazy-import
+ * escape hatch" for the pinned rationale.
  */
-export function App(): JSX.Element {
+const DeckScene = lazy(() => import('./scene/DeckScene'));
+
+/**
+ * The scene composition — DeckLayers + WarningOverlay inside
+ * DeckScene. Also lazy-loaded (bundled into the same chunk as
+ * DeckScene by manual-chunk grouping in vite.config.ts).
+ */
+const DeckLayers = lazy(async () => {
+  const mod = await import('./scene/layers');
+  return { default: mod.DeckLayers };
+});
+const WarningOverlay = lazy(async () => {
+  const mod = await import('./scene/WarningOverlay');
+  return { default: mod.WarningOverlay };
+});
+
+/**
+ * The Suspense fallback rendered while the scene chunk is loading.
+ * Deliberately minimal — a full-viewport spinner would compete
+ * with the disclaimer for user attention. A short text message
+ * on the shell background is enough.
+ */
+function SceneFallback(): JSX.Element {
   return (
-    <main>
-      <h1>Hello wooddeck</h1>
-      <p role="note">
-        Planning aid, not an engineering document — consult a licensed professional or your local
-        building department.
-      </p>
-    </main>
+    <div
+      role="status"
+      aria-live="polite"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100%',
+        color: '#4a4a4a',
+        fontSize: '0.875rem',
+      }}
+    >
+      Loading 3D view…
+    </div>
+  );
+}
+
+/**
+ * Placeholder for the S13 parameters panel. Renders an `<h2>` so
+ * the shell's `<aside>` landmark has an accessible section title
+ * NOW (before S13 lands). S13 REPLACES this component — it MUST
+ * keep the `<h2>` title so screen-reader users experience the same
+ * landmark structure.
+ */
+function LeftPanelPlaceholder(): JSX.Element {
+  return (
+    <>
+      <h2>Parameters</h2>
+      <p>The parameters panel arrives in S13.</p>
+    </>
+  );
+}
+
+/**
+ * Placeholder for the S14 tools panel (toggles + warnings + BOM +
+ * export). Same contract as LeftPanelPlaceholder: keep the `<h2>`
+ * heading when S14 lands.
+ */
+function RightPanelPlaceholder(): JSX.Element {
+  return (
+    <>
+      <h2>Tools</h2>
+      <p>Layer toggles, warnings, BOM, and export arrive in S14.</p>
+    </>
+  );
+}
+
+export function App(): JSX.Element {
+  // Boot: hydrate the design store from localStorage. The store
+  // handles AC9 gracefully — a stored design that fails to
+  // recompute lands in status:'error' + banner via
+  // `useUiStore.setStorageBanner('load-recompute-failed')`. See
+  // src/state/design-store.ts `loadFromLocalStorage`.
+  //
+  // Empty deps → fires ONCE on mount. StrictMode double-invocation
+  // (dev/test only) is tolerated because `loadFromLocalStorage()`
+  // is idempotent — a second call re-reads localStorage.
+  useEffect(() => {
+    useDesignStore.getState().loadFromLocalStorage();
+  }, []);
+
+  return (
+    <AppShell
+      leftPanel={<LeftPanelPlaceholder />}
+      rightPanel={<RightPanelPlaceholder />}
+      main={
+        <Suspense fallback={<SceneFallback />}>
+          <DeckScene>
+            <DeckLayers />
+            {/*
+             * WarningOverlay is a PEER of DeckLayers, mounted
+             * AFTER them so its highlights sort last in the
+             * transparent-material pass (S11 AC3 finding #7).
+             * Structural separation is enforced by dep-cruiser
+             * (`warning-overlay-no-layers` rule) — the overlay
+             * cannot import from `scene/layers/**`.
+             */}
+            <WarningOverlay />
+          </DeckScene>
+        </Suspense>
+      }
+    />
   );
 }
