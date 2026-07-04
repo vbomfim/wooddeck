@@ -43,7 +43,6 @@ function makeDesign(overrides: Partial<{
       spacingMm: 406,
     },
     beam: { material: { nominal: '2x10', species: 'PT', grade: 'No2' } },
-    post: { material: { nominal: '6x6', species: 'PT', grade: 'No2' } },
     decking: {
       material: { nominal: '5/4x6', species: 'PT', grade: 'No2' },
       orientation: overrides.orientation ?? 'parallel-to-width',

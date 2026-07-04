@@ -85,7 +85,14 @@ describe('makeDefaultDesign — AC8 factory', () => {
     expect(design.joist.material).toEqual({ nominal: '2x8', species: 'PT', grade: 'No2' });
     expect(design.joist.spacingMm).toBe(406);
     expect(design.beam.material).toEqual({ nominal: '2x8', species: 'PT', grade: 'No2' });
-    expect(design.post?.material).toEqual({ nominal: '6x6', species: 'PT', grade: 'No2' });
+    // Review-gate FIX 2: post material lives in `foundation.post`, not
+    // in a top-level `design.post` (which no longer exists).
+    if (design.foundation.type !== 'posts-on-footings') {
+      throw new Error(
+        `expected default design foundation.type='posts-on-footings' but got '${design.foundation.type}'`,
+      );
+    }
+    expect(design.foundation.post).toEqual({ nominal: '6x6', species: 'PT', grade: 'No2' });
     expect(design.decking.material).toEqual({
       nominal: '5/4x6',
       species: 'PT',

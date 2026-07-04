@@ -160,3 +160,30 @@ describe('materials — disposal', () => {
     expect(ptAgain).not.toBe(pt);
   });
 });
+
+// ---------------------------------------------------------------------------
+// QA Gap S17-G2 — materialForMember throws on a block-kind member
+// ---------------------------------------------------------------------------
+//
+// Block producers arrive with S19/S20 and will introduce their own
+// material picker rather than routing through this shared helper.
+// If a caller accidentally routes a block-kind member here today,
+// the throw makes the misuse LOUD (no silent wrong-color render).
+// This regression test locks in that behavior for the S17 window.
+
+describe('materialForMember — QA-Gap-S17-G2 block-kind member throws loudly', () => {
+  it('throws a descriptive Error naming the module when passed a block-kind member', () => {
+    const blockMember: LayoutMember = {
+      id: 'block-0',
+      kind: 'block',
+      material: { kind: 'block', productId: 'oldcastle-11x11x7' },
+      position: { x: 0, y: 0, z: 0 },
+      size: { x: 279, y: 178, z: 279 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    expect(() => materialForMember(blockMember)).toThrow(/lumber material/i);
+    expect(() => materialForMember(blockMember)).toThrow(/block/);
+    // The message names the module so triage is fast.
+    expect(() => materialForMember(blockMember)).toThrow(/materialForMember/);
+  });
+});

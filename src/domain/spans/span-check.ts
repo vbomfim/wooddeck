@@ -201,13 +201,15 @@ export function spanCheck(layout: Layout, table: SpanTable): Warning[] {
   if (joistSpanMm !== null && joists.length > 0) {
     for (const joist of joists) {
       // Joist members are ALWAYS stamped with kind='lumber' by the
-      // layout engine (see S17 MemberMaterialRef widening). This
-      // guard is defensive — a `kind='block'` joist is a domain
-      // impossibility, but silently trusting the union would open
-      // the door to a future producer bug. Skip such a member so
-      // the span check remains fail-safe rather than throwing on a
-      // `lookupJoistMaxSpan` type mismatch.
-      if (joist.material.kind !== 'lumber') continue;
+      // layout engine (see S17 MemberMaterialRef widening). Review-gate
+      // FIX 4 replaced the pre-fix silent `continue` with a fail-safe
+      // warning (`allowableMm: 0`, "not rated" message) so a future
+      // producer bug that stamps a block material on a joist surfaces
+      // in the UI instead of hiding a real span violation.
+      if (joist.material.kind !== 'lumber') {
+        warnings.push(buildUnexpectedMaterialWarning(joist, 'over-span-joist'));
+        continue;
+      }
       const allowableMm = table.lookupJoistMaxSpan(joist.material, joistSpacingMm);
       const citation = table.citationFor('joist', joist.material, joistSpacingMm);
       const warning = evaluateSpan({
@@ -229,9 +231,13 @@ export function spanCheck(layout: Layout, table: SpanTable): Warning[] {
       if (beamPostSpanMm === null) continue; // beam with < 2 posts — skip
 
       // Same defensive narrowing as the joist loop above — beams
-      // are always lumber, but skip a `kind='block'` beam rather
-      // than pass a shape mismatch into the span table.
-      if (beam.material.kind !== 'lumber') continue;
+      // are always lumber, but a `kind='block'` beam surfaces as a
+      // fail-safe warning (review-gate FIX 4) instead of silently
+      // skipping the span check for that beam.
+      if (beam.material.kind !== 'lumber') {
+        warnings.push(buildUnexpectedMaterialWarning(beam, 'over-span-beam'));
+        continue;
+      }
       const allowableMm = table.lookupBeamMaxSpan(
         beam.material,
         joistSpanMm,
@@ -394,4 +400,34 @@ function buildOverSpanMessage(input: EvaluateSpanInput): string {
     `${Math.round(input.allowableMm)} mm per ${input.tableReference}. ` +
     `Reduce span, add support, or upgrade the material.`
   );
+}
+
+/**
+ * Review-gate FIX 4 — fail-safe warning for a structural member
+ * (joist / beam) whose material is NOT lumber (e.g. a block-kind
+ * material accidentally stamped on a joist). The layout engine
+ * currently guarantees this never happens (only lumber producers
+ * emit joist + beam LayoutMembers), but silently `continue`-ing
+ * would mask a future producer bug AND suppress span warnings for
+ * that member. Instead, emit a fail-safe warning with
+ * `allowableMm: 0` (matching the "not covered" fail-safe pattern)
+ * and a message naming the unexpected material kind.
+ */
+function buildUnexpectedMaterialWarning(
+  member: LayoutMember,
+  kind: 'over-span-joist' | 'over-span-beam',
+): Warning {
+  const label = kind === 'over-span-joist' ? 'Joist' : 'Beam';
+  return {
+    memberId: member.id,
+    kind,
+    actualMm: 0,
+    allowableMm: 0,
+    tableReference: 'span-check.ts — unexpected material kind',
+    message:
+      `${label} member '${member.id}' has unexpected material kind ` +
+      `'${member.material.kind}' (span-check only rates lumber); ` +
+      `this size/material combination is not covered by the span table; ` +
+      `consult a licensed professional or your local building department.`,
+  };
 }

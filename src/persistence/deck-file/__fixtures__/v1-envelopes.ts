@@ -21,11 +21,13 @@
  *
  * The `expectedV2Design` for each fixture is derived MECHANICALLY
  * from the v1 payload:
- *   - copy `id`, `createdAt`, `footprint`, `joist`, `beam`, `post`,
+ *   - copy `id`, `createdAt`, `footprint`, `joist`, `beam`,
  *     `decking`, `layout` unchanged
  *   - stamp `structure: 'elevated'`
  *   - stamp `foundation: { type: 'posts-on-footings', post:
  *     v1.design.post.material, footing: { widthMm: 300, depthMm: 300 } }`
+ *   - DROP the pre-S17 top-level `post` field (review-gate FIX 2:
+ *     `foundation.post` is the single source of truth in v2)
  *
  * If you edit the migration defaults (S23 or later), update these
  * expectations in lockstep — the AC2 test pins the exact values.
@@ -42,6 +44,8 @@ import type { DeckDesign } from '../../../domain/model';
 import type { DeckFileV1, V1LegacyDesign } from '../envelope-types';
 import { serializeAsV1 } from '../schema-v1';
 
+import { V1_LEGACY_DESIGN } from './deck-designs';
+
 // ---------------------------------------------------------------------------
 // Migration defaults — mirror `migrate-v1-to-v2.ts`
 // ---------------------------------------------------------------------------
@@ -54,26 +58,13 @@ const DEFAULT_FOOTING_DEPTH_MM = 300;
 // ---------------------------------------------------------------------------
 
 /**
- * Corpus entry #1 — a 12'×16' PT-composite elevated deck, roughly
- * the reference case from the S3/S6 golden fixtures BEFORE the S17
- * Epic 2 amendment landed.
+ * Corpus entry #1 — a 12'×16' PT-composite elevated deck, the
+ * reference case from the S3/S6 golden fixtures BEFORE the S17
+ * Epic 2 amendment landed. Review-gate FIX 5d: imported from the
+ * shared `deck-designs.ts` fixture so this literal isn't duplicated
+ * between the validator tests and the migration corpus.
  */
-const V1_DESIGN_A: V1LegacyDesign = {
-  id: '018f4e7a-c1c5-4a3f-8f52-3a0f6c9d1e4b',
-  createdAt: '2026-05-01T12:00:00.000Z',
-  footprint: { widthMm: 3658, lengthMm: 4877, heightMm: 914 },
-  joist: {
-    material: { nominal: '2x8', species: 'PT', grade: 'No2' },
-    spacingMm: 406,
-  },
-  beam: { material: { nominal: '2x10', species: 'PT', grade: 'No2' } },
-  post: { material: { nominal: '6x6', species: 'PT', grade: 'No2' } },
-  decking: {
-    material: { nominal: '5/4x6', species: 'Composite', grade: 'NA' },
-    orientation: 'parallel-to-width',
-  },
-  layout: { bayRemainderStrategy: 'extra-bay-at-end' },
-};
+const V1_DESIGN_A: V1LegacyDesign = V1_LEGACY_DESIGN;
 
 /**
  * Corpus entry #2 — a 20'×30' cedar deck, different material picks
@@ -137,21 +128,28 @@ function makeFixture(
   const expectedV2Design: DeckDesign = {
     id: design.id,
     createdAt: design.createdAt,
-    footprint: design.footprint,
+    // FIX 2 — shallow-clone every nested plain-object slot so the
+    // expected value matches migrateV1ToV2's no-aliasing discipline.
+    footprint: { ...design.footprint },
     structure: 'elevated',
     foundation: {
       type: 'posts-on-footings',
-      post: design.post.material,
+      post: { ...design.post.material },
       footing: {
         widthMm: DEFAULT_FOOTING_WIDTH_MM,
         depthMm: DEFAULT_FOOTING_DEPTH_MM,
       },
     },
-    joist: design.joist,
-    beam: design.beam,
-    post: design.post,
-    decking: design.decking,
-    layout: design.layout,
+    joist: {
+      material: { ...design.joist.material },
+      spacingMm: design.joist.spacingMm,
+    },
+    beam: { material: { ...design.beam.material } },
+    decking: {
+      material: { ...design.decking.material },
+      orientation: design.decking.orientation,
+    },
+    layout: { ...design.layout },
   };
   return { label, v1Envelope, rawJson, expectedV2Design };
 }

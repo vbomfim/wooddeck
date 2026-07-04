@@ -159,14 +159,14 @@ export const deckDesignArb: fc.Arbitrary<DeckDesign> = fc
   })
   .map((r): DeckDesign => {
     // S17: seed elevated + posts-on-footings for every generated
-    // design. See module docs above. Reusing `postMaterial` as
-    // `foundation.post` maintains the pre-S17 invariant that
-    // `design.post` and `foundation.post` carry the SAME
-    // MaterialRef when the structure is elevated.
+    // design. See module docs above. Review-gate FIX 2 dropped the
+    // top-level `design.post` field — `foundation.post` (a shallow
+    // clone of the same MaterialRef) is now the single source of
+    // truth for the post material.
     const structure: StructureMode = 'elevated';
     const foundation: FoundationSpec = {
       type: 'posts-on-footings',
-      post: r.postMaterial,
+      post: { ...r.postMaterial },
       footing: { widthMm: 300, depthMm: 300 },
     };
     return {
@@ -177,7 +177,6 @@ export const deckDesignArb: fc.Arbitrary<DeckDesign> = fc
       foundation,
       joist: { material: r.joistMaterial, spacingMm: r.joistSpacingMm },
       beam: { material: r.beamMaterial },
-      post: { material: r.postMaterial },
       decking: { material: r.deckingMaterial, orientation: r.orientation },
       layout: { bayRemainderStrategy: r.bayRemainderStrategy },
     };

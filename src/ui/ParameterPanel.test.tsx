@@ -36,6 +36,27 @@ import { useUiStore } from '../state/ui-store';
 import { ParameterPanel } from './ParameterPanel';
 
 // --------------------------------------------------------------------------
+// FIX 2 helper — narrow `foundation.post` (the SoT for post material).
+// --------------------------------------------------------------------------
+//
+// Review-gate FIX 2 removed the top-level `design.post` field;
+// `foundation.post` (present only on the `posts-on-footings` variant,
+// which is the elevated default) is the single source of truth. Tests
+// that read the post's species / grade / nominal go through this
+// helper so a discriminant slip fails loudly rather than silently
+// asserting on `undefined`.
+function postMaterialOf(
+  design: import('../domain/model').DeckDesign,
+): import('../domain/model').MaterialRef {
+  if (design.foundation.type !== 'posts-on-footings') {
+    throw new Error(
+      `postMaterialOf: expected foundation.type='posts-on-footings' but got '${design.foundation.type}'`,
+    );
+  }
+  return design.foundation.post;
+}
+
+// --------------------------------------------------------------------------
 // Setup / teardown
 // --------------------------------------------------------------------------
 //
@@ -236,7 +257,7 @@ describe('<ParameterPanel /> — AC7 species propagation', () => {
     const before = useDesignStore.getState().bundle.design;
     expect(before.joist.material.species).toBe('PT');
     expect(before.beam.material.species).toBe('PT');
-    expect(before.post?.material.species).toBe('PT');
+    expect(postMaterialOf(before).species).toBe('PT');
     expect(before.decking.material.species).toBe('PT');
 
     const species = screen.getByLabelText(/^species/i);
@@ -245,7 +266,7 @@ describe('<ParameterPanel /> — AC7 species propagation', () => {
     const after = useDesignStore.getState().bundle.design;
     expect(after.joist.material.species).toBe('Cedar');
     expect(after.beam.material.species).toBe('Cedar');
-    expect(after.post?.material.species).toBe('Cedar');
+    expect(postMaterialOf(after).species).toBe('Cedar');
     // Decking is INDEPENDENT — untouched by the species control.
     expect(after.decking.material.species).toBe('PT');
   });
@@ -319,7 +340,7 @@ describe('<ParameterPanel /> — edges: catalog-invalid combos filtered / safe-b
     const design = useDesignStore.getState().bundle.design;
     expect(design.joist.material.species).toBe('Composite');
     expect(design.beam.material.species).toBe('Composite');
-    expect(design.post?.material.species).toBe('PT'); // kept
+    expect(postMaterialOf(design).species).toBe('PT'); // kept
     expect(useDesignStore.getState().status).toBe('idle');
   });
 
@@ -426,7 +447,7 @@ describe('<ParameterPanel /> — FIX 1 Grade options are catalog-filtered', () =
     const after = useDesignStore.getState().bundle.design;
     expect(after.joist.material.grade).toBe('No2');
     expect(after.beam.material.grade).toBe('No2');
-    expect(after.post?.material.grade).toBe('No2');
+    expect(postMaterialOf(after).grade).toBe('No2');
     expect(after.decking.material.grade).toBe('No2');
   });
 });
@@ -561,7 +582,7 @@ describe('<ParameterPanel /> — FIX 4 every field applies to its own store slic
     render(<ParameterPanel />);
     const postSize = screen.getByLabelText(/post size/i);
     await user.selectOptions(postSize, '6x6');
-    expect(useDesignStore.getState().bundle.design.post?.material.nominal).toBe('6x6');
+    expect(postMaterialOf(useDesignStore.getState().bundle.design).nominal).toBe('6x6');
   });
 
   it('Decking board size select applies decking.material.nominal', async () => {
@@ -637,5 +658,52 @@ describe('<ParameterPanel /> — FIX 8 Composite framing informational note', ()
 
     await user.selectOptions(species, 'PT');
     expect(screen.queryByRole('note')).toBeNull();
+  });
+});
+
+// --------------------------------------------------------------------------
+// FIX 2 (review gate) — post-material single source of truth is
+//   `foundation.post`. Pre-fix bug: ParameterPanel patched a top-level
+//   `design.post` that co-existed with `foundation.post`; edits stamped
+//   the top-level, leaving `foundation.post` stale. FIX 2 removed the
+//   top-level entirely so every read + write flows through
+//   `foundation.post`. These assertions catch a regression to the
+//   dual-source-of-truth shape.
+// --------------------------------------------------------------------------
+
+describe('<ParameterPanel /> — FIX 2 post edits flow through foundation.post (no stale copy)', () => {
+  it('editing post size (6x6 → 4x4) reflects in foundation.post and NO top-level `design.post` exists', async () => {
+    const user = userEvent.setup();
+    render(<ParameterPanel />);
+    const postSize = screen.getByLabelText(/post size/i);
+    await user.selectOptions(postSize, '4x4');
+
+    const design = useDesignStore.getState().bundle.design;
+    expect(postMaterialOf(design).nominal).toBe('4x4');
+    // Regression guard — top-level `post` MUST NOT re-appear.
+    expect((design as { post?: unknown }).post).toBeUndefined();
+  });
+
+  it('editing species (PT → Cedar) reflects in foundation.post — no stale material lingering', async () => {
+    const user = userEvent.setup();
+    render(<ParameterPanel />);
+    const species = screen.getByLabelText(/^species/i);
+    await user.selectOptions(species, 'Cedar');
+
+    const design = useDesignStore.getState().bundle.design;
+    expect(postMaterialOf(design).species).toBe('Cedar');
+    expect((design as { post?: unknown }).post).toBeUndefined();
+  });
+
+  it('editing grade broadcasts to foundation.post and leaves no top-level `post` field', async () => {
+    const user = userEvent.setup();
+    render(<ParameterPanel />);
+    // Pick a species with multiple grades so the Grade select is enabled.
+    const grade = screen.getByLabelText<HTMLSelectElement>(/^grade/i);
+    await user.selectOptions(grade, 'No2');
+
+    const design = useDesignStore.getState().bundle.design;
+    expect(postMaterialOf(design).grade).toBe('No2');
+    expect((design as { post?: unknown }).post).toBeUndefined();
   });
 });

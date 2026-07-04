@@ -20,8 +20,9 @@
  * S18 changed `GOLDEN_DECK_DESIGN` in `./__fixtures__/deck-designs.ts`
  * to the post-Epic-2 shape (adds `structure` + `foundation`). The v1
  * validator's schema still requires the OLD shape and rejects the new
- * fields — so v1 tests here use `V1_FIXTURE_A.v1Envelope.design`
- * (a v1-shape design). v2 tests use `GOLDEN_DECK_DESIGN` unchanged.
+ * fields — so v1 tests here use `V1_LEGACY_DESIGN` (a v1-shape design
+ * imported from the same shared fixtures module, review-gate FIX 5d).
+ * v2 tests use `GOLDEN_DECK_DESIGN` unchanged.
  */
 import { describe, expect, it } from 'vitest';
 import { Ajv2020 } from 'ajv/dist/2020.js';
@@ -29,10 +30,14 @@ import addFormats from 'ajv-formats';
 
 import { validateDeckFile, validateDeckFileV2 } from './validator';
 import { DeckFileError } from './errors';
-import { GOLDEN_DECK_DESIGN } from './__fixtures__/deck-designs';
-import { V1_FIXTURE_A } from './__fixtures__/v1-envelopes';
+import { GOLDEN_DECK_DESIGN, V1_LEGACY_DESIGN } from './__fixtures__/deck-designs';
 
-const V1_DESIGN = V1_FIXTURE_A.v1Envelope.design;
+// Review-gate FIX 5d — V1_LEGACY_DESIGN (a v1-shape design) now
+// lives in `./__fixtures__/deck-designs.ts` so BOTH this file and
+// the migration corpus consume the SAME literal. The promoted
+// V1_LEGACY_DESIGN is used for the "v1 design inside a v2 envelope"
+// negative test below.
+const V1_DESIGN = V1_LEGACY_DESIGN;
 
 // ---------------------------------------------------------------------------
 // AC5 — schema file is a valid Draft-2020-12 document
@@ -413,6 +418,128 @@ describe('validateDeckFileV2 — S18 v2 schema', () => {
       const dfe = err as DeckFileError;
       expect(dfe.code).toBe('schema-validation-failed');
       expect(dfe.message).toMatch(/structure|foundation/i);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX 3 (review gate) — discriminator-aware foundation error messages
+// ---------------------------------------------------------------------------
+//
+// Pre-fix bug: for a malformed `foundation`, Ajv walks every `oneOf`
+// branch and reports a `const` error from the WRONG variant. E.g.
+// `foundation: { type: 'deck-blocks' }` (missing `product`) surfaced
+// "foundation.type must equal 'posts-on-footings'", implying the
+// user's `type` value was wrong when it was actually correct. FIX 3
+// makes the ranker discriminator-aware:
+//
+//   - If `foundation.type` is a KNOWN variant, filter Ajv errors to
+//     just that branch (report the real missing / extra field).
+//   - If `foundation.type` is UNKNOWN, collapse the same-path
+//     per-variant `const` errors into ONE enum-style message.
+
+describe('validator — FIX 3 discriminator-aware foundation errors', () => {
+  const envBase = {
+    schema: 2,
+    generator: 'wooddeck',
+    generatorVersion: '0.0.0-test',
+    createdAt: '2026-07-04T00:00:00.000Z',
+  };
+
+  it('missing `product` on a deck-blocks foundation → names the missing field, NOT the wrong-variant const', () => {
+    const envelope = {
+      ...envBase,
+      design: {
+        ...GOLDEN_DECK_DESIGN,
+        structure: 'floating' as const,
+        // deck-blocks branch requires `product`; type is correct.
+        foundation: { type: 'deck-blocks' },
+      },
+    };
+    try {
+      validateDeckFileV2(envelope);
+      throw new Error('expected DeckFileError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DeckFileError);
+      const msg = (err as DeckFileError).message;
+      // MUST name the missing 'product' field.
+      expect(msg).toMatch(/product/);
+      // MUST NOT wrongly claim 'type' should equal 'posts-on-footings'.
+      expect(msg).not.toMatch(/posts-on-footings/);
+    }
+  });
+
+  it('missing `footing` on a posts-on-footings foundation → names the missing field, NOT a deck-blocks/tuffblocks const', () => {
+    const envelope = {
+      ...envBase,
+      design: {
+        ...GOLDEN_DECK_DESIGN,
+        structure: 'elevated' as const,
+        foundation: {
+          type: 'posts-on-footings' as const,
+          post: { nominal: '6x6' as const, species: 'PT' as const, grade: 'No2' as const },
+          // footing intentionally missing
+        },
+      },
+    };
+    try {
+      validateDeckFileV2(envelope);
+      throw new Error('expected DeckFileError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DeckFileError);
+      const msg = (err as DeckFileError).message;
+      expect(msg).toMatch(/footing/);
+      expect(msg).not.toMatch(/deck-blocks|tuffblocks/);
+    }
+  });
+
+  it('stray `post` on a deck-blocks foundation → names the additional field, NOT a const error from another variant', () => {
+    const envelope = {
+      ...envBase,
+      design: {
+        ...GOLDEN_DECK_DESIGN,
+        structure: 'floating' as const,
+        foundation: {
+          type: 'deck-blocks' as const,
+          product: { productId: 'oldcastle-11x11x7' as const },
+          // stray field — deck-blocks branch has additionalProperties:false
+          post: { nominal: '6x6', species: 'PT', grade: 'No2' },
+        },
+      },
+    };
+    try {
+      validateDeckFileV2(envelope);
+      throw new Error('expected DeckFileError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DeckFileError);
+      const msg = (err as DeckFileError).message;
+      // The 'unknown field' additionalProperties message names 'post'.
+      expect(msg).toMatch(/post/);
+      // And does NOT claim 'type' should equal 'posts-on-footings'.
+      expect(msg).not.toMatch(/must equal 'posts-on-footings'/);
+    }
+  });
+
+  it('bad discriminator value → enum-style message listing all valid types', () => {
+    const envelope = {
+      ...envBase,
+      design: {
+        ...GOLDEN_DECK_DESIGN,
+        structure: 'elevated' as const,
+        // 'bouncy' is not one of the three known variants.
+        foundation: { type: 'bouncy' },
+      },
+    };
+    try {
+      validateDeckFileV2(envelope);
+      throw new Error('expected DeckFileError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DeckFileError);
+      const msg = (err as DeckFileError).message;
+      // Enum-style: all three variants named in ONE message.
+      expect(msg).toMatch(/posts-on-footings/);
+      expect(msg).toMatch(/deck-blocks/);
+      expect(msg).toMatch(/tuffblocks/);
     }
   });
 });

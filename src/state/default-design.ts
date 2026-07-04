@@ -134,7 +134,11 @@ export function makeDefaultDesign(id: string, createdAt: string): DeckDesign {
     deckingOrientation,
     bayRemainderStrategy,
   } = DEFAULT_DESIGN_PARAMS;
-  const postMaterial = { nominal: postNominal, species, grade } as const;
+  // Review-gate FIX 2 — every nested MaterialRef is a FRESH object
+  // literal (no aliasing). Two designs constructed via
+  // `makeDefaultDesign` therefore share zero mutable references, so a
+  // future consumer that (illegally) mutates a slot cannot silently
+  // corrupt another design's copy. Same discipline as `migrate-v1-to-v2.ts`.
   return {
     id,
     createdAt,
@@ -146,10 +150,14 @@ export function makeDefaultDesign(id: string, createdAt: string): DeckDesign {
     // Epic 2 / S17 (issue #39 AC2) — the default is elevated +
     // posts-on-footings so downstream layout & span-check math is
     // byte-identical to the pre-S17 default (SC-004 invariant).
+    // Review-gate FIX 2: `foundation.post` is the SINGLE source of
+    // truth for the post material — the previous top-level
+    // `design.post` field was removed to eliminate the dual-SoT
+    // drift bug (see model.ts FoundationSpec doc).
     structure: 'elevated',
     foundation: {
       type: 'posts-on-footings',
-      post: postMaterial,
+      post: { nominal: postNominal, species, grade },
       footing: { widthMm: FOOTING_WIDTH_MM, depthMm: FOOTING_DEPTH_MM },
     },
     joist: {
@@ -157,10 +165,6 @@ export function makeDefaultDesign(id: string, createdAt: string): DeckDesign {
       spacingMm: joistSpacingMm,
     },
     beam: { material: { nominal: beamNominal, species, grade } },
-    // Retained for elevated backward compatibility — carries the
-    // SAME MaterialRef as `foundation.post` above. See §4b of ticket
-    // #39 for the deprecation policy.
-    post: { material: postMaterial },
     decking: {
       material: { nominal: deckingNominal, species, grade },
       orientation: deckingOrientation,

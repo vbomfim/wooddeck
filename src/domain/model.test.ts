@@ -64,9 +64,6 @@ const GOLDEN_DECK_DESIGN: DeckDesign = {
   beam: {
     material: { nominal: '2x10', species: 'PT', grade: 'No2' },
   },
-  post: {
-    material: { nominal: '6x6', species: 'PT', grade: 'No2' },
-  },
   decking: {
     material: { nominal: '5/4x6', species: 'Composite', grade: 'NA' },
     orientation: 'parallel-to-width',
@@ -130,6 +127,9 @@ describe('model — AC4 DeckDesign JSON round-trip (golden fixture)', () => {
     // S17 update: the expected string now includes the `structure`
     // and `foundation` fields (inserted after `footprint`). Field
     // insertion order matches `DeckDesign` in `model.ts`.
+    // Review-gate FIX 2: the top-level `post` field was REMOVED —
+    // `foundation.post` is now the single source of truth for the
+    // elevated deck's post material.
     const expected =
       '{"id":"018f4e7a-c1c5-4a3f-8f52-3a0f6c9d1e4b",' +
       '"createdAt":"2026-07-02T21:00:00.000Z",' +
@@ -141,7 +141,6 @@ describe('model — AC4 DeckDesign JSON round-trip (golden fixture)', () => {
       '"joist":{"material":{"nominal":"2x8","species":"PT","grade":"No2"},' +
       '"spacingMm":406},' +
       '"beam":{"material":{"nominal":"2x10","species":"PT","grade":"No2"}},' +
-      '"post":{"material":{"nominal":"6x6","species":"PT","grade":"No2"}},' +
       '"decking":{"material":{"nominal":"5/4x6","species":"Composite","grade":"NA"},' +
       '"orientation":"parallel-to-width"},' +
       '"layout":{"bayRemainderStrategy":"extra-bay-at-end"}}';

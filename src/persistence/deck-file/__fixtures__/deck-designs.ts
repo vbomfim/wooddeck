@@ -25,6 +25,7 @@
  * (persistence) sidesteps both.
  */
 import type { DeckDesign } from '../../../domain/model';
+import type { V1LegacyDesign } from '../envelope-types';
 
 // Re-export the shared generator so the persistence tests keep their
 // existing import path (`./__fixtures__/deck-designs`). The single
@@ -65,9 +66,6 @@ export const GOLDEN_DECK_DESIGN: DeckDesign = {
   beam: {
     material: { nominal: '2x10', species: 'PT', grade: 'No2' },
   },
-  post: {
-    material: { nominal: '6x6', species: 'PT', grade: 'No2' },
-  },
   decking: {
     material: { nominal: '5/4x6', species: 'Composite', grade: 'NA' },
     orientation: 'parallel-to-width',
@@ -101,11 +99,37 @@ export const SECOND_GOLDEN_DECK_DESIGN: DeckDesign = {
     spacingMm: 305,
   },
   beam: { material: { nominal: '2x12', species: 'Cedar', grade: 'No2' } },
-  post: { material: { nominal: '4x4', species: 'PT', grade: 'No2' } },
   decking: {
     material: { nominal: '2x6', species: 'Cedar', grade: 'No2' },
     orientation: 'parallel-to-length',
   },
   layout: { bayRemainderStrategy: 'centered' },
+};
+
+/**
+ * Review-gate FIX 5d — promoted legacy v1 design used by BOTH
+ * `validator.test.ts` (as a v1-shape design smuggled into a v2
+ * envelope to force a validation failure) AND `__fixtures__/
+ * v1-envelopes.ts` (as the base v1 design used by the migration
+ * corpus). Pre-fix each caller instantiated its own literal; the
+ * promotion collapses those into a single source so a v1-shape
+ * change lands in one place. Shape mirrors `V1LegacyDesign` in
+ * `../envelope-types.ts`.
+ */
+export const V1_LEGACY_DESIGN: V1LegacyDesign = {
+  id: '018f4e7a-c1c5-4a3f-8f52-3a0f6c9d1e4b',
+  createdAt: '2026-05-01T12:00:00.000Z',
+  footprint: { widthMm: 3658, lengthMm: 4877, heightMm: 914 },
+  joist: {
+    material: { nominal: '2x8', species: 'PT', grade: 'No2' },
+    spacingMm: 406,
+  },
+  beam: { material: { nominal: '2x10', species: 'PT', grade: 'No2' } },
+  post: { material: { nominal: '6x6', species: 'PT', grade: 'No2' } },
+  decking: {
+    material: { nominal: '5/4x6', species: 'Composite', grade: 'NA' },
+    orientation: 'parallel-to-width',
+  },
+  layout: { bayRemainderStrategy: 'extra-bay-at-end' },
 };
 

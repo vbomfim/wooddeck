@@ -93,7 +93,6 @@ const designArb = fc
       spacingMm: r.spacingMm,
     },
     beam: { material: { nominal: '2x10', species: 'PT', grade: 'No2' } },
-    post: { material: { nominal: '6x6', species: 'PT', grade: 'No2' } },
     decking: {
       material: { nominal: '5/4x6', species: 'PT', grade: 'No2' },
       orientation: r.orientation,
@@ -268,7 +267,6 @@ describe('layout engine — AC3 property: no same-kind bounding-box overlap', ()
           spacingMm: r.spacingMm,
         },
         beam: { material: { nominal: '2x10', species: 'PT', grade: 'No2' } },
-        post: { material: { nominal: '6x6', species: 'PT', grade: 'No2' } },
         decking: {
           material: { nominal: '5/4x6', species: 'PT', grade: 'No2' },
           orientation: r.orientation,
@@ -474,7 +472,6 @@ describe('layout engine — AC4 width/length swap ⇒ rotated layout', () => {
         spacingMm: 406,
       },
       beam: { material: { nominal: '2x10', species: 'PT', grade: 'No2' } },
-      post: { material: { nominal: '6x6', species: 'PT', grade: 'No2' } },
       decking: {
         material: { nominal: '5/4x6', species: 'PT', grade: 'No2' },
         orientation: 'parallel-to-width',

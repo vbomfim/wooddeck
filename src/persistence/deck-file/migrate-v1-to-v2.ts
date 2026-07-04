@@ -99,11 +99,24 @@ export function migrateV1ToV2(v1: DeckFileV1): DeckFileV2 {
  * Migrate the design payload. Extracted so a unit test can exercise
  * it without the envelope wrapper, and so a future v1.5→v2 shim
  * (should we ever need one) can reuse the same defaulting.
+ *
+ * ## No aliasing (review-gate FIX 2)
+ *
+ * Every nested `MaterialRef` / plain-object slot copied from the
+ * source is SHALLOW-CLONED via `{ ...x }`. The migrated envelope
+ * therefore shares NO mutable references with the input `v1Design`
+ * — a future consumer that mutates `migrated.design.joist.material`
+ * cannot corrupt the caller's `v1.design.joist.material`, and vice
+ * versa. `foundation.post` is a fresh clone of `v1Design.post.material`
+ * for the same reason (previously an alias — see PR #49 review).
  */
 function migrateDesign(v1Design: V1LegacyDesign): DeckDesign {
   const foundation: FoundationSpec = {
     type: 'posts-on-footings',
-    post: v1Design.post.material,
+    // Shallow clone the MaterialRef so `foundation.post` and any
+    // caller reference to `v1Design.post.material` are independent
+    // objects (see module doc "No aliasing").
+    post: { ...v1Design.post.material },
     footing: {
       widthMm: DEFAULT_FOOTING_WIDTH_MM,
       depthMm: DEFAULT_FOOTING_DEPTH_MM,
@@ -114,17 +127,28 @@ function migrateDesign(v1Design: V1LegacyDesign): DeckDesign {
   // `structure` and `foundation` slot between `footprint` and `joist`.
   // `JSON.stringify` preserves insertion order, so this ordering is
   // load-bearing for the v2 round-trip byte-identity test.
+  //
+  // Review-gate FIX 2 — `design.post` was REMOVED from the model.
+  // `foundation.post` (inside the posts-on-footings variant) is the
+  // single source of truth for the post material. The v1 shape still
+  // carries a top-level `design.post` (v1 schema locked); we lift its
+  // material into `foundation.post` above and drop the top-level slot.
   const v2Design: DeckDesign = {
     id: v1Design.id,
     createdAt: v1Design.createdAt,
-    footprint: v1Design.footprint,
+    footprint: { ...v1Design.footprint },
     structure: 'elevated',
     foundation,
-    joist: v1Design.joist,
-    beam: v1Design.beam,
-    post: v1Design.post,
-    decking: v1Design.decking,
-    layout: v1Design.layout,
+    joist: {
+      material: { ...v1Design.joist.material },
+      spacingMm: v1Design.joist.spacingMm,
+    },
+    beam: { material: { ...v1Design.beam.material } },
+    decking: {
+      material: { ...v1Design.decking.material },
+      orientation: v1Design.decking.orientation,
+    },
+    layout: { ...v1Design.layout },
   };
   return v2Design;
 }

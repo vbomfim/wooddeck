@@ -255,3 +255,125 @@ describe('loadDesignFromLocalStorage — returns bundle-result when valid', () =
     expect(result!.migrated).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Review-gate FIX 1 — loader integration for compat + support gates
+// ---------------------------------------------------------------------------
+//
+// The compat matrix (FR-030) + support gate live inside `computeLayout`,
+// which every ingress funnels through. These tests exercise the two
+// concrete ingresses (`readDeckFile` and `loadDesignFromLocalStorage`)
+// with hand-crafted v2 envelopes carrying illegal AND not-yet-implemented
+// structure×foundation combos, and prove the LayoutError surfaces to the
+// application-layer caller (the persistence layer did NOT swallow it, and
+// the use-case did NOT rewrap it).
+
+describe('loadDesignFromFile — FIX 1 compat/support gate propagates', () => {
+  it('propagates LayoutError for FR-030-illegal elevated + tuffblocks combo', async () => {
+    const illegal = {
+      ...FIXTURE.design,
+      structure: 'elevated' as const,
+      foundation: {
+        type: 'tuffblocks' as const,
+        product: { productId: 'tuffblock-12x12x4' as const },
+      },
+    };
+    const file = makeDeckFile(serialize(illegal));
+    await expect(loadDesignFromFile(file, table)).rejects.toBeInstanceOf(LayoutError);
+    await expect(loadDesignFromFile(file, table)).rejects.toThrow(/TuffBlock/i);
+  });
+
+  it('propagates LayoutError "not yet implemented" for elevated + deck-blocks (S20)', async () => {
+    const notImpl = {
+      ...FIXTURE.design,
+      structure: 'elevated' as const,
+      foundation: {
+        type: 'deck-blocks' as const,
+        product: { productId: 'oldcastle-11x11x7' as const },
+      },
+    };
+    const file = makeDeckFile(serialize(notImpl));
+    await expect(loadDesignFromFile(file, table)).rejects.toBeInstanceOf(LayoutError);
+    await expect(loadDesignFromFile(file, table)).rejects.toThrow(/not yet implemented/i);
+  });
+});
+
+describe('loadDesignFromLocalStorage — FIX 1 compat/support gate propagates', () => {
+  it('propagates LayoutError for FR-030-illegal floating + posts-on-footings combo', () => {
+    // Build a v2 envelope by hand — persistence.saveDesignToLocalStorage
+    // routes through validation-on-save which would ALSO reject this
+    // design (defense-in-depth is good), so we bypass save by writing
+    // the raw envelope string into the storage slot directly.
+    const illegal = {
+      ...FIXTURE.design,
+      structure: 'floating' as const,
+      foundation: {
+        type: 'posts-on-footings' as const,
+        post: { nominal: '6x6' as const, species: 'PT' as const, grade: 'No2' as const },
+        footing: { widthMm: 300, depthMm: 300 },
+      },
+    };
+    // `serialize` writes a well-formed v2 envelope (schema OK); the
+    // compat rejection happens later in computeLayout via loader.
+    window.localStorage.setItem(STORAGE_KEY, serialize(illegal));
+    expect(() => loadDesignFromLocalStorage(table)).toThrow(LayoutError);
+    expect(() => loadDesignFromLocalStorage(table)).toThrow(/floating/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX 2 (review gate) — post-material save→load round-trip preservation.
+// ---------------------------------------------------------------------------
+//
+// Regression guard against the pre-fix DUAL SOURCE OF TRUTH bug:
+// pre-FIX-2 the design had BOTH `design.post` and `foundation.post`;
+// UI edits patched only the top-level field, leaving `foundation.post`
+// stale — so save/load persisted contradictory post materials. FIX 2
+// removed `design.post` entirely and re-pointed post-layout,
+// migration, and the UI at `foundation.post` as the single source of
+// truth. This test locks that in end-to-end.
+
+describe('save→load round-trip — FIX 2 post material preserved with no contradiction', () => {
+  it('a design with a specific post material round-trips through save+load with foundation.post intact and NO top-level `post` field', () => {
+    // Start from the medium fixture and rewrite `foundation.post` to
+    // a distinctive material triple (4x4 Cedar No2 — stocked SKU) so
+    // the assertion catches a value that could only survive if the
+    // SoT is honoured.
+    const distinctive = {
+      ...FIXTURE.design,
+      foundation: {
+        type: 'posts-on-footings' as const,
+        post: {
+          nominal: '4x4' as const,
+          species: 'Cedar' as const,
+          grade: 'No2' as const,
+        },
+        footing: { widthMm: 300, depthMm: 300 },
+      },
+    };
+
+    // Route through the REAL persistence save (writes a v2 envelope
+    // to localStorage) then the application-layer loader (which runs
+    // schema validation + migration branch + computeLayout).
+    persistenceSaveToLocalStorage(distinctive);
+    const result = loadDesignFromLocalStorage(table);
+    expect(result).not.toBeNull();
+
+    const loaded = result!.bundle.design;
+    // The SoT survives the round-trip byte-for-byte.
+    if (loaded.foundation.type !== 'posts-on-footings') {
+      throw new Error(
+        `expected 'posts-on-footings' but got '${loaded.foundation.type}'`,
+      );
+    }
+    expect(loaded.foundation.post).toEqual({
+      nominal: '4x4',
+      species: 'Cedar',
+      grade: 'No2',
+    });
+    // Regression guard — top-level `post` MUST NOT re-appear after
+    // save/load. If persistence starts emitting a legacy field, this
+    // is where we catch it before it splits the SoT again.
+    expect((loaded as { post?: unknown }).post).toBeUndefined();
+  });
+});

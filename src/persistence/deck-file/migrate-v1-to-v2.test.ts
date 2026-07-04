@@ -79,6 +79,26 @@ describe('migrateV1ToV2 — AC2 defaults', () => {
 // ---------------------------------------------------------------------------
 
 describe('migrateV1ToV2 — AC3/SC-010 layout equivalence', () => {
+  // Review-gate FIX 5e (top-of-describe clarification):
+  //
+  // SC-010 (zero layout drift under v1→v2 migration) holds BY
+  // CONSTRUCTION for this codebase: `computeLayout` (see
+  // `src/domain/layout/layout-engine.ts`) reads only the pre-Epic-2
+  // fields (`footprint`, `joist`, `beam`, `decking`, `layout`) plus
+  // the S17-added `foundation.post` for post placement (see
+  // `post-layout.ts`). Migration copies `v1.design.post.material`
+  // verbatim into `v2.foundation.post` (see `migrate-v1-to-v2.ts`)
+  // and stamps `structure:'elevated'` — a value the layout engine
+  // ONLY branches on to route into `computeElevatedPostsOnFootingsLayout`,
+  // which is the same code path v1 always ran. So the migrated and
+  // mechanical-expectation designs are guaranteed identical to the
+  // layout engine.
+  //
+  // This test remains valuable as a REGRESSION guard: if a future
+  // change teaches `computeLayout` to read a new S17-added field
+  // (or teaches migration to derive a non-verbatim value), SC-010
+  // will start failing here.
+
   // Freeze the clock so `computeLayout`'s `computedAt` timestamp is
   // identical across the two calls under test — the equivalence
   // proof is over the LAYOUT (member positions, dimensions, ids),
@@ -222,4 +242,73 @@ describe('migrateV1ToV2 — canonical field order', () => {
       expect(JSON.stringify(migrated)).toBe(JSON.stringify(fixture.expectedV2Design));
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// Review-gate FIX 5f — hostile v1 payload with a __proto__ splice
+// ---------------------------------------------------------------------------
+//
+// A crafted v1 envelope containing `"__proto__": { "polluted": true }`
+// inside the `design` block MUST NOT pollute `Object.prototype`, and
+// MUST surface as `schema-validation-failed` (Ajv's
+// `additionalProperties:false` on `design` catches it — `__proto__`
+// is not an allowed field). This is a defense-in-depth check against
+// prototype pollution at the persistence trust boundary. See the
+// header comment on `validator.ts` for the "belt + suspenders"
+// discussion.
+
+describe('deserialize — FIX 5f hostile __proto__ splice in v1 payload', () => {
+  it('rejects a v1 envelope with a __proto__ key inside `design` and does not pollute Object.prototype', () => {
+    // Build a well-formed v1 envelope string, then splice a hostile
+    // "__proto__" key into the `design` block via string editing.
+    // Using a raw JSON string sidesteps `JSON.parse`'s __proto__
+    // silent-drop behavior and forces the payload to reach Ajv.
+    // Build a well-formed v1 envelope, then splice a hostile
+    // "__proto__" key into the `design` block by raw string
+    // manipulation. Constructing this via a JS object literal
+    // { __proto__: {...} } would let the JS engine treat __proto__
+    // as the prototype-setter (not a data property), so
+    // JSON.stringify would silently drop it — we MUST inject the
+    // key at the raw-JSON layer to make it survive JSON.parse and
+    // reach Ajv.
+    const rawJson =
+      '{"schema":1,"generator":"wooddeck","generatorVersion":"0.0.0-test",' +
+      '"createdAt":"2026-07-04T00:00:00.000Z","design":{' +
+      '"__proto__":{"polluted":true},' +
+      '"id":"018f4e7a-c1c5-4a3f-8f52-3a0f6c9d1e4b",' +
+      '"createdAt":"2026-05-01T12:00:00.000Z",' +
+      '"footprint":{"widthMm":3658,"lengthMm":4877,"heightMm":914},' +
+      '"joist":{"material":{"nominal":"2x8","species":"PT","grade":"No2"},"spacingMm":406},' +
+      '"beam":{"material":{"nominal":"2x10","species":"PT","grade":"No2"}},' +
+      '"post":{"material":{"nominal":"6x6","species":"PT","grade":"No2"}},' +
+      '"decking":{"material":{"nominal":"5/4x6","species":"Composite","grade":"NA"},"orientation":"parallel-to-width"},' +
+      '"layout":{"bayRemainderStrategy":"extra-bay-at-end"}' +
+      '}}';
+
+    // Baseline — no pollution before the attempt.
+    expect((Object.prototype as { polluted?: unknown }).polluted).toBeUndefined();
+
+    // The loader MUST either (a) throw a DeckFileError from Ajv
+    // (schema-validation-failed on __proto__ as an unknown field
+    // OR because JSON.parse itself rejects `__proto__` via its
+    // reviver hook) — either outcome is acceptable defense-in-
+    // depth. What is NOT acceptable is silently accepting the
+    // payload OR polluting Object.prototype.
+    let caughtDeckFileError = false;
+    try {
+      deserialize(rawJson);
+    } catch (err) {
+      if (err instanceof DeckFileError) {
+        caughtDeckFileError = true;
+        // Any DeckFileError code is fine — the important assertion
+        // is (a) it threw and (b) Object.prototype was not polluted.
+      } else {
+        throw err;
+      }
+    }
+    expect(caughtDeckFileError).toBe(true);
+
+    // Post-condition — Object.prototype MUST NOT be polluted.
+    expect((Object.prototype as { polluted?: unknown }).polluted).toBeUndefined();
+  });
 });

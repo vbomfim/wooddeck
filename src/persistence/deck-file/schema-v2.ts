@@ -211,8 +211,8 @@ export function deserialize(json: string): DeserializeResult {
   // Only act on the precheck when `schema` is present AND a positive
   // INTEGER AND not in the known set. Non-integer numbers (e.g. 1.5),
   // strings, booleans, null, or missing values fall through to Ajv.
-  if (parsed !== null && typeof parsed === 'object' && 'schema' in parsed) {
-    const receivedSchema = parsed.schema;
+  if (parsed !== null && typeof parsed === 'object' && Object.hasOwn(parsed, 'schema')) {
+    const receivedSchema = (parsed as { schema: unknown }).schema;
     if (
       typeof receivedSchema === 'number' &&
       Number.isInteger(receivedSchema) &&
@@ -229,9 +229,15 @@ export function deserialize(json: string): DeserializeResult {
   // precheck above that if `parsed.schema` is a known integer it's
   // one of `KNOWN_SCHEMA_VERSIONS`; otherwise it may be structurally
   // malformed and Ajv will report accordingly.
+  //
+  // Review-gate FIX 5b — use `Object.hasOwn` (own-property check) at
+  // this trust boundary instead of the `in` operator, which walks
+  // the prototype chain and could match an inherited `schema` from
+  // `Object.prototype.__proto__` pollution. `Object.hasOwn` is
+  // prototype-safe by construction.
   const rawSchema =
-    parsed !== null && typeof parsed === 'object' && 'schema' in parsed
-      ? parsed.schema
+    parsed !== null && typeof parsed === 'object' && Object.hasOwn(parsed, 'schema')
+      ? (parsed as { schema: unknown }).schema
       : undefined;
 
   switch (rawSchema) {

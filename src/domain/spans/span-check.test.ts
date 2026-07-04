@@ -46,7 +46,7 @@ import { dirname, resolve as pathResolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { MM_PER_FOOT, ftInToMm, type Mm } from '../units';
-import type { DeckDesign, Layout, LayoutMember, MaterialRef, MemberKind } from '../model';
+import type { DeckDesign, Layout, LayoutMember, MaterialRef, MemberKind, MemberMaterialRef } from '../model';
 import { computeLayout } from '../layout';
 import { FOOTING_WIDTH_MM } from '../layout';
 
@@ -106,7 +106,6 @@ function makeDesign(overrides: DesignOverrides = {}): DeckDesign {
         grade: beamSpecies === 'Composite' ? 'NA' : 'No2',
       },
     },
-    post: { material: { nominal: '6x6', species: 'PT', grade: 'No2' } },
     decking: {
       material: { nominal: '5/4x6', species: 'PT', grade: 'No2' },
       orientation: 'parallel-to-width',
@@ -1049,5 +1048,122 @@ describe('spanCheck — dependency inversion (Code Review Guardian finding #4)',
     const importPattern =
       /(?:from|import|require)\s*\(?\s*['"]\.\/irc-2018-tables['"]/;
     expect(src).not.toMatch(importPattern);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX 4 (review gate) — non-lumber joist / beam is FAIL-LOUD, not silent
+// ---------------------------------------------------------------------------
+//
+// Pre-fix behavior: a joist/beam whose material.kind !== 'lumber' was
+// silently `continue`d — no warning, no error. That would mask a
+// future producer bug (block material on a structural member) AND
+// suppress span warnings for that member. FIX 4 replaces the silent
+// skip with a fail-safe warning (`allowableMm: 0`, message names the
+// unexpected kind + directs to a professional), matching the existing
+// "not covered / not rated" fail-safe pattern.
+
+describe('spanCheck — FIX 4 non-lumber joist/beam fails loud (fail-safe warning)', () => {
+  const FIXED_CLOCK = (): string => '2026-07-04T00:00:00.000Z';
+  const spacingMm = 406;
+  const joistSpanMm = 3000;
+  const halfSpan = joistSpanMm / 2;
+  // A block-kind LayoutMember (impossible-today, defensive-tomorrow).
+  const blockMaterial = { kind: 'block' as const, productId: 'oldcastle-11x11x7' } as const;
+  const lumberMaterial = {
+    kind: 'lumber' as const,
+    nominal: '2x10' as const,
+    species: 'PT' as const,
+    grade: 'No2' as const,
+  } as const;
+
+  function makeLayout(overrides: {
+    joistMaterial?: MemberMaterialRef;
+    beamMaterial?: MemberMaterialRef;
+  }): Layout {
+    const joistMat = overrides.joistMaterial ?? lumberMaterial;
+    const beamMat = overrides.beamMaterial ?? lumberMaterial;
+    const beamNear: LayoutMember = {
+      id: 'beam-near',
+      kind: 'beam',
+      material: beamMat,
+      position: { x: 0, y: 500, z: -halfSpan },
+      size: { x: 2000, y: 235, z: 38 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const beamFar: LayoutMember = {
+      ...beamNear,
+      id: 'beam-far',
+      position: { x: 0, y: 500, z: +halfSpan },
+    };
+    const joist0: LayoutMember = {
+      id: 'joist-0',
+      kind: 'joist',
+      material: joistMat,
+      position: { x: 0, y: 700, z: 0 },
+      size: { x: 38, y: 235, z: joistSpanMm + FOOTING_WIDTH_MM },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const joist1: LayoutMember = {
+      ...joist0,
+      id: 'joist-1',
+      position: { x: spacingMm, y: 700, z: 0 },
+    };
+    // Two posts per beam so `deriveBeamPostToPostSpanMm` returns a
+    // real span (fewer than 2 skips the beam). Positions are
+    // symmetric about the beam's z so the beam FIX-4 branch runs.
+    const posts: LayoutMember[] = [];
+    for (const b of [beamNear, beamFar]) {
+      for (const px of [0, 1500]) {
+        posts.push({
+          id: `post-${b.id}-${px}`,
+          kind: 'post',
+          material: {
+            kind: 'lumber',
+            nominal: '6x6',
+            species: 'PT',
+            grade: 'No2',
+          },
+          position: { x: px, y: 250, z: b.position.z },
+          size: { x: 140, y: 500, z: 140 },
+          rotation: { x: 0, y: 0, z: 0 },
+        });
+      }
+    }
+    return {
+      designId: '00000000-0000-4000-8000-000000000000',
+      computedAt: FIXED_CLOCK(),
+      bounds: { widthMm: 2000, lengthMm: joistSpanMm + FOOTING_WIDTH_MM, heightMm: 914 },
+      members: [beamNear, beamFar, joist0, joist1, ...posts],
+    };
+  }
+
+  it('a block-kind joist emits a fail-safe warning (allowableMm:0, names the kind)', () => {
+    const layout = makeLayout({ joistMaterial: blockMaterial });
+    const warnings = spanCheck(layout, new IrcSpanTable());
+    // Every joist (both of them) triggers a fail-safe warning.
+    const joistWarnings = warnings.filter((w) => w.memberId.startsWith('joist-'));
+    expect(joistWarnings.length).toBe(2);
+    for (const w of joistWarnings) {
+      expect(w.kind).toBe('over-span-joist');
+      expect(w.allowableMm).toBe(0);
+      expect(w.message).toMatch(/unexpected material kind/i);
+      expect(w.message).toMatch(/block/);
+      expect(w.message).toMatch(/consult/i);
+    }
+  });
+
+  it('a block-kind beam emits a fail-safe warning (allowableMm:0, names the kind)', () => {
+    const layout = makeLayout({ beamMaterial: blockMaterial });
+    const warnings = spanCheck(layout, new IrcSpanTable());
+    const beamWarnings = warnings.filter((w) => w.memberId.startsWith('beam-'));
+    expect(beamWarnings.length).toBe(2);
+    for (const w of beamWarnings) {
+      expect(w.kind).toBe('over-span-beam');
+      expect(w.allowableMm).toBe(0);
+      expect(w.message).toMatch(/unexpected material kind/i);
+      expect(w.message).toMatch(/block/);
+      expect(w.message).toMatch(/consult/i);
+    }
   });
 });

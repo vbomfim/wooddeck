@@ -161,18 +161,22 @@ export interface SerializeOptions {
  *
  * ## S18 — `schema` now admits 1 | 2
  *
- * Pre-S18 the field was `1 | (number & {})`. Now that v2 has landed
- * it's `1 | 2 | (number & {})` — a v1 file surfaces `schema: 1` here
- * (even though the design was migrated to v2), so a caller inspecting
- * `meta.schema === 1` learns "this file was migrated from v1". S23's
- * migration-toast UI will read this seam.
+ * Pre-S18 the field was `1`. Now that v2 has landed it's `1 | 2` —
+ * a v1 file surfaces `schema: 1` here (even though the design was
+ * migrated to v2), so a caller inspecting `meta.schema === 1` learns
+ * "this file was migrated from v1". S23's migration-toast UI will
+ * read this seam.
  *
- * The `number & Record<never, never>` tail preserves branch narrowing
- * against widening (TypeScript's canonical idiom) — plain `1 | 2 |
- * number` would collapse to `number`.
+ * Review-gate FIX 5c — simplified from `1 | 2 | (number &
+ * Record<never,never>)` to just `1 | 2`. The `(number & {})` tail
+ * was a preservation-against-widening idiom, but every producer of
+ * this shape (the deserializer, schema-v2 loader) narrows to the
+ * literal 1 or 2 by construction, so the tail was surfacing as
+ * "possibly other numbers" to consumers without adding any real
+ * safety.
  */
 export interface DeckFileMeta {
-  readonly schema: 1 | 2 | (number & Record<never, never>);
+  readonly schema: 1 | 2;
   readonly generator: string;
   readonly generatorVersion: string;
   readonly createdAt: string;

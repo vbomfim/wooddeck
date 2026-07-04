@@ -74,19 +74,21 @@
  * y = −FOOTING_DEPTH_MM. Real footings key on frost-line data; MVP
  * uses a fixed cube for visualization.
  *
- * **MVP simplification — the footing member carries `design.post.material`
- * as its `material` field (which is a lumber ref like `6x6 PT No2`),
- * even though the physical member is CONCRETE, not lumber.** This is a
- * conscious placeholder so the S4 render contract stays uniform (every
- * `LayoutMember` has a `material: MaterialRef`) without S4 having to
- * invent a `Concrete` catalog entry.
+ * **MVP simplification — the footing member carries the post
+ * `MaterialRef` (read from `design.foundation.post`, the single
+ * source of truth per review-gate FIX 2) as its `material` field
+ * (which is a lumber ref like `6x6 PT No2`), even though the
+ * physical member is CONCRETE, not lumber.** This is a conscious
+ * placeholder so the S4 render contract stays uniform (every
+ * `LayoutMember` has a `material: MemberMaterialRef`) without S4
+ * having to invent a `Concrete` catalog entry.
  *
  * @todo S14/BOM: footings are concrete, not lumber. The bill-of-materials
  *       story MUST special-case `kind === 'footing'` and NOT count it as
  *       6×6 lumber — instead compute concrete volume from
  *       `FOOTING_WIDTH_MM × FOOTING_DEPTH_MM × FOOTING_WIDTH_MM` per
  *       footing and roll up to a "concrete piers" line item. See the
- *       inline comment where `design.post.material` is assigned to the
+ *       inline comment where `design.foundation.post` is assigned to the
  *       footing below.
  */
 
@@ -118,20 +120,24 @@ export function layoutPostsAndFootings(
   design: DeckDesign,
   beams: readonly LayoutMember[],
 ): PostAndFootingResult {
-  // S17: `design.post` is now optional at the type level (a floating
-  // design has no posts). `layoutPostsAndFootings` is only invoked
-  // by the elevated / posts-on-footings code path, so `design.post`
-  // must be present — throw a defensive error naming the module if
-  // it isn't. S19's structure-aware orchestrator is responsible for
-  // routing floating designs to the block-layout path instead.
-  if (!design.post) {
+  // Review-gate FIX 2 — `foundation.post` is the SINGLE source of
+  // truth for the post material (the pre-S17 top-level `design.post`
+  // field was removed to eliminate a dual-SoT drift bug — see
+  // `model.ts` FoundationSpec doc). `layoutPostsAndFootings` is
+  // invoked ONLY from the elevated + posts-on-footings dispatch
+  // branch in `layout-engine.ts`, so the discriminant MUST be
+  // 'posts-on-footings' here. A defensive throw naming the module
+  // catches a future call site that skipped the compat gate.
+  if (design.foundation.type !== 'posts-on-footings') {
     throw new Error(
-      'layoutPostsAndFootings: design.post is undefined. This function is ' +
-        'only valid for elevated / posts-on-footings designs. ' +
-        'See src/domain/layout/post-layout.ts and Epic 2 / S19.',
+      `layoutPostsAndFootings: expected foundation.type === 'posts-on-footings', ` +
+        `got '${design.foundation.type}'. This function is only valid for the ` +
+        `elevated / posts-on-footings dispatch branch of computeLayout. ` +
+        `See src/domain/layout/post-layout.ts, src/domain/layout/layout-engine.ts, ` +
+        `and Epic 2 / S19/S20.`,
     );
   }
-  const postMaterialRef = design.post.material;
+  const postMaterialRef = design.foundation.post;
   const postMat = lookupMaterial(
     postMaterialRef.nominal,
     postMaterialRef.species,

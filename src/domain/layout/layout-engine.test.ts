@@ -53,7 +53,6 @@ function makeDesign(overrides: Partial<{
       spacingMm: overrides.spacingMm ?? 406,
     },
     beam: { material: { nominal: '2x10', species: 'PT', grade: 'No2' } },
-    post: { material: { nominal: '6x6', species: 'PT', grade: 'No2' } },
     decking: {
       material: { nominal: '5/4x6', species: 'PT', grade: 'No2' },
       orientation: 'parallel-to-width',
@@ -360,5 +359,98 @@ describe('computeLayout — error wrap contract (QA-Gap#3)', () => {
 describe('computeLayout — MIN_DECK_DIMENSION_MM', () => {
   it('MIN_DECK_DIMENSION_MM is exactly 4 ft (unrounded)', () => {
     expect(MIN_DECK_DIMENSION_MM).toBe(4 * MM_PER_FOOT);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review-gate FIX 1 — compat matrix + support gate at the layout boundary
+// ---------------------------------------------------------------------------
+//
+// `validateFoundationCombination` (FR-030) MUST be enforced by
+// `computeLayout` itself — file-load, localStorage-load, and
+// applyParameters all funnel through it, so a single choke-point
+// there covers every ingress. The support gate follows: only
+// `elevated`+`posts-on-footings` has a layout implementation in
+// this branch; every other compat-legal combo throws "not yet
+// implemented (arrives in Epic 2 stories S19/S20)".
+//
+// This block does NOT set `design.post` on the alternate combos —
+// FIX 2 dropped the top-level `design.post` field in favour of the
+// canonical `foundation.post`, and the alternate combos have no
+// post at all (`deck-blocks` / `tuffblocks` are block-supported).
+
+describe('computeLayout — FR-030 compat matrix (FIX 1)', () => {
+  it('throws LayoutError with the compat reason for elevated + tuffblocks (FR-030 illegal)', () => {
+    const design = makeDesign();
+    const illegal: DeckDesign = {
+      ...design,
+      structure: 'elevated',
+      foundation: {
+        type: 'tuffblocks',
+        product: { productId: 'tuffblock-12x12x4' },
+      },
+    };
+    expect(() => computeLayout(illegal)).toThrowError(LayoutError);
+    expect(() => computeLayout(illegal)).toThrowError(/TuffBlock/i);
+  });
+
+  it('throws LayoutError with the compat reason for floating + posts-on-footings (FR-030 illegal)', () => {
+    const design = makeDesign();
+    const illegal: DeckDesign = {
+      ...design,
+      structure: 'floating',
+      foundation: {
+        type: 'posts-on-footings',
+        post: { nominal: '6x6', species: 'PT', grade: 'No2' },
+        footing: { widthMm: 300, depthMm: 300 },
+      },
+    };
+    expect(() => computeLayout(illegal)).toThrowError(LayoutError);
+    expect(() => computeLayout(illegal)).toThrowError(/floating/i);
+    expect(() => computeLayout(illegal)).toThrowError(/footing/i);
+  });
+});
+
+describe('computeLayout — support-gate for not-yet-implemented combos (FIX 1)', () => {
+  it('throws LayoutError "not yet implemented" for elevated + deck-blocks (S20)', () => {
+    const design = makeDesign();
+    const notImpl: DeckDesign = {
+      ...design,
+      structure: 'elevated',
+      foundation: { type: 'deck-blocks', product: { productId: 'oldcastle-11x11x7' } },
+    };
+    expect(() => computeLayout(notImpl)).toThrowError(LayoutError);
+    expect(() => computeLayout(notImpl)).toThrowError(/not yet implemented/i);
+    expect(() => computeLayout(notImpl)).toThrowError(/S19|S20/);
+  });
+
+  it('throws LayoutError "not yet implemented" for floating + deck-blocks (S19)', () => {
+    const design = makeDesign();
+    const notImpl: DeckDesign = {
+      ...design,
+      structure: 'floating',
+      foundation: { type: 'deck-blocks', product: { productId: 'oldcastle-11x11x7' } },
+    };
+    expect(() => computeLayout(notImpl)).toThrowError(LayoutError);
+    expect(() => computeLayout(notImpl)).toThrowError(/not yet implemented/i);
+  });
+
+  it('throws LayoutError "not yet implemented" for floating + tuffblocks (S19)', () => {
+    const design = makeDesign();
+    const notImpl: DeckDesign = {
+      ...design,
+      structure: 'floating',
+      foundation: { type: 'tuffblocks', product: { productId: 'tuffblock-12x12x4' } },
+    };
+    expect(() => computeLayout(notImpl)).toThrowError(LayoutError);
+    expect(() => computeLayout(notImpl)).toThrowError(/not yet implemented/i);
+  });
+
+  it('elevated + posts-on-footings still produces a valid layout (the only supported combo)', () => {
+    // Regression guard: the support-gate MUST NOT swallow the sole
+    // supported combo. This is the "happy path" all pre-Epic-2
+    // fixtures rely on.
+    const layout = computeLayout(makeDesign());
+    expect(layout.members.length).toBeGreaterThan(0);
   });
 });

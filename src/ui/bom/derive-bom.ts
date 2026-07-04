@@ -179,9 +179,14 @@ function eachLengthOf(member: LayoutMember): Mm | null {
       // S17 addition; S24 confirms once floating layouts land.
       return member.size.x;
     default: {
-      // Exhaustive check — a new MemberKind fails compile here.
-      const _exhaustive: never = member.kind;
-      return _exhaustive;
+      // Review-gate FIX 5a — throw naming the unexpected kind so a
+      // widening slip surfaces LOUDLY instead of silently returning
+      // `never` (which TS erases at runtime). Matches the pattern
+      // in `materialForMember` (scene/layers/shared/materials.ts).
+      throw new Error(
+        `derive-bom.eachLengthOf: unexpected member.kind="${(member as { kind: string }).kind}"; ` +
+          `add a case above when adding to MemberKind.`,
+      );
     }
   }
 }
@@ -270,9 +275,14 @@ export function deriveBom(layout: Layout): readonly BomLine[] {
       case 'block':
         continue;
       default: {
-        // Exhaustive check — a new material variant fails compile here.
-        const _exhaustive: never = member.material;
-        return _exhaustive;
+        // Review-gate FIX 5a — throw naming the unexpected material
+        // variant so a widening slip surfaces LOUDLY instead of
+        // silently rendering an empty BOM. Matches the pattern in
+        // `materialForMember` (scene/layers/shared/materials.ts).
+        throw new Error(
+          `derive-bom: unexpected material.kind="${(member.material as { kind: string }).kind}" ` +
+            `on member '${member.id}'; add a case to the switch when adding to MemberMaterialRef.`,
+        );
       }
     }
     const lumber = member.material;

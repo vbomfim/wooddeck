@@ -105,7 +105,10 @@ export function validateDeckFile(payload: unknown): DeckFileV1 {
     return payload as DeckFileV1;
   }
   const errors = validateV1.errors ?? [];
-  throw new DeckFileError('schema-validation-failed', formatValidationError(errors, 'v1'));
+  throw new DeckFileError(
+    'schema-validation-failed',
+    formatValidationError(errors, 'v1', payload),
+  );
 }
 
 /**
@@ -121,12 +124,73 @@ export function validateDeckFileV2(payload: unknown): DeckFileV2 {
     return payload as DeckFileV2;
   }
   const errors = validateV2.errors ?? [];
-  throw new DeckFileError('schema-validation-failed', formatValidationError(errors, 'v2'));
+  throw new DeckFileError(
+    'schema-validation-failed',
+    formatValidationError(errors, 'v2', payload),
+  );
 }
 
 // ---------------------------------------------------------------------------
 // Error formatting — reader-facing messages
 // ---------------------------------------------------------------------------
+
+/**
+ * FR-026 foundation variants — same triple as `FOUNDATION_TYPES` in
+ * `schema-constants.ts` but duplicated here to keep validator.ts
+ * import-free of other persistence modules (avoids a circular seam
+ * during schema build). If the schema variants grow, add here too.
+ */
+const FOUNDATION_TYPE_VARIANTS = [
+  'posts-on-footings',
+  'deck-blocks',
+  'tuffblocks',
+] as const;
+type FoundationTypeVariant = (typeof FOUNDATION_TYPE_VARIANTS)[number];
+
+/**
+ * Per-variant field sets — MUST stay in sync with the branches under
+ * `#/$defs/FoundationSpec*` in `docs/deck-file-schema-v2.json`. The
+ * discriminator-aware error formatter uses these to filter Ajv errors
+ * to the branch the user's `type` actually matches.
+ */
+const FOUNDATION_VARIANT_FIELDS: Readonly<
+  Record<FoundationTypeVariant, { required: readonly string[]; allowed: readonly string[] }>
+> = {
+  'posts-on-footings': {
+    required: ['type', 'post', 'footing'],
+    allowed: ['type', 'post', 'footing'],
+  },
+  'deck-blocks': {
+    required: ['type', 'product'],
+    allowed: ['type', 'product'],
+  },
+  tuffblocks: {
+    required: ['type', 'product'],
+    allowed: ['type', 'product'],
+  },
+};
+
+function isKnownFoundationVariant(value: unknown): value is FoundationTypeVariant {
+  return (
+    typeof value === 'string' &&
+    (FOUNDATION_TYPE_VARIANTS as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * Read `payload.design.foundation.type` defensively — the payload is
+ * `unknown` at this point and any of the branches may be missing.
+ * Returns the discriminator value or `undefined` if the path doesn't
+ * resolve. Never throws (used only to steer error formatting).
+ */
+function readFoundationDiscriminator(payload: unknown): unknown {
+  if (typeof payload !== 'object' || payload === null) return undefined;
+  const design = (payload as { design?: unknown }).design;
+  if (typeof design !== 'object' || design === null) return undefined;
+  const foundation = (design as { foundation?: unknown }).foundation;
+  if (typeof foundation !== 'object' || foundation === null) return undefined;
+  return (foundation as { type?: unknown }).type;
+}
 
 /**
  * Reduce Ajv's verbose error array to a single actionable message.
@@ -138,17 +202,121 @@ export function validateDeckFileV2(payload: unknown): DeckFileV2 {
  * DEEPEST-path non-`oneOf` error instead: the deeper the instancePath,
  * the more specific the offense is to the user's actual data.
  *
+ * FIX 3 (review gate) — discriminator-aware `foundation` errors:
+ *   - If `payload.design.foundation.type` is a KNOWN variant, filter
+ *     out the OTHER variants' `const`/`required`/`additionalProperties`
+ *     errors so the reported message describes the user's actual
+ *     variant only (missing / extra field on THAT branch).
+ *   - If the discriminator is UNKNOWN, collapse the per-variant `const`
+ *     errors into ONE enum-style message ("must be one of ...") so
+ *     the user sees ALL valid types at once rather than "must equal
+ *     'posts-on-footings'" implying only one is valid.
+ *
  * Ajv error path shape: `"/design/footprint"` — we transform to
  * dot-notation (`"design.footprint"`) for readability.
  */
 function formatValidationError(
   errors: readonly ErrorObject[],
   schemaVersion: 'v1' | 'v2',
+  payload?: unknown,
 ): string {
   if (errors.length === 0) {
     return '.deck file failed schema validation (no details available)';
   }
-  const chosen = pickMostSpecificError(errors);
+
+  // FIX 3 — discriminator-aware branch selection for foundation.
+  // Only applies to v2 (v1 has no foundation).
+  if (schemaVersion === 'v2') {
+    const discriminator = readFoundationDiscriminator(payload);
+    if (discriminator !== undefined) {
+      // Detect whether the collected errors include any foundation.type
+      // `const` errors (Ajv reports one per oneOf branch when the
+      // whole oneOf fails).
+      const foundationTypeConstErrors = errors.filter(
+        (e) =>
+          e.keyword === 'const' &&
+          e.instancePath === '/design/foundation/type',
+      );
+
+      if (foundationTypeConstErrors.length > 0 && !isKnownFoundationVariant(discriminator)) {
+        // Discriminator is an unknown string — collapse into a single
+        // enum-style message listing every valid variant.
+        const quoted = FOUNDATION_TYPE_VARIANTS.map((v) => `'${v}'`).join(', ');
+        return `.deck file failed schema validation at 'design.foundation.type': must be one of ${quoted}`;
+      }
+
+      if (isKnownFoundationVariant(discriminator)) {
+        // Known variant — the user's `type` is correct; filter out
+        // OTHER variants' branches' errors so only the one true
+        // offense on THIS branch is reported. Ajv's schemaPath is
+        // relativized against the branch $ref (so branch-index
+        // filtering isn't reliable) — instead we filter by the
+        // variant's field-set: a missing field the branch doesn't
+        // require is noise, and a "stray" field the branch DOES
+        // allow is likewise noise.
+        const fields = FOUNDATION_VARIANT_FIELDS[discriminator];
+        const requiredSet = new Set(fields.required);
+        const allowedSet = new Set(fields.allowed);
+        const seenAdditional = new Set<string>();
+        const filtered = errors.filter((e) => {
+          const isFoundationSubtreeError = e.instancePath.startsWith(
+            '/design/foundation',
+          );
+          if (!isFoundationSubtreeError) return true;
+          // Drop the outer `oneOf` aggregator (uninformative).
+          if (e.keyword === 'oneOf') return false;
+          const params = e.params as {
+            missingProperty?: string;
+            additionalProperty?: string;
+          };
+          // Drop `const` errors on `/design/foundation/type` — the
+          // user's discriminator is correct; only the OTHER variants
+          // reject it, which is expected.
+          if (
+            e.keyword === 'const' &&
+            e.instancePath === '/design/foundation/type'
+          ) {
+            return false;
+          }
+          // Drop `required` errors for fields the chosen variant
+          // does not require (they come from other branches).
+          if (
+            e.keyword === 'required' &&
+            params.missingProperty !== undefined &&
+            !requiredSet.has(params.missingProperty)
+          ) {
+            return false;
+          }
+          // Drop `additionalProperties` errors for fields the chosen
+          // variant DOES allow (they come from other branches).
+          if (
+            e.keyword === 'additionalProperties' &&
+            params.additionalProperty !== undefined
+          ) {
+            if (allowedSet.has(params.additionalProperty)) return false;
+            // Dedupe: Ajv reports one such error per rejecting
+            // branch, but the user only sees ONE stray field.
+            if (seenAdditional.has(params.additionalProperty)) return false;
+            seenAdditional.add(params.additionalProperty);
+          }
+          return true;
+        });
+        if (filtered.length > 0) {
+          return formatChosen(pickMostSpecificError(filtered), schemaVersion);
+        }
+      }
+    }
+  }
+
+  return formatChosen(pickMostSpecificError(errors), schemaVersion);
+}
+
+/**
+ * Render one Ajv error into the reader-facing message. Extracted so
+ * both the plain path and the discriminator-aware path share exactly
+ * one rendering rule.
+ */
+function formatChosen(chosen: ErrorObject, schemaVersion: 'v1' | 'v2'): string {
   const pathDots = chosen.instancePath.replace(/^\//, '').replace(/\//g, '.');
   const location = pathDots.length > 0 ? pathDots : '(root)';
   const params = chosen.params as {

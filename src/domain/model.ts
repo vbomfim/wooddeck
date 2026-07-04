@@ -226,9 +226,12 @@ export interface FoundationBlockRef {
  * without touching the consumers as long as the tag stays.
  *
  *   - `'posts-on-footings'` — carries the post material and the
- *     footing dimensions. This is the legacy S3/S4 shape flattened
- *     into the union (see §4b of ticket #39 for the transition
- *     policy w.r.t. the top-level `design.post` field).
+ *     footing dimensions. **This is the SINGLE source of truth for
+ *     the elevated deck's post material.** The pre-S17 top-level
+ *     `design.post` field was REMOVED during review-gate FIX 2 to
+ *     eliminate a dual-SoT drift bug — every consumer that needs the
+ *     post material MUST read `design.foundation.post` guarded by
+ *     `design.foundation.type === 'posts-on-footings'`.
  *   - `'deck-blocks'`      — precast concrete deck blocks (e.g.
  *     Oldcastle). Carries a reference to the catalog product.
  *   - `'tuffblocks'`       — polypropylene instant-foundation pucks.
@@ -378,15 +381,6 @@ export interface DeckDesign {
     readonly spacingMm: Mm; // e.g. 406 mm ≈ 16" o.c.
   };
   readonly beam: { readonly material: MaterialRef };
-  /**
-   * Post material — required in the pre-S17 shape and RETAINED here
-   * for elevated + posts-on-footings backward compatibility. When
-   * `foundation.type === 'posts-on-footings'`, `foundation.post`
-   * and this field carry the SAME `MaterialRef` by convention; the
-   * S18 migration will canonicalize the pair. Optional so a floating
-   * design (no posts) can omit it.
-   */
-  readonly post?: { readonly material: MaterialRef };
   readonly decking: {
     readonly material: MaterialRef;
     readonly orientation: 'parallel-to-length' | 'parallel-to-width';

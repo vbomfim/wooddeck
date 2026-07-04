@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://wooddeck.dev/schema/deck-file-v2.json",
   "title": "wooddeck .deck file — envelope v2",
-  "description": "JSON Schema (Draft 2020-12) for the wooddeck .deck v2 file format. v2 adds Epic 2's foundation model: the design payload REQUIRES `structure` (elevated | floating) and `foundation` (discriminated union on `type`). The `post` field remains OPTIONAL — floating decks that use deck-blocks or tuffblocks may omit it. The envelope stays lenient at the root (no additionalProperties:false) so a future v3 producer may append additive metadata; the design payload is strict (additionalProperties:false at every level) so unknown fields are rejected, never silently dropped. Loader logic MUST switch on `schema` and refuse any value other than 2 (with v1 migration handled by a separate loader path).",
+  "description": "JSON Schema (Draft 2020-12) for the wooddeck .deck v2 file format. v2 adds Epic 2's foundation model: the design payload REQUIRES `structure` (elevated | floating) and `foundation` (discriminated union on `type`). The pre-S17 top-level `post` field was REMOVED in this schema (review-gate FIX 2) — `foundation.post` (inside the posts-on-footings variant) is now the SINGLE source of truth for the post material. `additionalProperties:false` on `DeckDesign` rejects a leftover top-level `post`, so a v1 file must go through migrateV1ToV2 before v2 validation. The envelope stays lenient at the root (no additionalProperties:false) so a future v3 producer may append additive metadata; the design payload is strict (additionalProperties:false at every level) so unknown fields are rejected, never silently dropped. Loader logic MUST switch on `schema` and refuse any value other than 2 (with v1 migration handled by a separate loader path).",
   "type": "object",
   "required": ["schema", "generator", "generatorVersion", "createdAt", "design"],
   "properties": {
@@ -69,13 +69,6 @@
           }
         },
         "beam": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": ["material"],
-          "properties": { "material": { "$ref": "#/$defs/MaterialRef" } }
-        },
-        "post": {
-          "description": "OPTIONAL — retained for elevated decks and floating designs that still want a top-level post material reference. Floating deck-blocks / tuffblocks designs may omit this field entirely.",
           "type": "object",
           "additionalProperties": false,
           "required": ["material"],
