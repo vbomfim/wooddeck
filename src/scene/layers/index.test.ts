@@ -2,7 +2,8 @@
  * Unit tests for `src/scene/layers/index.ts` — the layers barrel.
  *
  * Locks the public surface described in the S10 issue #11 §2
- * component map: each of the six layer components + the
+ * component map: each of the eight layer components (six from S10
+ * plus `BlocksLayer` + `BlockingLayer` from S22) + the
  * `<DeckLayers>` convenience bundle + the `DECK_LAYER_ORDER`
  * constant is exported by NAME (S12's `AppShell` will import from
  * this barrel).

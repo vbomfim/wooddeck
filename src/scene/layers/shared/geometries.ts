@@ -54,17 +54,31 @@
  *
  * Lifecycle-wise, these singletons live for the JS module lifetime
  * (which in the app is the tab lifetime). Browser tab teardown
- * reclaims the GPU handle. In HMR / test scenarios that want to
- * prove rebuild-friendliness, {@link disposeSharedGeometry} and
- * {@link disposeSharedGeometries} tear them down and let the next
- * access re-create — but the current exports are `const`, so a
- * "re-create" would need a wrapping accessor. YAGNI for MVP.
+ * reclaims the underlying GPU handles regardless of any explicit
+ * dispose call. {@link disposeSharedGeometry} and
+ * {@link disposeSharedGeometries} are therefore explicitly
+ * **test/HMR-only** helpers — they are NOT wired to scene unmount:
+ *
+ *   - Wiring them to scene unmount would break a scene REMOUNT
+ *     (module-level `const` geometries can't be safely
+ *     rebuilt without a lazy-accessor wrapper, which we
+ *     intentionally do NOT add — the scene doesn't remount in the
+ *     MVP; S12 mounts it once and it stays live).
+ *   - The tab's process teardown reclaims the GPU handles regardless
+ *     — no leak in production.
+ *
+ * The two helpers exist for TWO tooling scenarios:
+ *   1. **HMR** — proving rebuild-friendliness during `vite dev`.
+ *   2. **Test isolation** — freeing GPU handles between test
+ *      fixtures that construct+dispose their own scene subtrees.
  *
  *   - `disposeSharedGeometry()`  — disposes ONLY `UNIT_BOX_GEOMETRY`
  *     (kept for backwards compatibility with the S10 test surface).
  *   - `disposeSharedGeometries()` — plural: disposes every shared
  *     geometry the scene owns (S22 addition — used by the S22
- *     block-layer teardown path and future scene-wide HMR helpers).
+ *     block-layer test-isolation path and future HMR helpers).
+ *
+ * See pair-fix iter 2 GPT#2 for the "not scene-unmount" rationale.
  *
  * ## Boundary discipline
  *
@@ -94,48 +108,83 @@ export const DECK_BLOCK_GEOMETRY: BoxGeometry = new BoxGeometry(1, 1, 1);
 /**
  * ## `TUFFBLOCK_GEOMETRY` geometry constants
  *
- * The following two radii are the ONLY block-shape numbers that live
- * in this file — every OTHER dimension is derived per-instance from
- * `member.size` at render time.
+ * The following radii + segment count are the ONLY block-shape
+ * numbers that live in this file — every OTHER dimension is derived
+ * per-instance from `member.size` at render time.
  *
  *   - `TUFFBLOCK_BOTTOM_RADIUS_UNIT = 0.5`
- *     Makes the bottom face a UNIT-DIAMETER hex — so a
- *     `<mesh scale={[widthMm, heightMm, depthMm]}/>` produces a
- *     hex whose bottom-face width equals `widthMm`. Same "unit
- *     primitive × per-instance scale" discipline as
- *     `UNIT_BOX_GEOMETRY`.
+ *     Chosen so the bottom face's vertex-vertex diameter is 1.0
+ *     BEFORE the AABB normalization pre-scale (see below).
  *
  *   - `TUFFBLOCK_TOP_RADIUS_UNIT = 0.4`
  *     Top face is 80% of the bottom — visible truncated-pyramid
  *     taper matching the TuffBlock's cast form (AC4 side view).
- *     A future refinement can shift this ratio if the user
- *     rejects the current visual; the number lives here so the
- *     change is a one-line edit.
+ *     A future refinement can shift this ratio if the user rejects
+ *     the current visual; the number lives here so the change is a
+ *     one-line edit.
  *
  * The `radialSegments = 6` argument produces the HEXAGONAL top-down
  * silhouette AC4 mandates.
+ *
+ * ### AABB normalization (pair-fix iter 2 — GPT#1 HIGH)
+ *
+ * three.js `CylinderGeometry` emits its first cap vertex at
+ * `x = r·sin(0) = 0`, `z = r·cos(0) = r` — i.e. the FIRST vertex is on
+ * the +Z axis. With six equally-spaced segments, the resulting
+ * hexagon has:
+ *
+ *   - Z-axis (vertex-to-vertex): span `2·r` = 1.0
+ *   - X-axis (flat-to-flat):     span `2·r·cos(30°)` = `r·√3` ≈ 0.866
+ *
+ * The raw unit-space X/Z bounding box is therefore NOT square
+ * (0.866 × 1.0). A caller doing `<mesh scale={[305, 102, 305]}/>`
+ * would render 264 × 102 × 305 mm — a ~13% Z-axis undersize on the
+ * flat-flat axis. GPT review caught this.
+ *
+ * The fix: pre-scale the geometry's X axis by `2/√3 ≈ 1.1547` so
+ * the flat-flat span also reaches 1.0. After the pre-scale the
+ * unit-space AABB is exactly 1 × 1 × 1, and a `<mesh scale={size}>`
+ * gives the correct full-extent block dims. The hexagon is now
+ * slightly elongated (non-regular), but the 6-vertex silhouette
+ * (AC4) is preserved and the taper (AC4 side view) is preserved.
+ *
+ * `TUFFBLOCK_HEX_AABB_NORMALIZATION` is the flat-flat/vertex-vertex
+ * ratio's reciprocal — kept as a named constant so a future
+ * radial-segment change (unlikely, AC4 pins 6) only needs the math
+ * updated in one place.
  */
 const TUFFBLOCK_TOP_RADIUS_UNIT = 0.4;
 const TUFFBLOCK_BOTTOM_RADIUS_UNIT = 0.5;
 const TUFFBLOCK_RADIAL_SEGMENTS = 6;
 const TUFFBLOCK_HEIGHT_UNIT = 1;
+/**
+ * `2 / √3` — the X-axis pre-scale factor that stretches the
+ * flat-flat span (originally `r·√3` = 0.866) up to 1.0, matching
+ * the vertex-vertex span. Result: unit-space AABB is exactly 1×1×1
+ * so `<mesh scale={size}>` gives the correct catalog dims. See
+ * module JSDoc "AABB normalization" for the full derivation.
+ */
+const TUFFBLOCK_HEX_AABB_NORMALIZATION = 2 / Math.sqrt(3);
 
 /**
  * Shared cylinder-frustum geometry for `tuffblocks` foundation
  * products (polypropylene puck — TuffBlock 12×12×4). Hex silhouette
  * from `radialSegments = 6` (AC4); truncated-pyramid form from
- * top-radius < bottom-radius.
- *
- * Per-instance scale = `member.size` = full catalog dims. The
- * bottom-radius of 0.5 makes the bottom face a unit-diameter hex,
- * so `<mesh scale.x = widthMm>` produces the correct product width.
+ * top-radius < bottom-radius; AABB normalized to a unit 1×1 square
+ * footprint via an X-axis pre-scale (see module JSDoc — GPT#1
+ * pair-fix iter 2). Per-instance scale = `member.size` = full
+ * catalog dims.
  */
-export const TUFFBLOCK_GEOMETRY: CylinderGeometry = new CylinderGeometry(
+const tuffblockRaw = new CylinderGeometry(
   TUFFBLOCK_TOP_RADIUS_UNIT,
   TUFFBLOCK_BOTTOM_RADIUS_UNIT,
   TUFFBLOCK_HEIGHT_UNIT,
   TUFFBLOCK_RADIAL_SEGMENTS,
 );
+// Stretch the flat-flat (X) axis so the unit AABB is exactly 1×1
+// in X and Z. See module JSDoc for the derivation.
+tuffblockRaw.scale(TUFFBLOCK_HEX_AABB_NORMALIZATION, 1, 1);
+export const TUFFBLOCK_GEOMETRY: CylinderGeometry = tuffblockRaw;
 
 /**
  * Test-only helper — dispose the framing-member geometry so a HMR
@@ -148,8 +197,29 @@ export function disposeSharedGeometry(): void {
 
 /**
  * Test-only helper — dispose EVERY shared geometry the scene owns
- * (framing + block primitives). Not called in production; the
- * browser tab's process teardown reclaims GPU handles. This is the
+ * (framing + block primitives).
+ *
+ * ## NOT wired to scene unmount (pair-fix iter 2 — GPT#2)
+ *
+ * The scene lives for the whole app / tab lifetime (it's the lazy
+ * r3f chunk mounted by S12's `<AppShell>`; the user's design is
+ * always renderable). Eagerly disposing these singletons on scene
+ * unmount would BREAK a remount — the exported `const`s cannot be
+ * re-created without a lazy-accessor wrapper, and we intentionally
+ * did not add one (YAGNI — the scene doesn't remount in production).
+ *
+ * This helper is therefore for TWO test/tooling scenarios only:
+ *
+ *   1. **HMR** — a save-and-reload cycle during `vite dev` where a
+ *      developer wants to prove the geometries survive rebuild.
+ *   2. **Unit-test isolation** — a `.test.tsx` file that constructs
+ *      + disposes its own scene fixture and wants to guarantee no
+ *      GPU-handle leak between tests.
+ *
+ * Browser tab teardown reclaims the underlying GPU handles regardless
+ * of whether this helper is called — this is a debug/tooling
+ * convenience, not a production lifecycle hook.
+ *
  * S22 plural addition — the singular `disposeSharedGeometry` stays
  * for backwards compat and disposes ONLY `UNIT_BOX_GEOMETRY`.
  */

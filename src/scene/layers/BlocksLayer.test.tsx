@@ -424,3 +424,139 @@ describe('<BlocksLayer /> — layer stamp (userData layer id)', () => {
     await renderer.unmount();
   });
 });
+
+// ---------------------------------------------------------------------------
+// S22 review-gate pair-fix (iter 2)
+// ---------------------------------------------------------------------------
+
+describe('<BlocksLayer /> — defensive guards (pair-fix iter 2)', () => {
+  beforeEach(() => {
+    resetLayerVisibility();
+    resetDesignStoreForTests();
+  });
+
+  it('throws a contextful error when a kind==="block" member has non-block material (Opus#6 defensive-throw)', async () => {
+    // Fail-loud when the layout engine's `kind:'block'` promise is
+    // violated by upstream code — the BlockMesh narrower catches it
+    // with a stack trace that names the layer + the member id.
+    // If it silently swallowed the mismatch, `materialForBlock`
+    // would still throw, but the trace would blame the material
+    // helper rather than the layer that violated the invariant.
+    //
+    // We construct a "forged" LayoutMember (bypass type-checking via
+    // an explicit unknown-cast) so the runtime path is what we
+    // exercise. The layout engine cannot produce this shape, but
+    // this test guards against a future producer that regresses.
+    const forged = {
+      id: 'forged-0',
+      kind: 'block' as const,
+      material: {
+        kind: 'lumber' as const,
+        nominal: '2x8' as const,
+        species: 'PT' as const,
+        grade: 'No2' as const,
+      },
+      position: { x: 0, y: -89, z: 0 },
+      size: { x: 279, y: 178, z: 279 },
+      rotation: { x: 0, y: 0, z: 0 },
+    } as unknown as LayoutMember;
+    seedLayout([forged]);
+
+    // Silence the noisy r3f error boundary log that jsdom emits
+    // for uncaught render errors — we WANT the render to throw.
+    const originalError = console.error;
+    console.error = () => {};
+    try {
+      await expect(ReactThreeTestRenderer.create(<BlocksLayer />)).rejects.toThrow(
+        /BlocksLayer: expected block material/,
+      );
+    } finally {
+      console.error = originalError;
+    }
+  });
+
+  it('throws a contextful error when a block member carries an unknown productId (Opus#7)', async () => {
+    // A malformed / migrated .deck file could carry a productId
+    // that isn't in the MVP catalog. The BlockMesh currently reads
+    // `GEOMETRY_BY_PRODUCT_ID[productId]` — at runtime that returns
+    // `undefined` for a bad id, which lands as an "invalid geometry
+    // prop" error deep in r3f/three. We fail-loud earlier with a
+    // typed message that names the layer AND tells the reader how
+    // to fix it (extend the map / update the persistence migrator).
+    const bogusMember = {
+      id: 'bogus-0',
+      kind: 'block' as const,
+      material: {
+        kind: 'block' as const,
+        productId: 'made-up-block-9999',
+      },
+      position: { x: 0, y: -89, z: 0 },
+      size: { x: 279, y: 178, z: 279 },
+      rotation: { x: 0, y: 0, z: 0 },
+    } as unknown as LayoutMember;
+    seedLayout([bogusMember]);
+
+    const originalError = console.error;
+    console.error = () => {};
+    try {
+      await expect(ReactThreeTestRenderer.create(<BlocksLayer />)).rejects.toThrow(
+        /BlocksLayer: unknown productId "made-up-block-9999"/,
+      );
+    } finally {
+      console.error = originalError;
+    }
+  });
+
+  it('renders zero meshes when bundle.layout is null (§5 defensive-access — QA G2 for BlocksLayer)', async () => {
+    // Sibling of the KindLayer null-layout test, applied to the
+    // custom BlocksLayer (which has its own defensive
+    // `?.members ?? EMPTY_MEMBERS` guard, so it needs its own
+    // coverage row).
+    const cur = useDesignStore.getState().bundle;
+    useDesignStore.setState({
+      bundle: { ...cur, layout: null } as unknown as typeof cur,
+    });
+    const renderer = await ReactThreeTestRenderer.create(<BlocksLayer />);
+    const groups = renderer.scene
+      .findAllByType('Group')
+      .map((n) => n.instance as Group)
+      .filter((g) => g.userData[LAYER_USER_DATA_KEY] === 'blocks');
+    expect(groups).toHaveLength(1);
+    const meshes = renderer.scene.findAllByType('Mesh');
+    expect(meshes).toHaveLength(0);
+    // Group is still visible — the flag is orthogonal to null-layout.
+    expect(groups[0]!.visible).toBe(true);
+    await renderer.unmount();
+  });
+});
+
+describe('<BlocksLayer /> — position covers both y regimes (QA G4 coverage nit)', () => {
+  beforeEach(() => {
+    resetLayerVisibility();
+    resetDesignStoreForTests();
+  });
+
+  it('renders an elevated-under-post block at y > 0 (S20 blocks-under-posts regime)', async () => {
+    // The AC3 position test above uses `y = -89` (floating block
+    // sitting below grade, S19 regime). The other y regime is S20's
+    // "elevated + deck-blocks" — the block sits ON grade (positive
+    // y, block bottom at y=0, block center at +height/2). BlocksLayer
+    // must render both regimes verbatim (no arithmetic — pass the
+    // member's position straight to the mesh). This test seeds a
+    // y > 0 block and asserts the mesh position mirrors it exactly.
+    const elevatedBlock = makeMember({
+      id: 'elevated-oldcastle-0',
+      kind: 'block',
+      material: FIXTURE_MATERIAL_OLDCASTLE,
+      // Block bottom at y=0, height 178, center at +89.
+      position: { x: 1000, y: 89, z: 2000 },
+      size: { x: 279, y: 178, z: 279 },
+    });
+    seedLayout([elevatedBlock]);
+    const renderer = await ReactThreeTestRenderer.create(<BlocksLayer />);
+    const mesh = renderer.scene.findAllByType('Mesh')[0]!.instance as Mesh;
+    expect(mesh.position.toArray()).toEqual([1000, 89, 2000]);
+    expect(mesh.scale.toArray()).toEqual([279, 178, 279]);
+    await renderer.unmount();
+  });
+});

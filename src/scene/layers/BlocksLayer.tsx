@@ -130,7 +130,35 @@ function BlockMesh({ member }: BlockMeshProps): JSX.Element {
         `See src/scene/layers/BlocksLayer.tsx.`,
     );
   }
-  const geometry = GEOMETRY_BY_PRODUCT_ID[member.material.productId];
+  // Fail-loud on an unknown productId — a forged .deck file, a
+  // stale persisted design after an MVP catalog trim, or a future
+  // product added upstream WITHOUT a matching row in
+  // `GEOMETRY_BY_PRODUCT_ID`. Without this guard the geometry
+  // lookup would return `undefined` at runtime and land as an
+  // opaque r3f/three "invalid geometry prop" error deep in the
+  // reconciler — the layer name would not be in the stack. This
+  // typed message names the layer AND tells the reader exactly
+  // what to fix (matches the parallel `materialForBlock`
+  // unknown-productId throw in `shared/materials.ts`).
+  //
+  // Type-wise: `GEOMETRY_BY_PRODUCT_ID` is a `Record<FoundationProductId,
+  // BufferGeometry>`, so the index access is typed `BufferGeometry`
+  // (not `... | undefined`) — TypeScript trusts the compile-time
+  // union. At RUNTIME a forged productId can bypass that, so we
+  // cast to a `string`-keyed record for the actual lookup + null
+  // check. Reviewer-endorsed pattern (Opus#7 pair-fix iter 2).
+  const productId = member.material.productId;
+  const geometry = (
+    GEOMETRY_BY_PRODUCT_ID as Readonly<Record<string, BufferGeometry>>
+  )[productId];
+  if (geometry === undefined) {
+    throw new Error(
+      `BlocksLayer: unknown productId "${productId}" for block member id="${member.id}". ` +
+        `Extend GEOMETRY_BY_PRODUCT_ID in src/scene/layers/BlocksLayer.tsx ` +
+        `or update the persistence migrator. ` +
+        `See src/domain/foundation-catalog.ts (MVP_PRODUCTS) for the current catalog.`,
+    );
+  }
   const material = materialForBlock(member);
   return (
     <mesh

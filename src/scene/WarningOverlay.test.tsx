@@ -276,10 +276,11 @@ describe('<WarningOverlay /> — AC2 INDEPENDENT of layerVisibility (CRITICAL, f
   });
 
   it('toggling EVERY layer off does not hide the overlay or its meshes', async () => {
-    // The strongest form of the property: hide all six layers and
-    // assert the overlay is unchanged. If any inline
-    // `layerVisibility[<key>]` subscription creeps into the overlay,
-    // this test catches it regardless of which key was touched.
+    // The strongest form of the property: hide all eight layers
+    // (six S10 + blocks + blocking from S22) and assert the overlay
+    // is unchanged. If any inline `layerVisibility[<key>]`
+    // subscription creeps into the overlay, this test catches it
+    // regardless of which key was touched.
     const members = [
       makeMember({ id: 'beam-hl', kind: 'beam', position: { x: 100, y: 500, z: 0 } }),
     ];

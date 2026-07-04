@@ -1,13 +1,14 @@
 /**
  * Unit tests for `src/scene/layers/DeckLayers.tsx`.
  *
- * ## Coverage map (S10 issue #11)
+ * ## Coverage map (S10 issue #11 + S22 issue #44)
  *
- *   AC1  All six layers mount.
+ *   AC1  All eight layers mount (six from S10 + blocks + blocking
+ *        from S22).
  *   AC8  Layer order — the composition order is
- *        environment → footings → posts → beams → joists → decking
- *        so that a raycast from above hits decking FIRST, then
- *        joists, etc.
+ *        environment → footings → blocks → posts → beams → blocking
+ *        → joists → decking so that a raycast from above hits
+ *        decking FIRST, then joists, etc.
  *
  *        This test walks the ACTUAL scene-graph traversal order
  *        by reading each layer group's `userData[LAYER_USER_DATA_KEY]`
