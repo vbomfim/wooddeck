@@ -125,12 +125,24 @@ export type Grade = 'No1' | 'No2' | 'Select' | 'NA';
  * canonical dressed-size table. Constructing one manually risks
  * drifting from the catalog and breaking the FR-011 SKU-identity
  * guarantee.
+ *
+ * ## S21 addition — stockLengthsMm (FR-031)
+ *
+ * `stockLengthsMm` is the sorted (ascending), non-empty list of
+ * standard stock-board lengths carried for the SKU at the reference
+ * lumberyard (Home Depot Canada, verified 2026-07-04). The BOM's
+ * cut-list bin-packer (`packCutList` in `src/domain/bom/`) reads
+ * this field as its `stockLengthsMm` input — the catalog is the
+ * single source of truth so the pack policy is PARAMETRIC on the
+ * SKU. A future region-specific catalog can supply a different list
+ * without changing the packer.
  */
 export interface Material {
   readonly nominal: LumberNominal;
   readonly species: Species;
   readonly grade: Grade;
   readonly actual: { readonly widthMm: Mm; readonly heightMm: Mm };
+  readonly stockLengthsMm: readonly Mm[];
 }
 
 /**

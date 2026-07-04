@@ -84,12 +84,14 @@ const SELFTEST_DIRS = [
   resolve(ROOT, 'src', 'domain', '__selftest__'),
   resolve(ROOT, 'src', 'domain', 'spans', '__selftest__'),
   resolve(ROOT, 'src', 'domain', 'layout', '__selftest__'),
+  resolve(ROOT, 'src', 'domain', 'bom', '__selftest__'),
   resolve(ROOT, 'src', 'application', '__selftest__'),
   resolve(ROOT, 'src', 'persistence', '__selftest__'),
   resolve(ROOT, 'src', 'state', '__selftest__'),
   resolve(ROOT, 'src', 'scene', '__selftest__'),
   resolve(ROOT, 'src', 'scene', 'highlights', '__selftest__'),
   resolve(ROOT, 'src', 'ui', '__selftest__'),
+  resolve(ROOT, 'src', 'ui', 'bom', '__selftest__'),
   // Non-src fixture target dir — used by BLOCK-2g to prove the
   // persistence-non-src-imports rule fires when persistence reaches
   // outside `src/` (into `scripts/`, `docs/`, etc.).
@@ -168,6 +170,38 @@ export const _ = App;
 import '../../test/setup';
 export const _ = 'x';
 `,
+    tool: 'depcruise',
+    expectedRule: 'domain-allowlist',
+    mustNameFile: true,
+  },
+  {
+    // S21 issue #43 §2 — the `deriveBom` MOVE from `src/ui/bom/` to
+    // `src/domain/bom/` inverts the layering. The FORWARD edge
+    // (`src/ui/**` → `src/domain/bom/**`) is exercised by real code
+    // (BomPanel.tsx imports deriveBom) and by the existing
+    // `ui-allowlist` rule that permits `^src/(state|ui|domain)/`.
+    // The REVERSE edge — `src/domain/bom/**` reaching back into
+    // `src/ui/**` — must FAIL loudly under `domain-allowlist` to
+    // preserve the Dependency Rule (adapters → ports → core, never
+    // outward). This probe locks it in.
+    label: 'BLOCK-21d: domain/bom reaches into src/ui/bom (dependency-rule violation)',
+    path: 'src/domain/bom/__selftest__/allowlist-ui-bom.ts',
+    contents: `// self-test fixture — MUST fail lint:boundaries (allowlist)
+import { _stubUiBom } from '../../../ui/bom/__selftest__/target';
+export const _ = _stubUiBom;
+`,
+    targets: [
+      {
+        path: 'src/ui/bom/__selftest__/target.ts',
+        contents: `// self-test target for BLOCK-21d — resolves the offending import
+// so the boundary rule is what fails (not module-not-found). This
+// file lives under a synthetic \`src/ui/bom/\` directory that is
+// otherwise empty after the S21 move (\`derive-bom.ts\` graduated
+// to \`src/domain/bom/\`).
+export const _stubUiBom = 'stub';
+`,
+      },
+    ],
     tool: 'depcruise',
     expectedRule: 'domain-allowlist',
     mustNameFile: true,
