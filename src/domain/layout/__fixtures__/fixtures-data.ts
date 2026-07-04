@@ -24,9 +24,10 @@
  */
 
 import { MM_PER_FOOT } from '../../units';
-import type { DeckDesign, MaterialRef } from '../../model';
+import type { DeckDesign, FoundationSpec, MaterialRef } from '../../model';
 import { FOOTING_DEPTH_MM, FOOTING_WIDTH_MM } from '../y-stack';
 
+const PT_2X8: MaterialRef = { nominal: '2x8', species: 'PT', grade: 'No2' };
 const PT_2X10: MaterialRef = { nominal: '2x10', species: 'PT', grade: 'No2' };
 const PT_6X6: MaterialRef = { nominal: '6x6', species: 'PT', grade: 'No2' };
 const PT_54: MaterialRef = { nominal: '5/4x6', species: 'PT', grade: 'No2' };
@@ -54,6 +55,16 @@ const FIXTURE_FOUNDATION = {
   type: 'posts-on-footings' as const,
   post: PT_6X6,
   footing: { widthMm: FOOTING_WIDTH_MM, depthMm: FOOTING_DEPTH_MM },
+};
+
+// S19 floating fixture foundations — one per block product variant.
+const FIXTURE_TUFFBLOCK_FOUNDATION: FoundationSpec = {
+  type: 'tuffblocks',
+  product: { productId: 'tuffblock-12x12x4' },
+};
+const FIXTURE_OLDCASTLE_FOUNDATION: FoundationSpec = {
+  type: 'deck-blocks',
+  product: { productId: 'oldcastle-11x11x7' },
 };
 
 /**
@@ -290,5 +301,114 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       heightFt: 3,
       spacingMm: 406,
     }),
+  },
+  // -----------------------------------------------------------------
+  // S19 — floating layout goldens (Epic 2)
+  //
+  // AC10: the user's hand-drawn 16 ft × 14 ft 2×8-PT-on-TuffBlocks
+  //       reference deck.
+  // AC1:  the small 8 ft × 8 ft deck-blocks (Oldcastle) variant —
+  //       proves the second block product path is covered.
+  // Regression: the min-dimension 4 ft × 4 ft floating deck exercises
+  //       the trust-boundary MIN_DECK_DIMENSION_MM edge on the
+  //       floating path.
+  //
+  // Note the DIFFERENT foundation, structure, and heightMm values
+  // vs. the elevated fixtures above. `heightMm` is set exactly to
+  // `computeMinFloatingHeightMm(design)` for the 2×8 beam + 5/4×6
+  // decking stack (184 + 25 = 209 mm) — the minimum legal floating
+  // height at which validation still passes.
+  // -----------------------------------------------------------------
+  {
+    name: 'floating-16x14-tuffblock',
+    // AC10 — user's hand-drawn example.
+    // Expected: 3 beams × 8 blocks/beam = 24 blocks (verified in the
+    // floating-layout AC10 unit test); block count MUST land in
+    // [24, 30] per AC10.
+    design: {
+      id: '11111111-1111-4111-8111-000000000019',
+      createdAt: '2026-07-04T00:00:00.000Z',
+      footprint: {
+        widthMm: 16 * MM_PER_FOOT,
+        lengthMm: 14 * MM_PER_FOOT,
+        heightMm: 209, // MIN legal for 2×8 beam + 5/4×6 decking
+      },
+      structure: 'floating',
+      foundation: FIXTURE_TUFFBLOCK_FOUNDATION,
+      joist: { material: PT_2X8, spacingMm: 406 },
+      beam: { material: PT_2X8 },
+      decking: { material: PT_54, orientation: 'parallel-to-width' },
+      layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+    },
+  },
+  {
+    name: 'floating-8x8-deckblocks',
+    // AC1 — smaller floating deck on the Oldcastle deck-block product.
+    // Uses a heavier 2×10 beam so the block layout is exercised with
+    // a different beam-depth / min-height combination (235 + 25 = 260).
+    design: {
+      id: '22222222-2222-4222-8222-000000000019',
+      createdAt: '2026-07-04T00:00:01.000Z',
+      footprint: {
+        widthMm: 8 * MM_PER_FOOT,
+        lengthMm: 8 * MM_PER_FOOT,
+        heightMm: 260, // MIN legal for 2×10 beam + 5/4×6 decking
+      },
+      structure: 'floating',
+      foundation: FIXTURE_OLDCASTLE_FOUNDATION,
+      joist: { material: PT_2X10, spacingMm: 406 },
+      beam: { material: PT_2X10 },
+      decking: { material: PT_54, orientation: 'parallel-to-width' },
+      layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+    },
+  },
+  {
+    name: 'floating-4x4-min-tuffblock',
+    // MIN_DECK_DIMENSION_MM boundary — floating variant. Every
+    // dimension at the smallest legal value:
+    //   - widthMm / lengthMm = MIN_DECK_DIMENSION_MM (4 ft)
+    //   - heightMm = computeMinFloatingHeightMm (2×8 + 5/4×6 = 209 mm)
+    // One millimetre less on ANY dim throws a LayoutError. This
+    // fixture is the "yes it's still valid at the boundary" proof.
+    design: {
+      id: '33333333-3333-4333-8333-000000000019',
+      createdAt: '2026-07-04T00:00:02.000Z',
+      footprint: {
+        widthMm: 4 * MM_PER_FOOT,
+        lengthMm: 4 * MM_PER_FOOT,
+        heightMm: 209,
+      },
+      structure: 'floating',
+      foundation: FIXTURE_TUFFBLOCK_FOUNDATION,
+      joist: { material: PT_2X8, spacingMm: 406 },
+      beam: { material: PT_2X8 },
+      decking: { material: PT_54, orientation: 'parallel-to-width' },
+      layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+    },
+  },
+  {
+    // Review-gate FIX 5 — non-square floating golden. Exercises the
+    // row/col grid formulas independently (width and length differ
+    // by 5×). At 8 ft wide × 40 ft long with the 8 ft beam-max spec
+    // gives 2 beam columns; the ~24″ block-row-max spec gives
+    // 40 ft / 2 ft + 1 = 21 rows → 42 blocks total. Verifies the
+    // engine doesn't accidentally square-off the grid on aspect
+    // ratios other than 1:1.
+    name: 'floating-8x40-oldcastle',
+    design: {
+      id: '44444444-4444-4444-8444-000000000019',
+      createdAt: '2026-07-04T00:00:03.000Z',
+      footprint: {
+        widthMm: 8 * MM_PER_FOOT,
+        lengthMm: 40 * MM_PER_FOOT,
+        heightMm: 209, // MIN legal for 2×8 beam + 5/4×6 decking
+      },
+      structure: 'floating',
+      foundation: FIXTURE_OLDCASTLE_FOUNDATION,
+      joist: { material: PT_2X8, spacingMm: 406 },
+      beam: { material: PT_2X8 },
+      decking: { material: PT_54, orientation: 'parallel-to-width' },
+      layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+    },
   },
 ];

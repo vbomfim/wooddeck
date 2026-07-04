@@ -37,13 +37,6 @@
         "grade": "No2"
       }
     },
-    "post": {
-      "material": {
-        "nominal": "6x6",
-        "species": "PT",
-        "grade": "No2"
-      }
-    },
     "decking": {
       "material": {
         "nominal": "5/4x6",
