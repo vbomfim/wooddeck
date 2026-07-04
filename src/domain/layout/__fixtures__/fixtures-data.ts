@@ -386,4 +386,29 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       layout: { bayRemainderStrategy: 'extra-bay-at-end' },
     },
   },
+  {
+    // Review-gate FIX 5 — non-square floating golden. Exercises the
+    // row/col grid formulas independently (width and length differ
+    // by 5×). At 8 ft wide × 40 ft long with the 8 ft beam-max spec
+    // gives 2 beam columns; the ~24″ block-row-max spec gives
+    // 40 ft / 2 ft + 1 = 21 rows → 42 blocks total. Verifies the
+    // engine doesn't accidentally square-off the grid on aspect
+    // ratios other than 1:1.
+    name: 'floating-8x40-oldcastle',
+    design: {
+      id: '44444444-4444-4444-8444-000000000019',
+      createdAt: '2026-07-04T00:00:03.000Z',
+      footprint: {
+        widthMm: 8 * MM_PER_FOOT,
+        lengthMm: 40 * MM_PER_FOOT,
+        heightMm: 209, // MIN legal for 2×8 beam + 5/4×6 decking
+      },
+      structure: 'floating',
+      foundation: FIXTURE_OLDCASTLE_FOUNDATION,
+      joist: { material: PT_2X8, spacingMm: 406 },
+      beam: { material: PT_2X8 },
+      decking: { material: PT_54, orientation: 'parallel-to-width' },
+      layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+    },
+  },
 ];

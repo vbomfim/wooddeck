@@ -35,6 +35,7 @@ import type { DeckDesign, FoundationSpec, MaterialRef } from '../model';
 import { MM_PER_FOOT } from '../units';
 import { computeLayout } from '../layout';
 
+import { IrcSpanTable } from './irc-2018-tables';
 import type { SpanTable } from './span-table';
 import { spanCheck } from './span-check';
 
@@ -147,6 +148,252 @@ describe('spanCheck (floating) — AC8', () => {
       // deliberately agnostic about whether span-check strips the
       // discriminator before the lookup call.
       expect(m).toMatchObject(PT_2X8);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review-gate FIX 1 — REAL IrcSpanTable end-to-end wiring
+// ---------------------------------------------------------------------------
+//
+// The prior mock-only tests prove the SpanTable INTERFACE is
+// reached; they do NOT prove `computeFloatingLayout` + `spanCheck`
+// + `IrcSpanTable` produce structurally correct behavior together.
+// FIX 1 wires a REAL tributary (per-beam adjacent-beam-x delta)
+// into `lookupBeamMaxSpan` and `citationFor` — replacing the prior
+// hard-coded 0 that snapped every beam to the MOST-permissive
+// column (14–54% false-permissive). These tests prove the fix
+// end-to-end against the actual IRC-2018 data.
+
+describe('spanCheck (floating) — REAL IrcSpanTable e2e (FIX 1)', () => {
+  it('a compliant floating deck (~610 mm block spacing under 2×8 PT beams) fires ZERO span warnings', () => {
+    // Layout produces ~610 mm block-to-block spacing along +z; the
+    // beam-to-beam +x delta is 8 ft (2438 mm) = 8-ft IRC column.
+    // 2×8 PT 2-ply at 8-ft joist span allowable = 7 ft 4 in (2235 mm).
+    // 610 << 2235 → no beam warning. Also proves the mock-vs-real
+    // wiring: a compliant deck must genuinely not warn with the real
+    // table (regression guard against a future "warn always" bug).
+    const design = makeFloating({ widthFt: 16, lengthFt: 14, beam: PT_2X8 });
+    const layout = computeLayout(design, { now: () => design.createdAt });
+    const table = new IrcSpanTable();
+
+    const warnings = spanCheck(layout, table);
+    const beamWarnings = warnings.filter((w) => w.kind === 'over-span-beam');
+    expect(beamWarnings).toEqual([]);
+  });
+
+  it('a contrived over-span scenario (5 m block-to-block gap under a 2×8 PT beam) FIRES an over-span-beam warning', () => {
+    // We hand-author a `Layout` with wide (5 m) block-to-block
+    // spacing along +z under two beams that share the deck's +x
+    // axis. `spanCheck` sees blocks under each beam → floating path;
+    // tributary derived from beam-to-beam +x delta (8 ft = 2438.4 mm)
+    // → IrcSpanTable's `snapBeamJoistSpan` snaps UP to the 10-ft
+    // column (the comparison uses `ftInToMm(ft, 0)` which rounds, so
+    // 2438.4 > 2438 and the 8-ft row is missed by ~0.4 mm — this is
+    // documented in `irc-2018-tables.ts` `snapBeamJoistSpan`, the
+    // conservative safety choice). 2×8 PT 2-ply allowable at the
+    // 10-ft column is 6 ft 6 in (1981 mm). Actual block-to-block
+    // span is 5000 mm > 1981 mm → beam over-span warning MUST fire,
+    // and the tableReference MUST name the 10-ft joist-span column.
+    const lumberMat = { kind: 'lumber' as const, ...PT_2X8 };
+    const blockMat = {
+      kind: 'block' as const,
+      productId: 'tuffblock-12x12x4' as const,
+    };
+    const beamA = {
+      id: 'beam-A',
+      kind: 'beam' as const,
+      material: lumberMat,
+      position: { x: -1219.2, y: 92, z: 0 }, // 4 ft left of center
+      size: { x: 89, y: 184, z: 4267.2 }, // 14 ft long
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const beamB = {
+      id: 'beam-B',
+      kind: 'beam' as const,
+      material: lumberMat,
+      position: { x: 1219.2, y: 92, z: 0 }, // 4 ft right of center → 8 ft apart
+      size: { x: 89, y: 184, z: 4267.2 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    // Two blocks per beam, 5 m apart — forces over-span.
+    const blockA1 = {
+      id: 'block-A1',
+      kind: 'block' as const,
+      material: blockMat,
+      position: { x: -1219.2, y: -51, z: -2500 },
+      size: { x: 305, y: 102, z: 305 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const blockA2 = {
+      id: 'block-A2',
+      kind: 'block' as const,
+      material: blockMat,
+      position: { x: -1219.2, y: -51, z: 2500 },
+      size: { x: 305, y: 102, z: 305 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const blockB1 = {
+      id: 'block-B1',
+      kind: 'block' as const,
+      material: blockMat,
+      position: { x: 1219.2, y: -51, z: -2500 },
+      size: { x: 305, y: 102, z: 305 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const blockB2 = {
+      id: 'block-B2',
+      kind: 'block' as const,
+      material: blockMat,
+      position: { x: 1219.2, y: -51, z: 2500 },
+      size: { x: 305, y: 102, z: 305 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const layout = {
+      designId: '00000000-0000-4000-8000-000000000019' as const,
+      computedAt: '2026-07-04T00:00:00.000Z',
+      bounds: { widthMm: 4876.8, lengthMm: 5305, heightMm: 300 },
+      members: [beamA, beamB, blockA1, blockA2, blockB1, blockB2],
+    };
+
+    const table = new IrcSpanTable();
+    const warnings = spanCheck(layout, table);
+    const beamWarnings = warnings.filter((w) => w.kind === 'over-span-beam');
+    // 2 beams, each with 5 m block-to-block span > 2235 mm allowable.
+    expect(beamWarnings.length).toBe(2);
+    for (const w of beamWarnings) {
+      expect(w.actualMm).toBe(5000);
+      // 2×8 PT 2-ply @ 10-ft joist span → 6 ft 6 in = 1981 mm.
+      // (See `snapBeamJoistSpan` note above — 2438.4 mm snaps UP.)
+      expect(w.allowableMm).toBe(1981);
+      // Citation must name the 10-ft joist-span column (proves the
+      // tributary was passed to citationFor as well).
+      expect(w.tableReference).toContain('supporting 10 ft joist span');
+      expect(w.tableReference).toContain('R507.5');
+    }
+  });
+
+  it('a contrived over-span scenario with a 2×6 PT beam (smaller SKU) triggers a warning at TIGHTER threshold', () => {
+    // Same 5 m block spacing, but the beam is 2×6 (smaller). At the
+    // 8-ft tributary column, 2×6 PT 2-ply allowable = 5 ft 8 in
+    // (1727 mm) — smaller than the 2×8's 2235 mm. Proves the
+    // material passthrough works and the tributary is not a
+    // hardcoded constant.
+    const PT_2X6: MaterialRef = { nominal: '2x6', species: 'PT', grade: 'No2' };
+    const lumberMat = { kind: 'lumber' as const, ...PT_2X6 };
+    const blockMat = {
+      kind: 'block' as const,
+      productId: 'tuffblock-12x12x4' as const,
+    };
+    const beamA = {
+      id: 'beam-A',
+      kind: 'beam' as const,
+      material: lumberMat,
+      position: { x: -1219.2, y: 70, z: 0 },
+      size: { x: 89, y: 140, z: 4267.2 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const beamB = {
+      id: 'beam-B',
+      kind: 'beam' as const,
+      material: lumberMat,
+      position: { x: 1219.2, y: 70, z: 0 },
+      size: { x: 89, y: 140, z: 4267.2 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const blockA1 = {
+      id: 'block-A1',
+      kind: 'block' as const,
+      material: blockMat,
+      position: { x: -1219.2, y: -51, z: -2500 },
+      size: { x: 305, y: 102, z: 305 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const blockA2 = {
+      id: 'block-A2',
+      kind: 'block' as const,
+      material: blockMat,
+      position: { x: -1219.2, y: -51, z: 2500 },
+      size: { x: 305, y: 102, z: 305 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const blockB1 = {
+      id: 'block-B1',
+      kind: 'block' as const,
+      material: blockMat,
+      position: { x: 1219.2, y: -51, z: -2500 },
+      size: { x: 305, y: 102, z: 305 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const blockB2 = {
+      id: 'block-B2',
+      kind: 'block' as const,
+      material: blockMat,
+      position: { x: 1219.2, y: -51, z: 2500 },
+      size: { x: 305, y: 102, z: 305 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const layout = {
+      designId: '00000000-0000-4000-8000-000000000019' as const,
+      computedAt: '2026-07-04T00:00:00.000Z',
+      bounds: { widthMm: 4876.8, lengthMm: 5305, heightMm: 300 },
+      members: [beamA, beamB, blockA1, blockA2, blockB1, blockB2],
+    };
+
+    const table = new IrcSpanTable();
+    const warnings = spanCheck(layout, table);
+    const beamWarnings = warnings.filter((w) => w.kind === 'over-span-beam');
+    expect(beamWarnings.length).toBe(2);
+    for (const w of beamWarnings) {
+      // 2×6 PT 2-ply @ 10-ft joist span → 5 ft 1 in = 1549 mm.
+      // Same 2438.4→10-ft snap as the 2×8 test above.
+      expect(w.allowableMm).toBe(1549);
+      expect(w.tableReference).toContain('2x6');
+      expect(w.tableReference).toContain('supporting 10 ft joist span');
+    }
+  });
+
+  it('QA probe reproduction: a 30 ft × 14 ft floating deck no longer produces ZERO warnings when the tributary should trigger — but IS compliant with real table', () => {
+    // QA's original bug report: on a 30×14 deck the OLD implementation
+    // (joistSpanMm=0 → snap to 6-ft col → 2591 mm allowable) hid
+    // every over-span. With FIX 1 the tributary = beam-to-beam +x
+    // delta, computed from actual layout: 30/(4-1) = 10 ft or
+    // similar. This isn't a warning test — the block-row spacing is
+    // still 610 mm, well within the 8/10-ft column allowables (1676
+    // to 2235 mm). It's a REGRESSION guard: the tributary must be
+    // > 0 so the citation names a REALISTIC column. We assert that
+    // the citation does NOT snap to 6 ft (the old false-permissive).
+    const design = makeFloating({ widthFt: 30, lengthFt: 14 });
+    const layout = computeLayout(design, { now: () => design.createdAt });
+    const table = new IrcSpanTable();
+
+    // Probe: force a beam-check code path by using a real table and
+    // observing citations recorded on any warnings. If NO warnings,
+    // instrument via a spy that captures the tributary passed to
+    // lookupBeamMaxSpan. That's what we do here.
+    const seenTributaries: number[] = [];
+    const spy: SpanTable = {
+      edition: 'SPY',
+      lookupJoistMaxSpan: (mat, sp) => table.lookupJoistMaxSpan(mat, sp),
+      lookupBeamMaxSpan: (mat, tributary, ply) => {
+        seenTributaries.push(tributary);
+        return table.lookupBeamMaxSpan(mat, tributary, ply);
+      },
+      citationFor: (kind, mat, sp) => table.citationFor(kind, mat, sp),
+    };
+    spanCheck(layout, spy);
+
+    // Every beam-check must have received a tributary > 0. The pre-
+    // FIX-1 code passed 0 (which snapped to 6 ft = 1829 mm and
+    // returned 2591 mm allowable — the false-permissive bug). All
+    // seen tributaries must exceed the 6-ft row so we KNOW the
+    // fix propagated.
+    expect(seenTributaries.length).toBeGreaterThan(0);
+    for (const t of seenTributaries) {
+      // 30 ft / (numBeams - 1) with 8-ft max spacing → 5 beams →
+      // 30/4 = 7.5 ft = 2286 mm, or 4 beams → 30/3 = 10 ft = 3048 mm.
+      // Either way > 1829 mm (6-ft column boundary).
+      expect(t).toBeGreaterThan(1829);
     }
   });
 });

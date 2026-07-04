@@ -46,7 +46,10 @@
  * Pure `src/domain/**` module. Imports only sibling domain modules.
  */
 
-import type { DeckDesign, Layout, LayoutMember } from '../../model';
+import type { DeckDesign, Layout, LayoutMember, MaterialRef } from '../../model';
+import { lookupFoundationProduct } from '../../foundation-catalog';
+import { IrcSpanTable } from '../../spans/irc-2018-tables';
+import type { SpanTable } from '../../spans/span-table';
 import { MM_PER_FOOT, type Mm } from '../../units';
 import { LayoutError, MIN_DECK_DIMENSION_MM } from '../layout-shared';
 
@@ -67,14 +70,45 @@ import { computeMinFloatingHeightMm } from './y-stack-floating';
 export const BEAM_TO_BEAM_MAX_SPACING_MM: Mm = 8 * MM_PER_FOOT;
 
 /**
- * Max along-length spacing between adjacent BLOCKS under a single
- * beam. 24″ (610 mm) is the DIY residential norm for closely-spaced
- * block foundations on 2× lumber. Matches the user's hand-drawn
- * 14′-long-8-blocks-per-beam example (14×305/24 ≈ 7 spans → 8 blocks).
+ * PRACTICAL max along-length spacing between adjacent BLOCKS under a
+ * single beam. 24″ (610 mm) is the DIY residential norm for closely-
+ * spaced block foundations on 2× lumber. Matches the user's hand-
+ * drawn 14′-long-8-blocks-per-beam example
+ * (14 × 305 / 24 ≈ 7 spans → 8 blocks).
+ *
+ * Review-gate FIX 1 (FR-029(a) reconciliation): the ACTUAL block-
+ * row spacing is `min(BLOCK_ROW_MAX_SPACING_MM_PRACTICAL, allowable)`
+ * where `allowable = IrcSpanTable.lookupBeamMaxSpan(beam.material,
+ * tributary, 2)` and `tributary = beam-to-beam +x delta`. The
+ * practical constant CAPS the derived value so a very-permissive
+ * table (e.g., a 2×12 beam with 6-ft tributary → ~11 ft allowable)
+ * does not spawn a sparse block grid that would look wrong to a
+ * DIY carpenter. For every MVP material combo the allowable
+ * exceeds 610 mm, so the practical cap wins in the default path;
+ * the derived branch is a defensive future-proof.
  *
  * Autonomous decision — see S19 handoff. Reversible.
  */
-export const BLOCK_ROW_MAX_SPACING_MM: Mm = 610;
+export const BLOCK_ROW_MAX_SPACING_MM_PRACTICAL: Mm = 610;
+
+/**
+ * Legacy re-export — pre-FIX-1 code and tests referenced this name.
+ * Kept as an alias so downstream code that imported the constant
+ * (e.g., blocking span checks in QA probes) still resolves. New
+ * code should reference `BLOCK_ROW_MAX_SPACING_MM_PRACTICAL` to
+ * make the "practical DIY minimum, not span-derived" nature
+ * explicit.
+ */
+export const BLOCK_ROW_MAX_SPACING_MM: Mm = BLOCK_ROW_MAX_SPACING_MM_PRACTICAL;
+
+/**
+ * Default ply-count assumed for the auto-derived block-row spacing
+ * bound. Matches the MVP's 2-ply beam convention (see
+ * `span-check.ts` `DEFAULT_BEAM_PLY_COUNT`). Kept module-local
+ * because floating-layout does not currently expose a per-design
+ * ply-count override.
+ */
+const DEFAULT_BEAM_PLY_COUNT = 2;
 
 /**
  * Max on-center spacing between blocking pieces between adjacent
@@ -85,12 +119,38 @@ export const BLOCK_ROW_MAX_SPACING_MM: Mm = 610;
 export const MAX_BLOCKING_SPACING_MM: Mm = 1220;
 
 /**
- * Options for `computeFloatingLayout` — identical shape to the
- * elevated `ComputeLayoutOptions` so a caller (the layout-engine
- * dispatcher) can pass the same options through unchanged.
+ * Options for `computeFloatingLayout` — extends the elevated
+ * `ComputeLayoutOptions` shape with an OPTIONAL `spanTable` seam so
+ * the auto-derived block-row spacing (Review-gate FIX 1) can be
+ * unit-tested against either the real `IrcSpanTable` or a mock. If
+ * omitted, a fresh `IrcSpanTable` is instantiated — the layout is
+ * always genuinely IRC-bounded.
  */
 export interface ComputeFloatingLayoutOptions {
   readonly now?: () => string;
+  readonly spanTable?: SpanTable;
+}
+
+/**
+ * Derive the max block-row spacing to place under a beam. Reads the
+ * span table for `(beam.material, tributary, 2 plies)` and caps at
+ * the practical DIY minimum. Fail-safe: if the table returns 0
+ * (unrated material / row not covered), fall back to the practical
+ * minimum — the auto-layout stays conservative and the span-check
+ * loop separately surfaces a fail-safe warning for the same design.
+ */
+function deriveBlockRowMaxSpacingMm(
+  beamMaterial: MaterialRef,
+  tributaryMm: Mm,
+  spanTable: SpanTable,
+): Mm {
+  const allowable = spanTable.lookupBeamMaxSpan(
+    beamMaterial,
+    tributaryMm,
+    DEFAULT_BEAM_PLY_COUNT,
+  );
+  if (allowable <= 0) return BLOCK_ROW_MAX_SPACING_MM_PRACTICAL;
+  return Math.min(BLOCK_ROW_MAX_SPACING_MM_PRACTICAL, allowable);
 }
 
 /**
@@ -117,6 +177,7 @@ export function computeFloatingLayout(
 ): Layout {
   validateFloatingDesign(design);
   const now = options?.now ?? defaultNow;
+  const spanTable = options?.spanTable ?? new IrcSpanTable();
 
   try {
     // TypeScript narrowing — after `validateFloatingDesign` we know
@@ -133,6 +194,27 @@ export function computeFloatingLayout(
       );
     }
 
+    // Review-gate FIX 1 (FR-029(a)): the block-row spacing along a
+    // beam MUST be bounded by the tributary-aware IRC allowable so
+    // the auto-layout is span-compliant by construction. Tributary
+    // for a floating beam is the beam-to-beam +x spacing. For N
+    // beams evenly distributed across `widthMm`,
+    // `tributary = widthMm / (numBeams − 1)` where
+    // `numBeams = ceil(widthMm / BEAM_TO_BEAM_MAX_SPACING_MM) + 1`.
+    // A degenerate single-beam case (`numBeams === 1`, tributary
+    // undefined) uses the practical minimum unchanged — the span
+    // table can't sensibly bound zero neighbors.
+    const widthMm = design.footprint.widthMm;
+    const numBeams =
+      Math.ceil(widthMm / BEAM_TO_BEAM_MAX_SPACING_MM) + 1;
+    const beamTributaryMm: Mm =
+      numBeams >= 2 ? widthMm / (numBeams - 1) : widthMm;
+    const blockRowMaxSpacingMm = deriveBlockRowMaxSpacingMm(
+      design.beam.material,
+      beamTributaryMm,
+      spanTable,
+    );
+
     const blocks = computeBlockGrid({
       footprintMm: {
         widthMm: design.footprint.widthMm,
@@ -140,7 +222,7 @@ export function computeFloatingLayout(
       },
       foundation: design.foundation,
       beamSpanMaxMm: BEAM_TO_BEAM_MAX_SPACING_MM,
-      joistSpanMaxMm: BLOCK_ROW_MAX_SPACING_MM,
+      joistSpanMaxMm: blockRowMaxSpacingMm,
     });
 
     const beams = computeFloatingBeams(design, blocks);
@@ -172,11 +254,7 @@ export function computeFloatingLayout(
     return {
       designId: design.id,
       computedAt: now(),
-      bounds: {
-        widthMm: design.footprint.widthMm,
-        lengthMm: design.footprint.lengthMm,
-        heightMm: design.footprint.heightMm,
-      },
+      bounds: computeFloatingBoundsFromMembers(members, design),
       members,
     };
   } catch (err) {
@@ -186,6 +264,60 @@ export function computeFloatingLayout(
       { cause: err },
     );
   }
+}
+
+/**
+ * Compute `Layout.bounds` for a floating layout as the axis-aligned
+ * bounding box of every produced member (S19 review-gate FIX 3).
+ *
+ * Rationale — the elevated pipeline sets `bounds = design.footprint`
+ * because posts + footings sit within the footprint on x/z and
+ * above/below-grade y is bounded by `heightMm`. Floating designs
+ * violate both: outer blocks overhang the footprint by ~½ block on
+ * each side (`block-grid.ts` module header AC4), and blocks extend
+ * BELOW y=0 by `product.actual.heightMm`. If `Layout.bounds` still
+ * reported `design.footprint` for floating layouts, S22's camera
+ * (`scene/CameraRig.tsx`) would frame from the deck footprint and
+ * clip the outer blocks + subgrade extent out of view.
+ *
+ * Fallback — a member-less layout is impossible for a valid design
+ * (every code path in this file emits ≥1 block + beam + board), but
+ * as a defensive guard we fall back to `design.footprint` so the
+ * function never returns `NaN`/`-Infinity` fields.
+ */
+function computeFloatingBoundsFromMembers(
+  members: readonly LayoutMember[],
+  design: DeckDesign,
+): Layout['bounds'] {
+  if (members.length === 0) {
+    return {
+      widthMm: design.footprint.widthMm,
+      lengthMm: design.footprint.lengthMm,
+      heightMm: design.footprint.heightMm,
+    };
+  }
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const m of members) {
+    const halfX = m.size.x / 2;
+    const halfY = m.size.y / 2;
+    const halfZ = m.size.z / 2;
+    if (m.position.x - halfX < minX) minX = m.position.x - halfX;
+    if (m.position.x + halfX > maxX) maxX = m.position.x + halfX;
+    if (m.position.y - halfY < minY) minY = m.position.y - halfY;
+    if (m.position.y + halfY > maxY) maxY = m.position.y + halfY;
+    if (m.position.z - halfZ < minZ) minZ = m.position.z - halfZ;
+    if (m.position.z + halfZ > maxZ) maxZ = m.position.z + halfZ;
+  }
+  return {
+    widthMm: maxX - minX,
+    lengthMm: maxZ - minZ,
+    heightMm: maxY - minY,
+  };
 }
 
 /**
@@ -255,6 +387,39 @@ function validateFloatingDesign(design: DeckDesign): void {
         `land below the deck surface. S13's UI height input MUST clamp its ` +
         `lower bound to computeMinFloatingHeightMm(design) for floating ` +
         `designs.`,
+    );
+  }
+
+  // ---- FR-028 acceptsLumber compat (review-gate FIX 2) --------------------
+  // Each foundation-block product declares the lumber nominals it is
+  // rated to bear (see `foundation-catalog.ts` `acceptsLumber`). Pairing
+  // a block with an unsupported beam nominal is physically invalid — the
+  // manufacturer has not sized the block for that load path. Fail-loud
+  // here BEFORE the block-grid + beam layout math consume the pair.
+  //
+  // `lookupFoundationProduct` throws on unknown ids; that surfaces as a
+  // LayoutError with the catalog-error message (mirrors the material
+  // catalog lookup pattern in `computeMinStructuralHeightMm`).
+  let product;
+  try {
+    product = lookupFoundationProduct(design.foundation.product.productId);
+  } catch (err) {
+    throw new LayoutError(
+      `computeFloatingLayout: unknown foundation product ` +
+        `${JSON.stringify(design.foundation.product.productId)}: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
+  const beamNominal = design.beam.material.nominal;
+  if (!product.acceptsLumber.includes(beamNominal)) {
+    throw new LayoutError(
+      `Foundation-block × beam-nominal mismatch (FR-028): ` +
+        `${product.displayName} (${product.productId}) accepts ` +
+        `${product.acceptsLumber.join(', ')} lumber, ` +
+        `but design.beam is ${beamNominal}. Choose a beam nominal the ` +
+        `block is rated to bear, or select a foundation-block product ` +
+        `whose acceptsLumber includes ${beamNominal}.`,
     );
   }
 }

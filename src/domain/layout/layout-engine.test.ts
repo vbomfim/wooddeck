@@ -446,6 +446,16 @@ describe('computeLayout — support-gate for not-yet-implemented combos (FIX 1)'
       ...design,
       structure: 'floating',
       foundation: { type: 'tuffblocks', product: { productId: 'tuffblock-12x12x4' } },
+      // TuffBlock accepts 2x6 / 2x8 only (foundation-catalog.ts).
+      // makeDesign() defaults to 2x10 which is FR-028-invalid here,
+      // so override the beam nominal for this combo. The elevated
+      // default is intentionally 2x10; overriding here documents the
+      // per-foundation-product constraint.
+      joist: {
+        material: { nominal: '2x8', species: 'PT', grade: 'No2' },
+        spacingMm: 406,
+      },
+      beam: { material: { nominal: '2x8', species: 'PT', grade: 'No2' } },
     };
     const layout = computeLayout(impl);
     expect(layout.members.length).toBeGreaterThan(0);

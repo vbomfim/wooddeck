@@ -29,15 +29,17 @@
  *     the outer anchors.
  *
  * Total block count = numCols × numRows, row-major stamped with
- * stable ids `block-r{row}-c{col}`. Blocks NEVER extend outside the
- * footprint horizontally by construction — the outermost CENTERS
- * lie on the footprint edges, so the outermost block extends
+ * stable ids `block-r{row}-c{col}`. The outermost block CENTERS lie
+ * on the footprint edges, so each outer block extends
  * `product.actual.{width,depth}Mm / 2` OUTSIDE the deck on each
- * axis. This is by design (matches AC4 "outer blocks are directly
- * under the rim beams" — the block bearing the rim beam has half
- * its footprint outside the deck perimeter). If a future
- * requirement pins blocks INSIDE the footprint, the anchor formula
- * is the single seam to change.
+ * axis (a ~½-block overhang under the rim). This is by design
+ * (matches AC4 "outer blocks are directly under the rim beams" —
+ * the block bearing the rim beam has half its footprint outside
+ * the deck perimeter). Review-gate FIX 3 propagates this overhang
+ * into `Layout.bounds` so the scene camera frames the true extent
+ * (see `floating-layout.ts` `computeFloatingBoundsFromMembers`).
+ * If a future requirement pins blocks INSIDE the footprint, the
+ * anchor formula is the single seam to change.
  *
  * ## Input contract
  *

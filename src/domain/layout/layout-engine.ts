@@ -171,7 +171,7 @@ export function computeMinStructuralHeightMm(design: DeckDesign): Mm {
  * module header for the coordinate frame, error contract, and
  * determinism guarantee.
  *
- * ## Structure × foundation dispatch (Epic 2 review-gate FIX 1)
+ * ## Structure × foundation dispatch (Epic 2 S19 pair-fix)
  *
  * Two gates run BEFORE the layout math:
  *
@@ -182,14 +182,15 @@ export function computeMinStructuralHeightMm(design: DeckDesign): Mm {
  *      point every ingress (`readDeckFile`, `loadFromLocalStorage`,
  *      `applyParameters`) inherits — none of those paths need to
  *      call the matrix themselves.
- *   2. **Support gate** — of the four compat-legal combos, only
- *      `elevated`+`posts-on-footings` has an implementation in this
- *      branch. The other three (`elevated`+`deck-blocks`,
- *      `floating`+`deck-blocks`, `floating`+`tuffblocks`) throw
- *      "not yet implemented (arrives in Epic 2 stories S19/S20)"
- *      until those stories fill in the branches. Exhaustive
- *      dispatch with a `never`-typed default catches any future
- *      variant that lands without a branch here.
+ *   2. **Support gate** — of the four compat-legal combos, three
+ *      have implementations here: `elevated`+`posts-on-footings`
+ *      (S17), `floating`+`deck-blocks` (S19), and
+ *      `floating`+`tuffblocks` (S19). The remaining
+ *      `elevated`+`deck-blocks` combo throws
+ *      "not yet implemented (arrives in Epic 2 story S20)" until
+ *      that story fills in the branch. Exhaustive dispatch with a
+ *      `never`-typed default catches any future variant that lands
+ *      without a branch here.
  *
  * @throws {LayoutError} when the design is invalid, when the
  *   structure × foundation combo is FR-030-illegal, when the combo

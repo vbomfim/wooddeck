@@ -232,10 +232,20 @@ export function spanCheck(layout: Layout, table: SpanTable): Warning[] {
 
   // ---- Beam checks -------------------------------------------------------
 
-  if (joistSpanMm !== null) {
+  // Review-gate FIX 1: for the FLOATING layout the beam-table
+  // "tributary joist span" input is the beam-to-beam x-delta (each
+  // beam carries a strip of decking equal to its adjacent-beam
+  // spacing), NOT the elevated `joistSpanMm` (which is 0 for every
+  // floating beam — all share z=0). Using 0 would snap to the
+  // most-permissive IRC column and hide every real over-span. The
+  // per-beam branch below picks the right source from
+  // `deriveBeamSupportInfo(...).source`.
+  const floatingBeamTributaryMm = deriveFloatingBeamTributaryMm(beams);
+
+  if (joistSpanMm !== null || floatingBeamTributaryMm !== null) {
     for (const beam of beams) {
-      const beamPostSpanMm = deriveBeamSupportSpanMm(beam, posts, blocks);
-      if (beamPostSpanMm === null) continue; // beam with < 2 supports — skip
+      const supportInfo = deriveBeamSupportInfo(beam, posts, blocks);
+      if (supportInfo === null) continue; // beam with < 2 supports — skip
 
       // Same defensive narrowing as the joist loop above — beams
       // are always lumber, but a `kind='block'` beam surfaces as a
@@ -245,9 +255,19 @@ export function spanCheck(layout: Layout, table: SpanTable): Warning[] {
         warnings.push(buildUnexpectedMaterialWarning(beam, 'over-span-beam'));
         continue;
       }
+
+      // Pick the tributary source based on which supports we found.
+      // Elevated (post-supported) → joist-to-joist span across the
+      // beam (max-z − min-z of beams). Floating (block-supported)
+      // → beam-to-beam +x spacing (max adjacent-x gap of beams).
+      const tributaryMm: Mm =
+        supportInfo.source === 'block'
+          ? floatingBeamTributaryMm ?? 0
+          : joistSpanMm ?? 0;
+
       const allowableMm = table.lookupBeamMaxSpan(
         beam.material,
-        joistSpanMm,
+        tributaryMm,
         DEFAULT_BEAM_PLY_COUNT,
       );
       // Third parameter is the tributary joist span (mm) — the
@@ -255,11 +275,11 @@ export function spanCheck(layout: Layout, table: SpanTable): Warning[] {
       // COLUMN that produced the allowable (Code Review Guardian
       // PR#24 GPT#2). Mock tables that ignore the parameter still
       // work — they just get an extra number they don't use.
-      const citation = table.citationFor('beam', beam.material, joistSpanMm);
+      const citation = table.citationFor('beam', beam.material, tributaryMm);
       const warning = evaluateSpan({
         memberId: beam.id,
         kind: 'over-span-beam',
-        actualMm: beamPostSpanMm,
+        actualMm: supportInfo.spanMm,
         allowableMm,
         tableReference: citation,
       });
@@ -306,26 +326,77 @@ function deriveJoistSpacingMm(joists: readonly LayoutMember[]): Mm {
 }
 
 /**
- * Max support-to-support distance under the given beam. Tries POST
- * supports first (the elevated layout: posts share the beam's z,
- * spaced along +x) and falls back to BLOCK supports (the floating
- * layout: blocks share the beam's x, spaced along +z). The two
- * paths are mutually exclusive by structure — an elevated layout
- * has zero blocks and a floating layout has zero posts.
+ * Support-derivation info for a beam. The `.source` field discriminates
+ * elevated ('post') from floating ('block') support layouts so the
+ * beam check can pick the right tributary-span source (Review-gate
+ * FIX 1):
+ *   - elevated: tributary = joist span (beam-to-beam z-delta)
+ *   - floating: tributary = beam-to-beam x-delta (adjacent-beam
+ *     spacing along +x); each beam carries a strip of decking
+ *     equal to the worst-case adjacent-beam gap.
  *
- * Match uses a small tolerance (`POST_Z_TOLERANCE_MM`, reused for
- * block-along-x matching under the same rationale) rather than
- * strict `===`. Returns `null` if fewer than 2 supports are found
- * under the beam.
+ * This is the ONLY behavioral seam between "elevated" and "floating"
+ * in the beam check; the IRC beam-span table sees the same
+ * `lookupBeamMaxSpan(material, tributaryMm, plyCount)` call for
+ * both structures (`irc-2018-tables.ts` unchanged). See
+ * `span-check-floating.test.ts` for the real-IrcSpanTable e2e proof.
+ *
+ * `deriveBeamSupportInfo` tries POST supports first (the elevated
+ * layout: posts share the beam's z, spaced along +x) and falls back
+ * to BLOCK supports (the floating layout: blocks share the beam's
+ * x, spaced along +z). The two paths are mutually exclusive by
+ * structure — an elevated layout has zero blocks and a floating
+ * layout has zero posts. Match uses a small tolerance
+ * (`POST_Z_TOLERANCE_MM`, reused for block-along-x matching under
+ * the same rationale) rather than strict `===`. Returns `null` if
+ * fewer than 2 supports are found under the beam.
  */
-function deriveBeamSupportSpanMm(
+interface BeamSupportInfo {
+  readonly spanMm: Mm;
+  readonly source: 'post' | 'block';
+}
+
+function deriveBeamSupportInfo(
   beam: LayoutMember,
   posts: readonly LayoutMember[],
   blocks: readonly LayoutMember[],
-): Mm | null {
+): BeamSupportInfo | null {
   const postSpan = deriveBeamPostToPostSpanMm(beam, posts);
-  if (postSpan !== null) return postSpan;
-  return deriveBeamBlockToBlockSpanMm(beam, blocks);
+  if (postSpan !== null) return { spanMm: postSpan, source: 'post' };
+  const blockSpan = deriveBeamBlockToBlockSpanMm(beam, blocks);
+  if (blockSpan !== null) return { spanMm: blockSpan, source: 'block' };
+  return null;
+}
+
+/**
+ * Beam-to-beam cross-width spacing for a FLOATING layout — every
+ * floating beam shares `.position.z = 0` and is spaced along +x;
+ * this returns the MAX adjacent-x gap (the worst-case tributary for
+ * any beam in the row, so the beam-span lookup is conservative for
+ * every beam in the array).
+ *
+ * Review-gate FIX 1: an earlier revision passed the elevated
+ * `joistSpanMm` (max-z minus min-z, which is `0` for floating) to
+ * `lookupBeamMaxSpan`, which snaps to the MOST-permissive IRC
+ * beam-span column and hid every real over-span. The tributary
+ * derived here restores IRC-2018 R507.5's intended semantics
+ * (the "joist span" column is really the load-strip width per beam,
+ * which for floating IS the beam-to-beam x-delta).
+ *
+ * Returns `null` for < 2 beams — a single-beam layout has no
+ * defensible tributary.
+ */
+function deriveFloatingBeamTributaryMm(
+  beams: readonly LayoutMember[],
+): Mm | null {
+  if (beams.length < 2) return null;
+  const xs = beams.map((b) => b.position.x).sort((a, b) => a - b);
+  let maxGap = 0;
+  for (let i = 1; i < xs.length; i++) {
+    const gap = xs[i]! - xs[i - 1]!;
+    if (gap > maxGap) maxGap = gap;
+  }
+  return maxGap;
 }
 
 /**
