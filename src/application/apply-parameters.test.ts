@@ -196,6 +196,111 @@ describe('applyParameters — AC5 unknown-key rejection', () => {
 });
 
 // ---------------------------------------------------------------------------
+// S25 pair-fix — full-path allowlist scoping for optional leaf fields
+// (GPT HIGH#1 / Opus MED#2 / Security INFO#1 / QA G2)
+//
+// The `KNOWN_OPTIONAL_LEAF_PATHS` set exempts genuinely-optional
+// FoundationSpec fields (blockRowsHint / blockColsHint) from the
+// unknown-key check on subtrees where they don't currently have an
+// own key. The exemption MUST be scoped to the DOTTED PATH — a
+// leaf-key-only allowlist admitted wrong-subtree writes like
+// `{ joist: { blockRowsHint: 999 } }`, which is schema-invalid.
+// ---------------------------------------------------------------------------
+
+describe('applyParameters — S25 path-scoped optional-leaf allowlist', () => {
+  // Reach the floating tuffblock fixture — it carries a `foundation`
+  // subtree without `blockRowsHint`/`blockColsHint`, so a patch that
+  // ADDS them is exactly the legitimate-add case the allowlist
+  // exists to enable. `find` (not indexed access) is robust against
+  // future reordering of the fixture array.
+  const floatingFixture = FIXTURE_DESIGNS.find(
+    (f) => f.name === 'floating-16x14-tuffblock',
+  )!.design;
+
+  it('legitimate `{ foundation: { blockRowsHint: 3 } }` patch succeeds on a hintless floating tuffblock design', () => {
+    const patch = { foundation: { blockRowsHint: 3 } } as unknown as DeepPartial<DeckDesign>;
+    const bundle = applyParameters(floatingFixture, patch, table);
+    if (bundle.design.foundation.type !== 'tuffblocks' && bundle.design.foundation.type !== 'deck-blocks') {
+      throw new Error('expected block foundation on floating fixture');
+    }
+    expect(bundle.design.foundation.blockRowsHint).toBe(3);
+  });
+
+  it('legitimate `{ foundation: { blockColsHint: 2 } }` patch succeeds on a hintless floating tuffblock design', () => {
+    const patch = { foundation: { blockColsHint: 2 } } as unknown as DeepPartial<DeckDesign>;
+    const bundle = applyParameters(floatingFixture, patch, table);
+    if (bundle.design.foundation.type !== 'tuffblocks' && bundle.design.foundation.type !== 'deck-blocks') {
+      throw new Error('expected block foundation on floating fixture');
+    }
+    expect(bundle.design.foundation.blockColsHint).toBe(2);
+  });
+
+  it('rejects wrong-subtree write `{ joist: { blockRowsHint: 999 } }` with the dotted path', () => {
+    // The leaf key `blockRowsHint` is legitimate ONLY at
+    // `foundation.blockRowsHint`. Writing it into `joist` is a
+    // schema-invalid patch that a leaf-only allowlist would have
+    // silently accepted.
+    const patch = { joist: { blockRowsHint: 999 } } as unknown as DeepPartial<DeckDesign>;
+    try {
+      applyParameters(floatingFixture, patch, table);
+      throw new Error('expected ApplyParametersError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApplyParametersError);
+      expect((err as ApplyParametersError).path).toBe('joist.blockRowsHint');
+      expect((err as ApplyParametersError).message).toMatch(/joist\.blockRowsHint/);
+    }
+  });
+
+  it('rejects wrong-subtree write `{ beam: { blockColsHint: 42 } }` with the dotted path', () => {
+    const patch = { beam: { blockColsHint: 42 } } as unknown as DeepPartial<DeckDesign>;
+    try {
+      applyParameters(floatingFixture, patch, table);
+      throw new Error('expected ApplyParametersError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApplyParametersError);
+      expect((err as ApplyParametersError).path).toBe('beam.blockColsHint');
+    }
+  });
+
+  it('rejects deep wrong-path write `{ joist: { material: { blockRowsHint: 7 } } }`', () => {
+    // A leaf-only allowlist would silently accept this nonsense
+    // (adding an orphan `blockRowsHint` into MaterialRef). Deep
+    // dotted-path check catches it.
+    const patch = {
+      joist: { material: { blockRowsHint: 7 } },
+    } as unknown as DeepPartial<DeckDesign>;
+    try {
+      applyParameters(floatingFixture, patch, table);
+      throw new Error('expected ApplyParametersError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApplyParametersError);
+      expect((err as ApplyParametersError).path).toBe('joist.material.blockRowsHint');
+    }
+  });
+
+  it('proto-pollution defence still runs BEFORE the allowlist — nested __proto__ under foundation rejected', () => {
+    // Even though `foundation.blockRowsHint` is exempted from the
+    // unknown-key check, a JSON.parse-preserved `__proto__` own key
+    // under `foundation` must still be rejected as forbidden. This
+    // confirms the FORBIDDEN_KEYS check runs first in the loop.
+    const rogue = JSON.parse(
+      '{"foundation":{"__proto__":{"POLLUTED":true}}}',
+    ) as DeepPartial<DeckDesign>;
+    try {
+      applyParameters(floatingFixture, rogue, table);
+      throw new Error('expected ApplyParametersError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApplyParametersError);
+      // Path names the forbidden nested key so the error is
+      // debuggable.
+      expect((err as ApplyParametersError).path).toBe('foundation.__proto__');
+    }
+    // Object.prototype must be untouched.
+    expect(({} as Record<string, unknown>)['POLLUTED']).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // AC5 (prototype pollution) — the __proto__ vector MUST NOT poison
 // Object.prototype, and JSON-parse form MUST be rejected.
 // ---------------------------------------------------------------------------

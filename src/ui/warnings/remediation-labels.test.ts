@@ -226,4 +226,41 @@ describe('formatRemediationOption — S25 add-support-row', () => {
       expect(out.detail.length).toBeGreaterThan(0);
     }
   });
+
+  // S25 pair-fix (Opus MED#4) — headlineFor MUST NOT render a
+  // count-arrow when the option is disabled AND the placeholder
+  // row counts on the patch would produce a contradictory label
+  // (e.g. an elevated design's "(2 → 2)" or "(2 → 3)" alongside a
+  // "Switch to Floating construction" disabled reason). The
+  // `summary` field is the presentation-safe fallback.
+  it('elevated-disabled variant renders `summary` as the headline, no "N → M" arrow', () => {
+    const disabled: RemediationOption = {
+      kind: 'add-support-row',
+      memberId: 'beam-near',
+      // Placeholder counts (equal) — meaningless for the elevated
+      // path. `produceAddSupportRow` sets both to 2 in
+      // `makeDisabledAddSupportRowNoRowCount`.
+      patch: {
+        kind: 'add-support-row',
+        targetBeamId: 'beam-near',
+        currentRows: 2,
+        proposedRows: 2,
+      },
+      summary: 'Add a support row',
+      currentAllowableMm: 1981,
+      newAllowableMm: 0,
+      actualSpanMm: 6000,
+      wouldClear: false,
+      disabled: true,
+      disabledReason:
+        'Switch to Floating construction to enable intermediate support rows.',
+    };
+    const out = formatRemediationOption(disabled, 'imperial');
+    // Headline is the summary — no arrow, no numbers.
+    expect(out.headline).toBe('Add a support row');
+    expect(out.headline).not.toMatch(/→/);
+    expect(out.headline).not.toMatch(/2/);
+    // Detail carries the alternative-surfacing reason.
+    expect(out.detail.toLowerCase()).toContain('floating');
+  });
 });

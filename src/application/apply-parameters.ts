@@ -112,10 +112,18 @@
  * Using `current` as the reference has ONE limitation: if the domain
  * type ever added an OPTIONAL field, `current` might legitimately
  * omit that field, and a patch that ADDS it would be rejected as
- * "unknown key". Every field of `DeckDesign` is currently REQUIRED
- * (see `src/domain/model.ts`), so this limitation does not bite for
- * MVP. A future optional-field addition would need a companion
- * "allowed additional keys" list argued for on the ticket.
+ * "unknown key". S25 (ticket #47) introduced the first such
+ * optional fields — `foundation.blockRowsHint` /
+ * `foundation.blockColsHint` — which are patched in by the
+ * `add-support-row` remediation on designs whose initial
+ * `foundation` subtree does not carry them. The
+ * `KNOWN_OPTIONAL_LEAF_PATHS` set (below) grants a NARROWLY-SCOPED
+ * full-dotted-path exemption for those fields (and any future
+ * optional leaves added by later stories). Any new optional field
+ * MUST be added to that set with a comment naming the ticket that
+ * introduced it — a rewrite that omits the entry will fail-loud
+ * with `Unknown key '...'`, caught by the test suite before it can
+ * corrupt production data.
  *
  * ## Line budget
  *
@@ -220,33 +228,39 @@ const NON_EDITABLE_TOP_KEYS: ReadonlySet<string> = new Set(['id', 'createdAt']);
  * would trip the unknown-key check and fail with
  * "Unknown key 'foundation.blockRowsHint'".
  *
- * ## Why a whitelist (and not just remove the check)
+ * ## Why the whitelist is FULL-PATH scoped (not leaf-name)
  *
- * The whitelist keeps the typo-defence for the 99% common path
- * (`{ joist: { spacingMm: 305 } }` — every key is a known member
- * of the current subtree). Only genuinely-optional additive fields
- * declared in `model.ts` FoundationSpec (or a future extension)
- * are exempted, and each one is documented here with a citation
- * to the ticket that introduced it. A future field is added by
- * appending one entry — a rewrite that adds a new optional field
- * without touching this set produces a runtime failure, which is
- * caught by the test suite, not silent corruption.
+ * (S25 pair-fix / GPT HIGH#1) A leaf-key-only allowlist admitted
+ * these hostile-shape patches by name collision:
+ *
+ *   { joist: { blockRowsHint: 999 } }
+ *   { beam:  { blockColsHint: 42 } }
+ *   { joist: { material: { blockRowsHint: 7 } } }
+ *
+ * — none of which are legal DeckDesign edits, all of which used
+ * to be silently accepted because the leaf "blockRowsHint" was
+ * on the exempt list at every depth. Full dotted-path scoping
+ * (`foundation.blockRowsHint`) confines the exemption to the
+ * ONE subtree where the field is actually declared on
+ * `FoundationSpec`. Adding a future optional leaf is one line
+ * (append the dotted path); a typo (`foundation.blockRowHint` —
+ * missing 's') is still rejected as unknown.
  *
  * ## Security invariant
  *
- * Every key in this set is a LITERAL alphanumeric identifier
+ * Every path in this set is a LITERAL alphanumeric identifier
  * declared in `src/domain/model.ts` — none of them collide with
  * prototype-pollution vectors (`__proto__`, `constructor`,
  * `prototype`) which remain rejected by `FORBIDDEN_KEYS` earlier
- * in the same loop. Adding a key to this set does NOT weaken
+ * in the same loop. Adding a path to this set does NOT weaken
  * the prototype-pollution defence.
  */
-const KNOWN_OPTIONAL_LEAF_KEYS: ReadonlySet<string> = new Set([
+const KNOWN_OPTIONAL_LEAF_PATHS: ReadonlySet<string> = new Set([
   // S25 / ticket #47 — FoundationSpec deck-blocks/tuffblocks
   // additive-optional block-grid overrides. See `FoundationSpec`
   // doc-block in `src/domain/model.ts`.
-  'blockRowsHint',
-  'blockColsHint',
+  'foundation.blockRowsHint',
+  'foundation.blockColsHint',
 ]);
 
 /**
@@ -313,7 +327,16 @@ function deepMerge<T extends object>(
         `Forbidden key '${key}' in patch at path '${pathPrefix}${key}' (prototype-pollution defence — see apply-parameters.ts module docs)`,
       );
     }
-    if (!Object.hasOwn(current, key) && !KNOWN_OPTIONAL_LEAF_KEYS.has(key)) {
+    // S25 pair-fix: full DOTTED-PATH check — a leaf-only allowlist
+    // silently accepted `{ joist: { blockRowsHint: 999 } }` and
+    // similar wrong-subtree writes. Confine the exemption to the
+    // exact declared path (`foundation.blockRowsHint`). The
+    // FORBIDDEN_KEYS check above runs first — a `__proto__` under
+    // any prefix is still rejected before this check runs.
+    if (
+      !Object.hasOwn(current, key) &&
+      !KNOWN_OPTIONAL_LEAF_PATHS.has(`${pathPrefix}${key}`)
+    ) {
       throw new ApplyParametersError(
         `${pathPrefix}${key}`,
         `Unknown key '${pathPrefix}${key}' — not a field of DeckDesign at that path (see apply-parameters.ts module docs)`,

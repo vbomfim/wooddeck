@@ -356,6 +356,25 @@ describe('computeBlockGrid — trust-boundary defensive checks', () => {
       joistSpanMaxMm: JOIST_SPAN_MAX_MM,
     };
     expect(() => computeBlockGrid(badWidth)).toThrow(/widthMm|lengthMm/i);
+    // S25 pair-fix (QA G11): the LENGTH case was not previously
+    // exercised — only width. The validator branches for lengthMm
+    // are their own defensive check and MUST be covered
+    // independently.
+    const badLength = {
+      footprintMm: { widthMm: 16 * MM_PER_FOOT, lengthMm: 0 as Mm },
+      foundation: TUFFBLOCK_FOUNDATION,
+      beamSpanMaxMm: BEAM_SPAN_MAX_MM,
+      joistSpanMaxMm: JOIST_SPAN_MAX_MM,
+    };
+    expect(() => computeBlockGrid(badLength)).toThrow(/lengthMm/i);
+    // Negative lengthMm — same defensive branch.
+    const negLength = {
+      footprintMm: { widthMm: 16 * MM_PER_FOOT, lengthMm: -1 as Mm },
+      foundation: TUFFBLOCK_FOUNDATION,
+      beamSpanMaxMm: BEAM_SPAN_MAX_MM,
+      joistSpanMaxMm: JOIST_SPAN_MAX_MM,
+    };
+    expect(() => computeBlockGrid(negLength)).toThrow(/lengthMm/i);
   });
 });
 

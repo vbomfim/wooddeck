@@ -596,3 +596,146 @@ describe('deserialize — AC5 valid structure × foundation combos round-trip', 
     expect(design.foundation.type).toBe('tuffblocks');
   });
 });
+
+// ---------------------------------------------------------------------------
+// S25 pair-fix (Security#2 / GPT MED#3+#4 / Opus LOW#6 / QA G8):
+// schema tightening on the optional `blockRowsHint` /
+// `blockColsHint` fields introduced by S25.
+//
+//   - `type: integer` + `minimum: 2` (mirrors the AC4 perimeter-two
+//     lower bound the runtime clamp enforces).
+//   - `maximum: 100` — a generous fixed cap well above any
+//     physically-sensible grid; the runtime density clamp
+//     (MIN_BLOCK_SPACING_MM = 300 mm) reduces this further per
+//     deck length, so 100 is the schema-level "not-obviously-
+//     hostile" bound.
+//
+// The tightening reduces the persisted-file trust boundary:
+// pre-fix, a `.deck` file could smuggle `blockRowsHint: -1` or
+// `blockRowsHint: "3"` past Ajv → apply-parameters accepted the
+// bogus subtree → the layout silently clamped, but the persisted
+// design still carried garbage. Now the load-time Ajv rejection
+// catches it.
+// ---------------------------------------------------------------------------
+
+describe('deserialize — S25 blockRowsHint schema tightening', () => {
+  const HINT_OPTS = {
+    createdAt: '2026-07-04T00:00:00.000Z',
+    generatorVersion: '1.0.0',
+  } as const;
+
+  function floatingTuffWithHint(overrides: Record<string, unknown>): string {
+    // Serialize a valid floating+tuffblocks base then patch the
+    // foundation to inject the hint under test. Bypasses the
+    // domain-type readonly narrowing while keeping the envelope
+    // otherwise-valid.
+    const base = {
+      ...GOLDEN_DECK_DESIGN,
+      structure: 'floating' as const,
+      foundation: {
+        type: 'tuffblocks' as const,
+        product: { productId: 'tuffblock-12x12x4' as const },
+      },
+    };
+    const s = serialize(base, HINT_OPTS);
+    const parsed = JSON.parse(s) as DeckFileV2;
+    const patched = {
+      ...parsed,
+      design: {
+        ...parsed.design,
+        foundation: { ...parsed.design.foundation, ...overrides },
+      },
+    };
+    return JSON.stringify(patched);
+  }
+
+  it('rejects blockRowsHint = 0 (below minimum 2)', () => {
+    const rogue = floatingTuffWithHint({ blockRowsHint: 0 });
+    try {
+      deserialize(rogue);
+      throw new Error('expected DeckFileError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DeckFileError);
+      expect((err as DeckFileError).code).toBe('schema-validation-failed');
+      expect((err as DeckFileError).message).toMatch(/blockRowsHint|minimum/i);
+    }
+  });
+
+  it('rejects blockRowsHint = 1 (below minimum 2)', () => {
+    const rogue = floatingTuffWithHint({ blockRowsHint: 1 });
+    expect(() => deserialize(rogue)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  it('rejects blockRowsHint = 1.5 (non-integer)', () => {
+    const rogue = floatingTuffWithHint({ blockRowsHint: 1.5 });
+    expect(() => deserialize(rogue)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  it('rejects blockRowsHint = "3" (wrong type — string)', () => {
+    const rogue = floatingTuffWithHint({ blockRowsHint: '3' });
+    expect(() => deserialize(rogue)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  it('rejects blockRowsHint = -1 (negative)', () => {
+    const rogue = floatingTuffWithHint({ blockRowsHint: -1 });
+    expect(() => deserialize(rogue)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  it('rejects blockRowsHint = 101 (above maximum 100)', () => {
+    const rogue = floatingTuffWithHint({ blockRowsHint: 101 });
+    expect(() => deserialize(rogue)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  it('rejects blockColsHint = 0 (mirrors the row-hint bounds)', () => {
+    const rogue = floatingTuffWithHint({ blockColsHint: 0 });
+    expect(() => deserialize(rogue)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  // QA G8: round-trip a floating tuffblock design carrying a valid
+  // `blockRowsHint: 3` — serialize → deserialize → deep-equal
+  // original. This is the "the legitimate write path still works"
+  // proof.
+  it('QA G8 round-trip: floating + tuffblocks with blockRowsHint = 3 deep-equals the original', () => {
+    const withHint = {
+      ...GOLDEN_DECK_DESIGN,
+      structure: 'floating' as const,
+      foundation: {
+        type: 'tuffblocks' as const,
+        product: { productId: 'tuffblock-12x12x4' as const },
+        blockRowsHint: 3,
+      },
+    };
+    const json = serialize(withHint, HINT_OPTS);
+    const { design, migrated } = deserialize(json);
+    expect(migrated).toBe(false);
+    // The round-tripped foundation MUST carry the hint verbatim.
+    expect(design.foundation).toEqual(withHint.foundation);
+  });
+
+  it('QA G8 round-trip: valid blockColsHint = 2 preserved end-to-end', () => {
+    const withColsHint = {
+      ...GOLDEN_DECK_DESIGN,
+      structure: 'floating' as const,
+      foundation: {
+        type: 'tuffblocks' as const,
+        product: { productId: 'tuffblock-12x12x4' as const },
+        blockColsHint: 2,
+      },
+    };
+    const json = serialize(withColsHint, HINT_OPTS);
+    const { design } = deserialize(json);
+    expect(design.foundation).toEqual(withColsHint.foundation);
+  });
+});

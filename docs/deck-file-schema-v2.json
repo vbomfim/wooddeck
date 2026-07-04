@@ -125,14 +125,16 @@
         "type": { "type": "string", "const": "deck-blocks" },
         "product": { "$ref": "#/$defs/FoundationBlockRef" },
         "blockRowsHint": {
-          "description": "S25 (ticket #47) — OPTIONAL override for the derived block-row count under a floating deck. Dimensionless positive integer; clamped by the layout engine to [2, floor(lengthMm / MIN_BLOCK_SPACING_MM) + 1]. Omit for the S19 derivation (byte-identical to pre-S25).",
+          "description": "S25 (ticket #47) — OPTIONAL override for the derived block-row count under a floating deck. Dimensionless positive integer; the runtime layout clamps to [2, floor(lengthMm / MIN_BLOCK_SPACING_MM) + 1]. minimum=2 mirrors the perimeter-two AC4 lower bound; maximum=100 is a generous fixed ceiling well above any physically-sensible grid (a 100-row grid on a 40 ft deck yields ~120 mm block spacing, below the 300 mm runtime density cap — the runtime clamp will reject it further). Omit for the S19 derivation (byte-identical to pre-S25).",
           "type": "integer",
-          "minimum": 0
+          "minimum": 2,
+          "maximum": 100
         },
         "blockColsHint": {
-          "description": "S25 (ticket #47) — OPTIONAL override for the derived block-column count under a floating deck. Dimensionless positive integer; clamped by the layout engine to [2, floor(widthMm / MIN_BLOCK_SPACING_MM) + 1]. Omit for the S19 derivation.",
+          "description": "S25 (ticket #47) — OPTIONAL override for the derived block-column count under a floating deck. Dimensionless positive integer; the runtime layout clamps to [2, floor(widthMm / MIN_BLOCK_SPACING_MM) + 1]. See blockRowsHint for the bounds rationale. Omit for the S19 derivation.",
           "type": "integer",
-          "minimum": 0
+          "minimum": 2,
+          "maximum": 100
         }
       }
     },
@@ -144,14 +146,16 @@
         "type": { "type": "string", "const": "tuffblocks" },
         "product": { "$ref": "#/$defs/FoundationBlockRef" },
         "blockRowsHint": {
-          "description": "S25 (ticket #47) — OPTIONAL override for the derived block-row count under a floating deck. Dimensionless positive integer; clamped by the layout engine to [2, floor(lengthMm / MIN_BLOCK_SPACING_MM) + 1]. Omit for the S19 derivation (byte-identical to pre-S25).",
+          "description": "S25 (ticket #47) — OPTIONAL override for the derived block-row count under a floating deck. Dimensionless positive integer; the runtime layout clamps to [2, floor(lengthMm / MIN_BLOCK_SPACING_MM) + 1]. minimum=2 mirrors the perimeter-two AC4 lower bound; maximum=100 is a generous fixed ceiling well above any physically-sensible grid. Omit for the S19 derivation (byte-identical to pre-S25).",
           "type": "integer",
-          "minimum": 0
+          "minimum": 2,
+          "maximum": 100
         },
         "blockColsHint": {
-          "description": "S25 (ticket #47) — OPTIONAL override for the derived block-column count under a floating deck. Dimensionless positive integer; clamped by the layout engine to [2, floor(widthMm / MIN_BLOCK_SPACING_MM) + 1]. Omit for the S19 derivation.",
+          "description": "S25 (ticket #47) — OPTIONAL override for the derived block-column count under a floating deck. Dimensionless positive integer; the runtime layout clamps to [2, floor(widthMm / MIN_BLOCK_SPACING_MM) + 1]. See blockRowsHint for the bounds rationale. Omit for the S19 derivation.",
           "type": "integer",
-          "minimum": 0
+          "minimum": 2,
+          "maximum": 100
         }
       }
     },

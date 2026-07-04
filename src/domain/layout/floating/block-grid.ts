@@ -203,6 +203,17 @@ export function computeBlockGrid(input: BlockGridInput): readonly LayoutMember[]
  * Otherwise fall back to the S19 derivation
  * `ceil(spanMm / maxSpacingMm) + 1`.
  *
+ * ## Public surface (S25 pair-fix)
+ *
+ * Exported so `domain/spans/remediations.ts::deriveCurrentRows`
+ * can mirror the actual layout clamp when computing the base row
+ * count for the `add-support-row` remediation — without this, a
+ * `blockRowsHint: 0` (or any out-of-range value) would compute
+ * `currentRows = 0` but the real layout produces 2 rows, and the
+ * remediation would mislabel/no-op the fix. Direct-file import
+ * from `spans → block-grid` is cycle-safe: this module imports
+ * ZERO span modules.
+ *
  * ## Clamp bounds
  *
  *   - Lower bound 2: a grid with a single row/column collapses the
@@ -223,8 +234,17 @@ export function computeBlockGrid(input: BlockGridInput): readonly LayoutMember[]
  * are rounded down (via `Math.floor`) before clamping — the block
  * grid is a count, not a continuous quantity. `NaN` / non-finite
  * values are treated as "no hint" and fall through to the derivation.
+ *
+ * ## Range-safe clamp (S25 pair-fix / Opus LOW#7)
+ *
+ * The clamp uses `Math.max(2, Math.min(asInt, maxCount))` so a
+ * pathologically tiny `spanMm` (below `MIN_BLOCK_SPACING_MM`) that
+ * yields `maxCount = 1 < 2` still returns 2 — the perimeter-two
+ * lower bound wins over the upper bound. `validateInput` already
+ * rejects `spanMm ≤ 0`, so this is defence-in-depth for the
+ * edge of the legal range.
  */
-function resolveGridCount(
+export function resolveGridCount(
   hint: number | undefined,
   spanMm: Mm,
   maxSpacingMm: Mm,
@@ -234,9 +254,7 @@ function resolveGridCount(
   }
   const maxCount = Math.floor(spanMm / MIN_BLOCK_SPACING_MM) + 1;
   const asInt = Math.floor(hint);
-  if (asInt < 2) return 2;
-  if (asInt > maxCount) return maxCount;
-  return asInt;
+  return Math.max(2, Math.min(asInt, maxCount));
 }
 
 /**

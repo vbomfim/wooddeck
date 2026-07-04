@@ -162,11 +162,19 @@ const FOUNDATION_VARIANT_FIELDS: Readonly<
   },
   'deck-blocks': {
     required: ['type', 'product'],
-    allowed: ['type', 'product'],
+    // S25 pair-fix (Security#2 / GPT MED#3): include the optional
+    // `blockRowsHint` / `blockColsHint` fields so a malformed hint
+    // is reported as its actual schema violation (e.g. "must be
+    // integer >= 2") rather than the noisier "unknown field" from
+    // an incomplete allowlist. The fields are OPTIONAL — omitted
+    // from `required` — but MUST appear in `allowed` for the
+    // error-filter to recognize a legitimate presence.
+    allowed: ['type', 'product', 'blockRowsHint', 'blockColsHint'],
   },
   tuffblocks: {
     required: ['type', 'product'],
-    allowed: ['type', 'product'],
+    // S25 pair-fix — see `deck-blocks` above.
+    allowed: ['type', 'product', 'blockRowsHint', 'blockColsHint'],
   },
 };
 
