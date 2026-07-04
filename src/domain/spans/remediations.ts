@@ -78,8 +78,13 @@
  *     3. change-joist-species   (largest — supply-chain shift)
  *
  *   over-span-beam:
- *     1. upgrade-beam-size      (medium)
- *     2. change-beam-species    (largest)
+ *     1. add-support-row        (S25 / FR-032 — floating decks only;
+ *                                elevated decks surface a DISABLED
+ *                                option with a "switch to floating"
+ *                                alternative reason. Cheapest — no
+ *                                material change.)
+ *     2. upgrade-beam-size      (medium)
+ *     3. change-beam-species    (largest)
  *
  * (No `reduce-beam-spacing` — beams have no user-facing spacing
  * knob in MVP; the beam count is derived by the layout engine.)
@@ -150,6 +155,19 @@ import type {
 import type { Mm } from '../units';
 
 import type { SpanTable } from './span-table';
+// S25 (ticket #47) — import the block-grid clamp floor + resolver
+// DIRECTLY from the layout file (NOT the `../layout` barrel).
+// Rationale: the barrel re-exports `floating-layout.ts`, which
+// imports from `../spans/irc-2018-tables` — pulling the barrel
+// here would create a spans↔layout file cycle (dep-cruiser
+// `no-circular` blocks it). `block-grid.ts` imports zero span
+// modules, so the direct file edge is cycle-free.
+//
+// `resolveGridCount` is reused inside `deriveCurrentRows` so the
+// remediation's `currentRows` always mirrors what the actual
+// layout produces (S25 pair-fix / GPT HIGH#2 / Opus LOW#5) — no
+// duplicated clamp math to drift.
+import { MIN_BLOCK_SPACING_MM, resolveGridCount } from '../layout/floating/block-grid';
 
 // ==========================================================
 // Public shape (frozen — ticket §2 Interface Contract)
@@ -168,7 +186,8 @@ export type RemediationKind =
   | 'upgrade-joist-size'
   | 'upgrade-beam-size'
   | 'change-joist-species'
-  | 'change-beam-species';
+  | 'change-beam-species'
+  | 'add-support-row';
 
 /**
  * Discriminated-union describing WHAT to change. The state layer
@@ -183,7 +202,26 @@ export type RemediationPatch =
   | { readonly kind: 'upgrade-joist-size'; readonly newNominal: LumberNominal }
   | { readonly kind: 'upgrade-beam-size'; readonly newNominal: LumberNominal }
   | { readonly kind: 'change-joist-species'; readonly newSpecies: Species }
-  | { readonly kind: 'change-beam-species'; readonly newSpecies: Species };
+  | { readonly kind: 'change-beam-species'; readonly newSpecies: Species }
+  | {
+      /**
+       * S25 (ticket #47) — add a row of foundation blocks under
+       * the beam(s) of a FLOATING deck. Semantically: bump
+       * `foundation.blockRowsHint` from `currentRows` to
+       * `proposedRows` (typically `currentRows + 1`). Applies only
+       * when `design.structure === 'floating'` and
+       * `design.foundation.type ∈ {'deck-blocks','tuffblocks'}`.
+       *
+       * `targetBeamId` names the beam warning that motivated the
+       * remediation — the UI can use it to highlight the affected
+       * beam in the 3D scene. `currentRows` / `proposedRows` are
+       * ROW COUNTS (dimensionless integers), NOT spacings.
+       */
+      readonly kind: 'add-support-row';
+      readonly targetBeamId: string;
+      readonly currentRows: number;
+      readonly proposedRows: number;
+    };
 
 export interface RemediationOption {
   /** The remediation kind (matches `patch.kind`). */
@@ -417,6 +455,26 @@ function applyPatchForVerification(
           ),
         },
       };
+    case 'add-support-row': {
+      // S25 (ticket #47) — bump the block-row hint on the design's
+      // block foundation. Only meaningful for
+      // `deck-blocks`/`tuffblocks`; a `posts-on-footings` foundation
+      // is not proposed by `produceAddSupportRow`, so this branch
+      // is unreachable for that variant (guarded here too so a
+      // future caller passing a synthetic patch on a
+      // `posts-on-footings` design gets a stable no-op rather than
+      // a corrupted design).
+      if (design.foundation.type === 'posts-on-footings') {
+        return design;
+      }
+      return {
+        ...design,
+        foundation: {
+          ...design.foundation,
+          blockRowsHint: patch.proposedRows,
+        },
+      };
+    }
     /* c8 ignore next 5 */
     default: {
       const _exhaustive: never = patch;
@@ -560,6 +618,8 @@ function disabledReasonForNoClear(kind: RemediationKind): string {
       return 'No structurally-rated species swap clears the over-span.';
     case 'change-beam-species':
       return 'No structurally-rated species swap clears the over-span.';
+    case 'add-support-row':
+      return 'Adding another row of blocks does not clear the over-span at the maximum block density.';
     /* c8 ignore next 5 */
     default: {
       const _exhaustive: never = kind;
@@ -1031,6 +1091,302 @@ function produceChangeBeamSpecies(
 }
 
 // ==========================================================
+// Add-support-row remediation producer (S25 — ticket #47)
+// ==========================================================
+
+/**
+ * Sentinel placeholder patch counts for disabled add-support-row
+ * options where the current/proposed row count is not meaningful
+ * (elevated designs — no block grid at all; SpanTable fail-safe
+ * — cannot derive the base). Uses the perimeter-minimum (2) as a
+ * schema-safe filler so the discriminated-union `patch` remains
+ * structurally valid; consumers rendering the option MUST route
+ * through `option.summary` (not the `patch.currentRows` /
+ * `patch.proposedRows` numbers) — see `ui/warnings/
+ * remediation-labels.ts` `headlineFor` add-support-row branch.
+ */
+const ADD_SUPPORT_ROW_PLACEHOLDER_ROWS = 2 as const;
+
+/**
+ * Build a disabled `add-support-row` option whose row-count
+ * numbers are meaningless (elevated / cannot-determine cases).
+ * The `summary` is the disabled-safe label the UI renders as the
+ * headline; the disabled `reason` carries the specific
+ * explanation. Extracted so the elevated + fail-safe branches
+ * share ONE presentation shape.
+ */
+function makeDisabledAddSupportRowNoRowCount(input: {
+  readonly warning: Warning;
+  readonly disabledReason: string;
+}): RemediationOption {
+  return {
+    kind: 'add-support-row',
+    memberId: input.warning.memberId,
+    patch: {
+      kind: 'add-support-row',
+      targetBeamId: input.warning.memberId,
+      currentRows: ADD_SUPPORT_ROW_PLACEHOLDER_ROWS,
+      proposedRows: ADD_SUPPORT_ROW_PLACEHOLDER_ROWS,
+    },
+    // The summary is rendered as the headline by
+    // `remediation-labels.ts` for disabled add-support-row options
+    // (whose currentRows/proposedRows placeholders would otherwise
+    // build a contradictory "N → M" arrow). Read it as if it were
+    // the button label.
+    summary: 'Add a support row',
+    currentAllowableMm: input.warning.allowableMm,
+    newAllowableMm: 0,
+    actualSpanMm: input.warning.actualMm,
+    wouldClear: false,
+    disabled: true,
+    disabledReason: input.disabledReason,
+  };
+}
+
+/**
+ * FLOATING-only foundation-level remediation. Densifies the
+ * block grid under the beam(s) by ONE row (rows +z) — cheapest
+ * possible fix because it changes NO framing SKU. Only proposed
+ * when:
+ *
+ *   1. Warning kind is `over-span-beam` (this producer is not
+ *      called for joist warnings — see `computeRemediations`).
+ *   2. `design.structure === 'floating'`.
+ *   3. `design.foundation.type ∈ {'deck-blocks','tuffblocks'}`.
+ *
+ * When condition 1 or 3 fails, we return `null` — the remediation
+ * KIND is structurally not modelable on this design (a joist
+ * warning, or a posts-on-footings foundation with no block grid
+ * at all).
+ *
+ * When condition 2 fails (`structure === 'elevated'`), FR-032
+ * requires the option to be DISABLED with a reason that surfaces
+ * the alternative (post-MVP: `structure = 'elevated'` will get an
+ * intermediate-beam remediation tracked separately). Omitting the
+ * option entirely would leave the user unaware of the alternative,
+ * violating FR-032's "MUST surface the alternative" clause.
+ *
+ * When the grid CANNOT densify any further (adjacent-block gap at
+ * the proposed row count would drop below `MIN_BLOCK_SPACING_MM`),
+ * a disabled option surfaces with an explicit reason — AC4 in the
+ * module header: never silently omit a KIND we model.
+ *
+ * ## `currentRows` derivation
+ *
+ * See `deriveCurrentRows` — mirrors `computeBlockGrid`'s
+ * `resolveGridCount` clamp so the reported base count matches
+ * what the actual layout produces (S25 pair-fix: previously the
+ * derivation returned the raw hint, mislabeling `blockRowsHint:0`
+ * as "currentRows=0 → proposed=1" when the real layout produced
+ * 2 rows).
+ *
+ * If the SpanTable returns 0 (fail-safe from an unknown SKU),
+ * we surface a disabled option with a reason — we cannot recommend
+ * densifying a grid whose base row count we can't establish.
+ *
+ * @returns `RemediationOption` if applicable (enabled OR disabled
+ *   with reason), `null` if the remediation KIND doesn't apply
+ *   (joist warning or posts-on-footings foundation).
+ */
+function produceAddSupportRow(
+  warning: Warning,
+  design: DeckDesign,
+  table: SpanTable,
+  recompute: (design: DeckDesign) => readonly Warning[],
+): RemediationOption | null {
+  // KIND-applicability guard — joist warnings have no block-row
+  // remediation semantically, so we return null (the KIND isn't
+  // modelled for that warning).
+  if (warning.kind !== 'over-span-beam') return null;
+
+  // FR-032 elevated clause (S25 pair-fix / Opus HIGH#1): every
+  // elevated design gets a DISABLED option with a reason that
+  // surfaces the alternative construction MODEL. This runs
+  // BEFORE the foundation-type guard so ALL elevated designs
+  // (posts-on-footings AND deck-blocks per FR-030) receive the
+  // same actionable hint — the user must learn about the
+  // alternative regardless of which valid elevated variant they
+  // chose. The intermediate-beam variant for elevated is
+  // deferred post-MVP (ticket #47 §16 Q7).
+  if (design.structure !== 'floating') {
+    return makeDisabledAddSupportRowNoRowCount({
+      warning,
+      disabledReason:
+        'Switch to Floating construction to enable intermediate support rows.',
+    });
+  }
+
+  // Floating + a non-block foundation is INVALID per FR-030 and
+  // should have been rejected at the apply-parameters boundary
+  // (compat-matrix). If we somehow reach here, return null — this
+  // KIND is not modelable on an incoherent design and we cannot
+  // synthesize a meaningful hint.
+  if (
+    design.foundation.type !== 'deck-blocks' &&
+    design.foundation.type !== 'tuffblocks'
+  ) {
+    return null;
+  }
+
+  const { lengthMm } = design.footprint;
+
+  // Derive `currentRows` — see doc-block above.
+  const currentRows = deriveCurrentRows(design, table);
+  if (currentRows === null) {
+    // We couldn't establish the current row count (SpanTable
+    // fail-safe hit for the joist SKU). Surface a disabled option
+    // — never silently omit. Placeholder rows are marked so the
+    // UI does not render a contradictory (N → M) arrow.
+    return makeDisabledAddSupportRowNoRowCount({
+      warning,
+      disabledReason:
+        'Cannot determine the current block row count for this design.',
+    });
+  }
+
+  const proposedRows = currentRows + 1;
+
+  // Densification cap: adjacent-block gap at `proposedRows` must
+  // stay ≥ MIN_BLOCK_SPACING_MM. Gap = lengthMm / (proposedRows−1).
+  const proposedGapMm = lengthMm / (proposedRows - 1);
+  if (proposedGapMm < MIN_BLOCK_SPACING_MM) {
+    return {
+      kind: 'add-support-row',
+      memberId: warning.memberId,
+      patch: {
+        kind: 'add-support-row',
+        targetBeamId: warning.memberId,
+        currentRows,
+        proposedRows,
+      },
+      summary: 'Add a row of blocks (disabled)',
+      currentAllowableMm: warning.allowableMm,
+      newAllowableMm: 0,
+      actualSpanMm: warning.actualMm,
+      wouldClear: false,
+      disabled: true,
+      disabledReason:
+        `Adding another row would place blocks less than ` +
+        `${MIN_BLOCK_SPACING_MM} mm apart along the deck length.`,
+    };
+  }
+
+  const patch: RemediationPatch = {
+    kind: 'add-support-row',
+    targetBeamId: warning.memberId,
+    currentRows,
+    proposedRows,
+  };
+  const verify = verifyPatchClears(warning, design, patch, recompute);
+
+  if (verify.invalidPatch) {
+    return {
+      kind: 'add-support-row',
+      memberId: warning.memberId,
+      patch,
+      summary: 'Add a row of blocks (disabled)',
+      currentAllowableMm: warning.allowableMm,
+      newAllowableMm: 0,
+      actualSpanMm: warning.actualMm,
+      wouldClear: false,
+      disabled: true,
+      disabledReason:
+        'Adding a row of blocks would produce an invalid design.',
+    };
+  }
+
+  if (verify.wouldClear) {
+    // Display estimate for `newAllowableMm`: the new beam post-to-
+    // post span equals `actualMm × (currentRows−1) / (proposedRows−1)`.
+    // (Same block-to-block gap ratio.) That's the "beam span the
+    // grid would produce" — used only for the "was X → now Y" label.
+    const newBeamSpanMm =
+      (warning.actualMm * (currentRows - 1)) / (proposedRows - 1);
+    return makeOption({
+      kind: 'add-support-row',
+      memberId: warning.memberId,
+      patch,
+      summary: `Add a row of blocks (${currentRows} → ${proposedRows})`,
+      currentAllowableMm: warning.allowableMm,
+      // The allowable didn't change (same beam SKU); what changed
+      // is the ACTUAL span the beam has to carry. Report the new
+      // actual span as the "newAllowable" so the label reads
+      // sensibly (actual now = X, allowable stayed the same,
+      // wouldClear because X < allowable).
+      newAllowableMm: warning.allowableMm,
+      actualSpanMm: newBeamSpanMm,
+    });
+  }
+
+  return {
+    kind: 'add-support-row',
+    memberId: warning.memberId,
+    patch,
+    summary: `Add a row of blocks (${currentRows} → ${proposedRows})`,
+    currentAllowableMm: warning.allowableMm,
+    newAllowableMm: verify.newAllowableMm ?? 0,
+    actualSpanMm: warning.actualMm,
+    wouldClear: false,
+    disabled: true,
+    disabledReason: disabledReasonForNoClear('add-support-row'),
+  };
+}
+
+/**
+ * Derive the current block-row count for a FLOATING deck. Returns
+ * `null` when the row count can't be established (SpanTable
+ * fail-safe hit — unknown SKU / Composite grade).
+ *
+ * Mirrors `computeBlockGrid`'s row derivation by CALLING the
+ * exported `resolveGridCount` from `block-grid.ts` — so a
+ * `blockRowsHint` of 0, 1, negative, or above the density cap
+ * produces the SAME clamped count the actual layout produces.
+ * Before the S25 pair-fix (GPT HIGH#2), this function returned
+ * the raw hint verbatim, causing `blockRowsHint: 0` to compute
+ * `currentRows = 0 → proposed = 1` while the real layout produced
+ * 2 rows — the option would mislabel or no-op the fix. Now the
+ * derivation is single-source; a future change to the clamp math
+ * ripples here automatically.
+ *
+ * When `blockRowsHint` is undefined, we fall back to the S19
+ * derivation `ceil(lengthMm / joistSpanMaxMm) + 1`, computed here
+ * via `resolveGridCount(undefined, lengthMm, joistSpanMaxMm)`.
+ * `joistSpanMaxMm` is looked up via the SAME `SpanTable` the
+ * recompute uses, so the derivation stays in sync with the layout.
+ */
+function deriveCurrentRows(
+  design: DeckDesign,
+  table: SpanTable,
+): number | null {
+  // Only meaningful for floating + block foundations; caller
+  // guards this, but a stray call would be a defect — keep the
+  // check for defence-in-depth.
+  if (design.structure !== 'floating') return null;
+  if (
+    design.foundation.type !== 'deck-blocks' &&
+    design.foundation.type !== 'tuffblocks'
+  ) {
+    return null;
+  }
+  const joistSpanMaxMm = table.lookupJoistMaxSpan(
+    design.joist.material,
+    design.joist.spacingMm,
+  );
+  if (!Number.isFinite(joistSpanMaxMm) || joistSpanMaxMm <= 0) {
+    // Table fail-safe hit; without a joistSpanMaxMm the derivation
+    // fallback path (`ceil(lengthMm / joistSpanMaxMm) + 1`) would
+    // divide by zero / return Infinity. Report null so the caller
+    // surfaces a disabled option instead of guessing.
+    return null;
+  }
+  return resolveGridCount(
+    design.foundation.blockRowsHint,
+    design.footprint.lengthMm,
+    joistSpanMaxMm,
+  );
+}
+
+// ==========================================================
 // Public entry point
 // ==========================================================
 
@@ -1072,7 +1428,24 @@ export function computeRemediations(
     ];
   }
   if (warning.kind === 'over-span-beam') {
+    // S25 (ticket #47 + pair-fix) — `produceAddSupportRow` returns
+    // `null` only when the remediation KIND is structurally not
+    // modelable on THIS design (joist warning routed by mistake,
+    // OR floating + posts-on-footings — an FR-030-invalid combo
+    // that should have been rejected at load / apply-parameters).
+    // For every other case (including `structure = 'elevated'`,
+    // which returns a DISABLED option with the FR-032 alternative
+    // reason), the option is surfaced. Drop the null slot rather
+    // than reserve an empty position — the option list is
+    // presented as an ordered sequence in the UI, so a `null`
+    // there would render an odd gap.
+    const addSupport = produceAddSupportRow(warning, design, table, recompute);
     return [
+      // Order per ticket AC8: add-support-row first (cheapest,
+      // no material change — even when disabled, the user learns
+      // about the alternative before scanning framing-swap
+      // options), then framing size, then species.
+      ...(addSupport ? [addSupport] : []),
       produceUpgradeBeamSize(warning, design, table, recompute),
       produceChangeBeamSpecies(warning, design, table, recompute),
     ];

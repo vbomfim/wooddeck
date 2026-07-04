@@ -356,5 +356,187 @@ describe('computeBlockGrid — trust-boundary defensive checks', () => {
       joistSpanMaxMm: JOIST_SPAN_MAX_MM,
     };
     expect(() => computeBlockGrid(badWidth)).toThrow(/widthMm|lengthMm/i);
+    // S25 pair-fix (QA G11): the LENGTH case was not previously
+    // exercised — only width. The validator branches for lengthMm
+    // are their own defensive check and MUST be covered
+    // independently.
+    const badLength = {
+      footprintMm: { widthMm: 16 * MM_PER_FOOT, lengthMm: 0 as Mm },
+      foundation: TUFFBLOCK_FOUNDATION,
+      beamSpanMaxMm: BEAM_SPAN_MAX_MM,
+      joistSpanMaxMm: JOIST_SPAN_MAX_MM,
+    };
+    expect(() => computeBlockGrid(badLength)).toThrow(/lengthMm/i);
+    // Negative lengthMm — same defensive branch.
+    const negLength = {
+      footprintMm: { widthMm: 16 * MM_PER_FOOT, lengthMm: -1 as Mm },
+      foundation: TUFFBLOCK_FOUNDATION,
+      beamSpanMaxMm: BEAM_SPAN_MAX_MM,
+      joistSpanMaxMm: JOIST_SPAN_MAX_MM,
+    };
+    expect(() => computeBlockGrid(negLength)).toThrow(/lengthMm/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S25 — foundation.blockRowsHint / .blockColsHint override the derived grid
+//
+// Ticket #47 AC3: "Given foundation.blockRowsHint = 5, When
+// computeBlockGrid runs on a footprint that would otherwise derive 3
+// rows, Then 5 rows are produced. Beams count matches (5 rows → 5
+// beams for the width axis)."
+//
+// AC4: the hint is clamped to a safe range —
+//   min = 2 (perimeter minimum)
+//   max = floor(spanMm / MIN_BLOCK_SPACING_MM) + 1
+// so a nonsense hint like 100 on a 12 ft deck does not spawn an
+// absurd grid (12 ft = 3657.6 mm; MIN_BLOCK_SPACING_MM = 300 mm;
+// max = floor(3657.6/300) + 1 = 13). AC4 is FLOOR-and-add-one so
+// the max spacing between adjacent centers stays ≥ MIN_BLOCK_SPACING_MM
+// (adjacent gap = spanMm / (count - 1)).
+//
+// The undefined-hint default behavior (S19 pre-S25 numbers) MUST
+// stay byte-identical — see the "undefined hint" test below.
+// ---------------------------------------------------------------------------
+
+describe('computeBlockGrid — S25 foundation.blockRowsHint honored', () => {
+  it('AC3 — blockRowsHint = 5 overrides the derived row count on a footprint that would derive 8 rows', () => {
+    // Reference 16 ft × 14 ft with the AC10 defaults derives
+    // 3 cols × 8 rows = 24 blocks (existing test). Setting the
+    // hint to 5 must produce 3 × 5 = 15 blocks instead.
+    const footprintMm = { widthMm: 16 * MM_PER_FOOT, lengthMm: 14 * MM_PER_FOOT };
+    const foundation: Extract<
+      FoundationSpec,
+      { type: 'deck-blocks' | 'tuffblocks' }
+    > = { ...TUFFBLOCK_FOUNDATION, blockRowsHint: 5 };
+    const blocks = computeBlockGrid({
+      footprintMm,
+      foundation,
+      beamSpanMaxMm: BEAM_SPAN_MAX_MM,
+      joistSpanMaxMm: JOIST_SPAN_MAX_MM,
+    });
+    const uniqueZs = new Set(blocks.map((b) => b.position.z));
+    expect(uniqueZs.size).toBe(5);
+    // Cols unchanged (blockColsHint not set).
+    const uniqueXs = new Set(blocks.map((b) => b.position.x));
+    expect(uniqueXs.size).toBe(3);
+    expect(blocks.length).toBe(3 * 5);
+    // Outer rows still flush at ±lengthMm/2.
+    expect(uniqueZs.has(-footprintMm.lengthMm / 2)).toBe(true);
+    expect(uniqueZs.has(+footprintMm.lengthMm / 2)).toBe(true);
+  });
+
+  it('AC3 — blockRowsHint smaller than the derived count wins (2 rows on a 14 ft deck)', () => {
+    // 14 ft length → derivation yields 8 rows. Hint = 2 → 2 rows.
+    const footprintMm = { widthMm: 16 * MM_PER_FOOT, lengthMm: 14 * MM_PER_FOOT };
+    const foundation: Extract<
+      FoundationSpec,
+      { type: 'deck-blocks' | 'tuffblocks' }
+    > = { ...TUFFBLOCK_FOUNDATION, blockRowsHint: 2 };
+    const blocks = computeBlockGrid({
+      footprintMm,
+      foundation,
+      beamSpanMaxMm: BEAM_SPAN_MAX_MM,
+      joistSpanMaxMm: JOIST_SPAN_MAX_MM,
+    });
+    const uniqueZs = new Set(blocks.map((b) => b.position.z));
+    expect(uniqueZs.size).toBe(2);
+    // Only two z anchors — the ±lengthMm/2 outer positions.
+    expect([...uniqueZs].sort((a, b) => a - b)).toEqual([
+      -footprintMm.lengthMm / 2,
+      +footprintMm.lengthMm / 2,
+    ]);
+  });
+
+  it('AC4 — hint below 2 is clamped to 2 (perimeter minimum)', () => {
+    // 1 row is a degenerate grid (a single line of blocks under one
+    // beam-line). Clamp to 2 — outer blocks flush at the edges.
+    const footprintMm = { widthMm: 16 * MM_PER_FOOT, lengthMm: 14 * MM_PER_FOOT };
+    for (const hint of [0, 1, -3]) {
+      const foundation: Extract<
+        FoundationSpec,
+        { type: 'deck-blocks' | 'tuffblocks' }
+      > = { ...TUFFBLOCK_FOUNDATION, blockRowsHint: hint };
+      const blocks = computeBlockGrid({
+        footprintMm,
+        foundation,
+        beamSpanMaxMm: BEAM_SPAN_MAX_MM,
+        joistSpanMaxMm: JOIST_SPAN_MAX_MM,
+      });
+      const uniqueZs = new Set(blocks.map((b) => b.position.z));
+      expect(uniqueZs.size).toBe(2);
+    }
+  });
+
+  it('AC4 — hint above (floor(lengthMm / MIN_BLOCK_SPACING_MM) + 1) is clamped', () => {
+    // 12 ft length = 3657.6 mm; MIN_BLOCK_SPACING_MM = 300 mm;
+    // max = floor(3657.6 / 300) + 1 = 12 + 1 = 13. Hint = 100 →
+    // clamped to 13. Adjacent gap = 3657.6 / 12 = 304.8 mm ≥ 300 mm.
+    const footprintMm = { widthMm: 16 * MM_PER_FOOT, lengthMm: 12 * MM_PER_FOOT };
+    const foundation: Extract<
+      FoundationSpec,
+      { type: 'deck-blocks' | 'tuffblocks' }
+    > = { ...TUFFBLOCK_FOUNDATION, blockRowsHint: 100 };
+    const blocks = computeBlockGrid({
+      footprintMm,
+      foundation,
+      beamSpanMaxMm: BEAM_SPAN_MAX_MM,
+      joistSpanMaxMm: JOIST_SPAN_MAX_MM,
+    });
+    const uniqueZs = new Set(blocks.map((b) => b.position.z));
+    expect(uniqueZs.size).toBe(13);
+    // Adjacent gap check — the clamp is chosen so the gap stays ≥
+    // MIN_BLOCK_SPACING_MM.
+    const zSorted = [...uniqueZs].sort((a, b) => a - b);
+    for (let i = 1; i < zSorted.length; i++) {
+      expect(zSorted[i]! - zSorted[i - 1]!).toBeGreaterThanOrEqual(300 - 1e-6);
+    }
+  });
+
+  it('undefined blockRowsHint preserves the pre-S25 derived count exactly (byte-stability)', () => {
+    // The S19 fixtures + goldens rely on this — a foundation with
+    // no hint field MUST match the pre-S25 derivation exactly.
+    const footprintMm = { widthMm: 16 * MM_PER_FOOT, lengthMm: 14 * MM_PER_FOOT };
+    const withoutHint = computeBlockGrid({
+      footprintMm,
+      foundation: TUFFBLOCK_FOUNDATION,
+      beamSpanMaxMm: BEAM_SPAN_MAX_MM,
+      joistSpanMaxMm: JOIST_SPAN_MAX_MM,
+    });
+    // Existing "AC3 count formulas" test locks 3 × 8 = 24 for this
+    // footprint. Re-assert here as a byte-stability guard.
+    expect(withoutHint.length).toBe(24);
+    // Explicit undefined must behave identically to omission.
+    // `exactOptionalPropertyTypes: true` disallows `{...x:
+    // undefined}` on a `readonly x?: number` slot at compile
+    // time — we go through `unknown` for the intentional
+    // "assert undefined is treated the same as missing" test.
+    const withUndefined = computeBlockGrid({
+      footprintMm,
+      foundation: {
+        ...TUFFBLOCK_FOUNDATION,
+        ...({ blockRowsHint: undefined } as unknown as { blockRowsHint?: number }),
+      },
+      beamSpanMaxMm: BEAM_SPAN_MAX_MM,
+      joistSpanMaxMm: JOIST_SPAN_MAX_MM,
+    });
+    expect(withUndefined).toEqual(withoutHint);
+  });
+
+  it('blockColsHint honored — 4 cols on a footprint that would derive 3', () => {
+    // 16 ft width → derivation gives 3 cols. Hint = 4 → 4 cols.
+    const footprintMm = { widthMm: 16 * MM_PER_FOOT, lengthMm: 14 * MM_PER_FOOT };
+    const foundation: Extract<
+      FoundationSpec,
+      { type: 'deck-blocks' | 'tuffblocks' }
+    > = { ...TUFFBLOCK_FOUNDATION, blockColsHint: 4 };
+    const blocks = computeBlockGrid({
+      footprintMm,
+      foundation,
+      beamSpanMaxMm: BEAM_SPAN_MAX_MM,
+      joistSpanMaxMm: JOIST_SPAN_MAX_MM,
+    });
+    const uniqueXs = new Set(blocks.map((b) => b.position.x));
+    expect(uniqueXs.size).toBe(4);
   });
 });

@@ -87,6 +87,29 @@ function headlineFor(option: RemediationOption, units: UnitSystem): string {
       return `Change joist species to ${formatSpecies(patch.newSpecies)}`;
     case 'change-beam-species':
       return `Change beam species to ${formatSpecies(patch.newSpecies)}`;
+    case 'add-support-row':
+      // S25 pair-fix (Opus MED#4): when the option is disabled,
+      // render `option.summary` instead of building an "N → M"
+      // arrow. Reason: some disabled paths (elevated design,
+      // SpanTable fail-safe) carry PLACEHOLDER
+      // `currentRows`/`proposedRows` because the row count is not
+      // meaningful for those states — the arrow would contradict
+      // the `disabledReason` ("Switch to Floating..." + "(2 → 2)"
+      // reads as broken). For enabled and densification-cap /
+      // no-clear disabled cases, `currentRows` and `proposedRows`
+      // are real, and the arrow is truthful; we could special-case
+      // those, but routing every disabled add-support-row through
+      // the summary keeps the presentation uniformly-safe and the
+      // detail (`disabledReason`) still tells the user the real
+      // reason.
+      if (option.disabled) {
+        return option.summary;
+      }
+      // S25 (ticket #47) — reads as
+      // "Add a row of blocks (3 → 4)". The counts are POSITIONAL
+      // in the sentence (source-of-change → target) so screen
+      // readers and translators keep the order predictable.
+      return `Add a row of blocks (${patch.currentRows} → ${patch.proposedRows})`;
     /* c8 ignore next 6 */
     default: {
       const _exhaustive: never = patch;

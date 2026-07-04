@@ -291,6 +291,14 @@ function optionId(option: RemediationOption): string {
       return `${patch.kind}:${patch.newSpecies}`;
     case 'change-beam-species':
       return `${patch.kind}:${patch.newSpecies}`;
+    case 'add-support-row':
+      // S25 (ticket #47) — proposedRows encodes the "target
+      // state" of the grid. Two `add-support-row` options on
+      // the same warning would have different `proposedRows`
+      // (in practice we only emit one per warning, but the id
+      // still needs to be unique within the group per the
+      // existing convention).
+      return `${patch.kind}:${String(patch.proposedRows)}`;
     /* c8 ignore next 6 */
     default: {
       const _exhaustive: never = patch;

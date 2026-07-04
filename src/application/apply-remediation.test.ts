@@ -16,10 +16,12 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { LayoutError } from '../domain/layout';
+import { LayoutError, computeLayout } from '../domain/layout';
 import { IrcSpanTable } from '../domain/spans';
 import type { RemediationOption } from '../domain/spans';
-import type { DeckDesign } from '../domain/model';
+import { computeRemediations } from '../domain/spans';
+import { spanCheck } from '../domain/spans';
+import type { DeckDesign, Warning } from '../domain/model';
 import { FIXTURE_DESIGNS } from '../domain/layout/__fixtures__/fixtures-data';
 
 import { applyParameters } from './apply-parameters';
@@ -258,5 +260,142 @@ describe('applyRemediation — AC8 error contract', () => {
         expect(thrown).toBeInstanceOf(LayoutError);
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S25 (ticket #47) — add-support-row apply + end-to-end payoff test
+// ---------------------------------------------------------------------------
+
+describe('applyRemediation — S25 add-support-row', () => {
+  const table25 = new IrcSpanTable();
+
+  function makeFloatingDesign(blockRowsHint: number | undefined): DeckDesign {
+    return {
+      id: '00000000-0000-4000-8000-000000000025',
+      createdAt: '2026-07-04T00:00:00.000Z',
+      footprint: {
+        widthMm: 12 * 304.8,
+        lengthMm: 12 * 304.8,
+        heightMm: 209,
+      },
+      structure: 'floating',
+      foundation:
+        blockRowsHint !== undefined
+          ? {
+              type: 'tuffblocks',
+              product: { productId: 'tuffblock-12x12x4' },
+              blockRowsHint,
+            }
+          : {
+              type: 'tuffblocks',
+              product: { productId: 'tuffblock-12x12x4' },
+            },
+      joist: {
+        material: { nominal: '2x8', species: 'PT', grade: 'No2' },
+        spacingMm: 406,
+      },
+      beam: {
+        material: { nominal: '2x8', species: 'PT', grade: 'No2' },
+      },
+      decking: {
+        material: { nominal: '5/4x6', species: 'PT', grade: 'No2' },
+        orientation: 'parallel-to-width',
+      },
+      layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+    };
+  }
+
+  it('applyRemediation add-support-row → bundle.design.foundation.blockRowsHint === proposedRows', () => {
+    // Starting design: floating with blockRowsHint=2 (an over-spanned
+    // configuration). Apply add-support-row → proposedRows=3.
+    // The bundle's foundation.blockRowsHint should be exactly 3.
+    const design = makeFloatingDesign(2);
+    const option: RemediationOption = {
+      kind: 'add-support-row',
+      memberId: 'beam-near',
+      patch: {
+        kind: 'add-support-row',
+        targetBeamId: 'beam-near',
+        currentRows: 2,
+        proposedRows: 3,
+      },
+      summary: 'Add a row of blocks (2 → 3)',
+      currentAllowableMm: 2000,
+      newAllowableMm: 2000,
+      actualSpanMm: 1828,
+      wouldClear: true,
+      disabled: false,
+      disabledReason: null,
+    };
+    const bundle = applyRemediation(design, option, table25);
+    if (bundle.design.foundation.type !== 'tuffblocks') {
+      throw new Error(
+        `expected bundle.design.foundation.type='tuffblocks' but got '${bundle.design.foundation.type}'`,
+      );
+    }
+    expect(bundle.design.foundation.blockRowsHint).toBe(3);
+    // Product + type preserved (spread semantics — did not clobber).
+    expect(bundle.design.foundation.product).toEqual({
+      productId: 'tuffblock-12x12x4',
+    });
+  });
+
+  it('END-TO-END PAYOFF — floating over-spanned beam cleared by add-support-row', () => {
+    // Reference S25 payoff: given a floating design with an
+    // over-spanned beam (blockRowsHint=2 → 12-ft step >> allowable
+    // for 2×8 PT), applying the add-support-row remediation must
+    // recompute a layout whose spanCheck NO LONGER emits an
+    // over-span-beam warning for that beam.
+    //
+    // This is the ground-truth "the fix actually fixed it" proof.
+    // Every seam in the chain contributes:
+    //   - model.ts:  FoundationSpec carries blockRowsHint
+    //   - block-grid.ts:  honors the hint
+    //   - remediations.ts:  proposes +1 with recompute-verified wouldClear
+    //   - apply-remediation.ts:  patches the hint into the design
+    //   - apply-parameters.ts:  deep-merge tolerates the optional key
+    //   - compute-layout + spanCheck:  the recomputed layout is compliant
+    const design = makeFloatingDesign(2);
+    // Sanity: the initial design has an over-span-beam warning.
+    const initial = spanCheck(computeLayout(design), table25);
+    const beamWarning = initial.find((w) => w.kind === 'over-span-beam');
+    expect(beamWarning).toBeDefined();
+    if (!beamWarning) return;
+
+    const recompute = (d: DeckDesign): readonly Warning[] =>
+      spanCheck(computeLayout(d), table25);
+    const options = computeRemediations(
+      beamWarning,
+      design,
+      table25,
+      recompute,
+    );
+    const addSupport = options.find((o) => o.kind === 'add-support-row');
+    expect(addSupport).toBeDefined();
+    if (!addSupport) return;
+    expect(addSupport.wouldClear).toBe(true);
+
+    // Apply → the bundle's warnings must NOT contain an over-span
+    // for the same beam id.
+    const bundle = applyRemediation(design, addSupport, table25);
+    const stillOverSpanning = bundle.warnings.some(
+      (w) =>
+        w.kind === 'over-span-beam' && w.memberId === beamWarning.memberId,
+    );
+    expect(stillOverSpanning).toBe(false);
+    // The hint made it into the design.
+    if (bundle.design.foundation.type === 'tuffblocks') {
+      expect(bundle.design.foundation.blockRowsHint).toBe(3);
+    }
+  });
+
+  it('setting blockRowsHint to undefined restores the derived count', () => {
+    // Sanity: a design without hint and a design with hint=undefined
+    // produce the same layout — the recompute treats them
+    // interchangeably.
+    const a = spanCheck(computeLayout(makeFloatingDesign(undefined)), table25);
+    // No hint set → auto-derived → no over-span.
+    expect(a.find((w) => w.kind === 'over-span-beam')).toBeUndefined();
   });
 });

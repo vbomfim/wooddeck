@@ -250,11 +250,56 @@ export interface FoundationBlockRef {
  *     Carries a reference to the catalog product. Only rated for
  *     ground-level (floating) construction — enforced by
  *     `compat-matrix.ts` (FR-030).
+ *
+ * ## Optional block-grid overrides (S25 / FR-032 — ticket #47)
+ *
+ * The `deck-blocks` / `tuffblocks` variants carry OPTIONAL
+ * `blockRowsHint` / `blockColsHint` fields — dimensionless integers
+ * that override the derived block-grid count under a floating deck.
+ * Semantics:
+ *
+ *   - `blockRowsHint = N` → the floating layout places EXACTLY N
+ *     rows of blocks along +z (deck length axis) under each beam,
+ *     regardless of the natural derivation
+ *     (`ceil(lengthMm / joistSpanMaxMm) + 1`). Clamped by
+ *     `computeBlockGrid` to `[2, floor(lengthMm / MIN_BLOCK_SPACING_MM) + 1]`
+ *     so an out-of-range hint never spawns a degenerate or absurd
+ *     grid.
+ *   - `blockColsHint = M` → same, along +x (deck width axis) —
+ *     mirror override for the beam-column axis.
+ *   - `undefined` → S19 pre-S25 derivation preserved BYTE-IDENTICALLY.
+ *     Every existing golden fixture and layout snapshot is stable
+ *     when the hint is omitted.
+ *
+ * These are the seam the S25 `add-support-row` remediation writes
+ * to when the user clicks "Add a row of blocks (N → N+1)" in the
+ * WarningsPanel — the hint bumps `numRows` by one, which reduces
+ * the beam-to-support span, which clears the over-span-beam
+ * warning that triggered the remediation.
+ *
+ * NOT MEANINGFUL for `posts-on-footings` (the elevated post grid
+ * is derived from beam-count math that has no equivalent "add a
+ * row" degree of freedom in the MVP scope — the elevated variant
+ * of add-support-row is deferred per ticket #47 §16, Q7).
  */
 export type FoundationSpec =
   | { readonly type: 'posts-on-footings'; readonly post: MaterialRef; readonly footing: FootingSpec }
-  | { readonly type: 'deck-blocks'; readonly product: FoundationBlockRef }
-  | { readonly type: 'tuffblocks'; readonly product: FoundationBlockRef };
+  | {
+      readonly type: 'deck-blocks';
+      readonly product: FoundationBlockRef;
+      /** S25: override for the derived block-row count. See doc-block above. */
+      readonly blockRowsHint?: number;
+      /** S25: override for the derived block-column count. See doc-block above. */
+      readonly blockColsHint?: number;
+    }
+  | {
+      readonly type: 'tuffblocks';
+      readonly product: FoundationBlockRef;
+      /** S25: override for the derived block-row count. See doc-block above. */
+      readonly blockRowsHint?: number;
+      /** S25: override for the derived block-column count. See doc-block above. */
+      readonly blockColsHint?: number;
+    };
 
 // ==========================================================
 // LayoutMember material widening (Epic 2 / S17 / FR-026, FR-029)

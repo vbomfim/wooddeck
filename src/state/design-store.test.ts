@@ -78,6 +78,7 @@ import type { DeepPartial } from '../application';
 import { DeckFileError } from '../application';
 import { LayoutError } from '../domain/layout';
 import type { DeckDesign } from '../domain/model';
+import { IrcSpanTable } from '../domain/spans';
 import { MM_PER_FOOT } from '../domain/units';
 import { STORAGE_KEY, serialize } from '../persistence';
 
@@ -862,6 +863,125 @@ describe('useDesignStore — applyRemediation action (S16 issue #38)', () => {
     expect(uiAfter.units).toBe(uiBefore.units);
     expect(uiAfter.cameraPreset).toBe(uiBefore.cameraPreset);
     expect(uiAfter.layerVisibility).toBe(uiBefore.layerVisibility);
+  });
+
+  // S25 pair-fix (QA G1): add-support-row mutation persists across
+  // the recompute; zundo captures ONE undo entry that restores the
+  // previous foundation (no `blockRowsHint`). This is the store
+  // integration test — the domain remediation + application
+  // application-parameters seam is proven in their own tests.
+  it('S25 — applyRemediation(add-support-row) persists blockRowsHint AND zundo undo restores prior foundation', () => {
+    // Seed a floating tuffblocks bundle directly (bypasses the
+    // default seed which is elevated + posts-on-footings — an
+    // add-support-row remediation on that combo would be a NO-OP
+    // per FR-030 / the domain producer's guards). Bundle is
+    // computed via applyParameters against a hand-built floating
+    // design so layout + warnings match a real user's state.
+    const seedDesign: import('../domain/model').DeckDesign = {
+      id: FIXED_ID,
+      createdAt: FIXED_CREATED_AT,
+      footprint: {
+        widthMm: 12 * MM_PER_FOOT,
+        lengthMm: 12 * MM_PER_FOOT,
+        heightMm: 209,
+      },
+      structure: 'floating',
+      foundation: {
+        type: 'tuffblocks',
+        product: { productId: 'tuffblock-12x12x4' },
+      },
+      joist: {
+        material: { nominal: '2x8', species: 'PT', grade: 'No2' },
+        spacingMm: 406,
+      },
+      beam: { material: { nominal: '2x8', species: 'PT', grade: 'No2' } },
+      decking: {
+        material: { nominal: '5/4x6', species: 'PT', grade: 'No2' },
+        orientation: 'parallel-to-width',
+      },
+      layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+    };
+    // Use the app's public applyParameters (with an empty patch) to
+    // compute the layout + warnings the same way a real edit
+    // would. Any subsequent test-only bundle mutation is handled
+    // via setState directly, but here we produce a compute-consistent
+    // bundle to seed with.
+    const seedBundle = appApi.applyParameters(
+      seedDesign,
+      // Empty patch triggers computeLayoutAndCheck on `seedDesign`
+      // verbatim (the seed has no `blockRowsHint`; the layout
+      // derives the row count from S19).
+      {},
+      new IrcSpanTable(),
+    );
+    // Reset zundo so we start from a clean history.
+    useDesignStore.temporal.getState().clear();
+    useDesignStore.setState({
+      bundle: seedBundle,
+      status: 'idle',
+      lastError: null,
+    });
+    useDesignStore.temporal.getState().clear();
+
+    // Snapshot the pre-remediation foundation. Must NOT carry
+    // `blockRowsHint` (proves the undo restore below is meaningful).
+    const before = useDesignStore.getState().bundle;
+    if (before.design.foundation.type !== 'tuffblocks') {
+      throw new Error('seed sanity: expected tuffblocks foundation');
+    }
+    expect(before.design.foundation.blockRowsHint).toBeUndefined();
+
+    // Construct the add-support-row option that mimics what the
+    // domain producer would emit for this deck. Only the `patch`
+    // is load-bearing at the store seam — the presentation fields
+    // are pass-through.
+    const addSupportOption: import('../domain/spans').RemediationOption = {
+      kind: 'add-support-row',
+      memberId: 'beam-0',
+      patch: {
+        kind: 'add-support-row',
+        targetBeamId: 'beam-0',
+        currentRows: 3,
+        proposedRows: 4,
+      },
+      summary: 'Add a row of blocks (3 → 4)',
+      currentAllowableMm: 2400,
+      newAllowableMm: 2400,
+      actualSpanMm: 3048,
+      wouldClear: true,
+      disabled: false,
+      disabledReason: null,
+    };
+
+    useDesignStore.getState().applyRemediation(addSupportOption);
+
+    // Post-remediation: foundation.blockRowsHint MUST equal
+    // proposedRows and persist across the store's recompute.
+    const after = useDesignStore.getState();
+    expect(after.status).toBe('idle');
+    expect(after.lastError).toBeNull();
+    if (after.bundle.design.foundation.type !== 'tuffblocks') {
+      throw new Error('post-remediation: expected tuffblocks foundation');
+    }
+    expect(after.bundle.design.foundation.blockRowsHint).toBe(4);
+    // Reference-inequality proves the immutable-update path fired.
+    expect(after.bundle).not.toBe(before);
+
+    // zundo captured exactly ONE past state (the pre-remediation
+    // bundle). Undo restores the prior foundation.
+    const past = useDesignStore.temporal.getState().pastStates;
+    expect(past.length).toBe(1);
+    useDesignStore.temporal.getState().undo();
+    const restored = useDesignStore.getState().bundle;
+    if (restored.design.foundation.type !== 'tuffblocks') {
+      throw new Error('post-undo: expected tuffblocks foundation');
+    }
+    // The restored foundation must NOT carry the hint — undo
+    // brought us back to the pre-remediation state.
+    expect(restored.design.foundation.blockRowsHint).toBeUndefined();
+    // Reference-equality with the pre-remediation bundle proves
+    // zundo's undo restores structurally-identical state.
+    expect(restored).toBe(before);
   });
 });
 
