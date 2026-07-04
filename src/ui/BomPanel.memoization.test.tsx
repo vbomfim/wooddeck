@@ -2,9 +2,9 @@
  * `BomPanel.memoization.test.tsx` — S14 UAT pair-fix FIX J.5.
  *
  * Split from `BomPanel.test.tsx` because it requires `vi.mock`
- * of the `./bom/derive-bom` module to spy on the pure function.
- * A `vi.mock` in the main test file would poison every other
- * test in the same module.
+ * of the `../domain/bom/derive-bom` module to spy on the pure
+ * function. A `vi.mock` in the main test file would poison every
+ * other test in the same module.
  *
  * ## What this covers
  *
@@ -31,9 +31,9 @@ import { act, cleanup, render } from '@testing-library/react';
 // correct BomLine[] AND we can count how many times it was
 // called. `vi.hoisted` is not needed here — `vi.mock` factory
 // runs before the import.
-vi.mock('./bom/derive-bom', async () => {
-  const actual = await vi.importActual<typeof import('./bom/derive-bom')>(
-    './bom/derive-bom',
+vi.mock('../domain/bom/derive-bom', async () => {
+  const actual = await vi.importActual<typeof import('../domain/bom/derive-bom')>(
+    '../domain/bom/derive-bom',
   );
   return {
     ...actual,
@@ -43,7 +43,7 @@ vi.mock('./bom/derive-bom', async () => {
 
 // Import AFTER vi.mock so the mock takes effect.
 import { BomPanel } from './BomPanel';
-import { deriveBom as mockedDeriveBom } from './bom/derive-bom';
+import { deriveBom as mockedDeriveBom } from '../domain/bom/derive-bom';
 import { resetDesignStoreForTests } from '../state/design-store';
 import { useUiStore } from '../state/ui-store';
 

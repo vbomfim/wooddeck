@@ -60,6 +60,16 @@
  * from it on every call. `listMaterials` returns the catalog as an
  * insertion-ordered array (also O(catalog size)).
  *
+ * ## Stock lengths (S21 / FR-031)
+ *
+ * Each record also carries `stockLengthsMm` — the sorted, non-empty
+ * list of standard stock-board lengths available for the SKU at
+ * Home Depot Canada (verified 2026-07-04). The S21 cut-list packer
+ * (`src/domain/bom/pack-cut-list.ts`) reads this field as its
+ * `stockLengthsMm` input; the catalog is the single source of truth
+ * so a regional catalog swap requires no packer change. See
+ * `STOCK_FEET_BY_NOMINAL` below for the concrete values and rationale.
+ *
  * ## Immutability & sharing
  *
  * `Material` records are frozen (`Object.freeze`) at load time so a
@@ -69,7 +79,7 @@
  * TypeScript module for MVP. Not user-editable.").
  */
 
-import { MM_PER_INCH } from './units';
+import { MM_PER_FOOT, MM_PER_INCH } from './units';
 import type { Grade, LumberNominal, Material, Species } from './model';
 
 // ==========================================================
@@ -105,6 +115,60 @@ const DRESSED_INCHES: Record<LumberNominal, { widthIn: number; heightIn: number 
 function inToMm(inches: number): number {
   return Math.round(inches * MM_PER_INCH);
 }
+
+/**
+ * Convert a foot value to whole millimeters using the ONE foot
+ * constant defined in `units.ts` (which is itself derived from
+ * `MM_PER_INCH`). We do NOT hard-code `304.8` here — same rationale
+ * as `inToMm`. Used for the S21 `stockLengthsMm` per-SKU list, where
+ * every value is expressed in feet at the catalog source.
+ */
+function ftToMm(feet: number): number {
+  return Math.round(feet * MM_PER_FOOT);
+}
+
+// ==========================================================
+// S21 issue #43 — Standard stock-board length tables (FR-031)
+// ==========================================================
+//
+// Per-nominal list of stock-board lengths carried at the reference
+// lumberyard (Home Depot Canada, verified 2026-07-04). Values are
+// expressed in FEET at the source and converted to whole millimeters
+// on record build via `ftToMm(feet)`.
+//
+// Rationale for splitting by nominal:
+//
+//   - 2× framing (2x6/2x8/2x10/2x12) is stocked in a common six-length
+//     set: 8, 10, 12, 14, 16, 20 ft. (18 ft is a special-order size
+//     for 2× framing at HD Canada and is deliberately omitted from
+//     the MVP catalog.)
+//   - 5/4×6 decking adds an 18 ft option — a common decking length
+//     for large one-piece board runs.
+//   - Posts (4×4, 6×6) are typically stocked 8, 10, 12, 14, 16 ft;
+//     20 ft is not a standard retail post length.
+//
+// The BOM's cut-list bin-packer reads these lists per SKU (never
+// hard-codes them itself), so a future regional catalog can supply a
+// different list without touching the packer.
+
+const STOCK_FEET_2X_FRAMING: readonly number[] = [8, 10, 12, 14, 16, 20];
+const STOCK_FEET_5_4_DECKING: readonly number[] = [8, 10, 12, 14, 16, 18, 20];
+const STOCK_FEET_POSTS: readonly number[] = [8, 10, 12, 14, 16];
+
+/**
+ * Nominal → standard stock lengths in feet. Exhaustive over
+ * `LumberNominal` so adding a new SKU fails-compile here until a
+ * stock list is chosen (belt-and-suspenders alongside the AC10 test).
+ */
+const STOCK_FEET_BY_NOMINAL: Record<LumberNominal, readonly number[]> = {
+  '2x6': STOCK_FEET_2X_FRAMING,
+  '2x8': STOCK_FEET_2X_FRAMING,
+  '2x10': STOCK_FEET_2X_FRAMING,
+  '2x12': STOCK_FEET_2X_FRAMING,
+  '4x4': STOCK_FEET_POSTS,
+  '6x6': STOCK_FEET_POSTS,
+  '5/4x6': STOCK_FEET_5_4_DECKING,
+};
 
 // ==========================================================
 // MVP SKU manifest — the (nominal, species, grade) triples the
@@ -168,6 +232,13 @@ function keyFor(nominal: LumberNominal, species: Species, grade: Grade): string 
 
 function buildMaterial(spec: CatalogSpec): Material {
   const dressed = DRESSED_INCHES[spec.nominal];
+  const stockFeet = STOCK_FEET_BY_NOMINAL[spec.nominal];
+  // Convert once at build time, freeze the array, and share the same
+  // frozen reference across every species/grade sharing the nominal.
+  // The catalog is module-scope and only builds this list once per
+  // record so a lightweight per-record freeze is fine (kept per-
+  // record so a future per-species stock list has no migration).
+  const stockLengthsMm: readonly number[] = Object.freeze(stockFeet.map(ftToMm));
   const material: Material = Object.freeze({
     nominal: spec.nominal,
     species: spec.species,
@@ -176,6 +247,7 @@ function buildMaterial(spec: CatalogSpec): Material {
       widthMm: inToMm(dressed.widthIn),
       heightMm: inToMm(dressed.heightIn),
     }),
+    stockLengthsMm,
   });
   return material;
 }
