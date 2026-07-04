@@ -36,7 +36,7 @@
 import { describe, expect, it, vi, afterEach, beforeAll, afterAll } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 
-import { DECKSCENE_ARIA_LABEL } from './DeckScene';
+import { DECKSCENE_ARIA_LABEL, WOODDECK_CANVAS_CLASSNAME } from './DeckScene';
 import { WEBGL_FALLBACK_MESSAGE } from './WebGLFallback';
 
 // ---- module mocks ---------------------------------------------------------
@@ -54,21 +54,44 @@ import { WEBGL_FALLBACK_MESSAGE } from './WebGLFallback';
 // The scene-internal children (SceneLighting + CameraRig) are
 // SEPARATELY mocked to `() => null` so they don't try to consume
 // the (missing) r3f context.
+//
+// S14 iter-2 (AC10 className fix): the mock now also INVOKES
+// `onCreated` with a fake gl whose `domElement` is a REAL
+// `<canvas>` element it appends inside the wrapper div. That lets
+// tests assert side effects of the onCreated callback (e.g. the
+// class-on-canvas fix below). The fake gl is stored on
+// `window.__wooddeckLastFakeGl` for tests that need to spy on it.
 vi.mock('@react-three/fiber', async () => {
   const actual = await vi.importActual<typeof import('@react-three/fiber')>('@react-three/fiber');
-  return {
-    ...actual,
-    Canvas: ({
-      children,
-      className,
-      'aria-label': ariaLabel,
-      tabIndex,
-    }: {
-      children?: React.ReactNode;
-      className?: string;
-      'aria-label'?: string;
-      tabIndex?: number;
-    }) => (
+  const CanvasMock = ({
+    children,
+    className,
+    'aria-label': ariaLabel,
+    tabIndex,
+    onCreated,
+  }: {
+    children?: React.ReactNode;
+    className?: string;
+    'aria-label'?: string;
+    tabIndex?: number;
+    onCreated?: (state: { gl: { domElement: HTMLCanvasElement } }) => void;
+  }) => {
+    // Build a fake gl object with a REAL <canvas> element so
+    // classList assertions work. The canvas is expressed via a
+    // ref callback so it exists in the DOM tree by the time we
+    // invoke onCreated (React attaches refs before layout effects
+    // but our callback ref fires synchronously during render).
+    const canvasRefCallback = (node: HTMLCanvasElement | null): void => {
+      if (node !== null && onCreated !== undefined) {
+        const fakeGl = { domElement: node };
+        // Expose the last fake gl for tests that want to poke at it.
+        (
+          window as unknown as { __wooddeckLastFakeGl?: { domElement: HTMLCanvasElement } }
+        ).__wooddeckLastFakeGl = fakeGl;
+        onCreated({ gl: fakeGl });
+      }
+    };
+    return (
       <div
         data-testid="canvas-mock"
         className={className}
@@ -76,9 +99,14 @@ vi.mock('@react-three/fiber', async () => {
         role="img"
         tabIndex={tabIndex}
       >
+        <canvas data-testid="canvas-mock-inner" ref={canvasRefCallback} />
         {children}
       </div>
-    ),
+    );
+  };
+  return {
+    ...actual,
+    Canvas: CanvasMock,
   };
 });
 
@@ -177,6 +205,40 @@ describe('<DeckScene /> — WebGL 2 supported path', () => {
     render(<DeckScene />);
     const canvas = screen.getByTestId('canvas-mock');
     expect(canvas).toHaveAttribute('tabindex', '0');
+  });
+
+  // S14 iter-2 (AC10) — className on the ACTUAL <canvas>.
+  //
+  // Bug root cause: react-three-fiber applies the `<Canvas
+  // className>` prop to the WRAPPER <div>, NOT to the inner
+  // <canvas> element. That meant
+  // `document.querySelector('canvas.wooddeck-canvas')` (the
+  // ExportMenu's AC10 lookup target) always returned null in
+  // production — Export PNG silently fell through to the "canvas
+  // missing" error branch even though the wrapper div carried
+  // the class.
+  //
+  // Fix: `onCreated` explicitly adds the class to `gl.domElement`,
+  // which IS the canvas. The consumer-supplied class on
+  // `<Canvas className>` stays on the wrapper div (harmless — it's
+  // used by CSS for layout only). This test pins the fix in the
+  // simplest possible way: after mount, the inner canvas must have
+  // the querySelector-target class.
+  it('AC10: onCreated adds WOODDECK_CANVAS_CLASSNAME to gl.domElement (the actual <canvas>)', () => {
+    render(<DeckScene />);
+    // The mock inserts a real <canvas> and invokes onCreated with
+    // it as gl.domElement — so we can assert against it directly.
+    const innerCanvas = screen.getByTestId('canvas-mock-inner');
+    expect(innerCanvas.classList.contains(WOODDECK_CANVAS_CLASSNAME)).toBe(true);
+  });
+
+  it('AC10: querySelector(canvas.wooddeck-canvas) finds the canvas after mount', () => {
+    // End-to-end proof that the ExportMenu's lookup pattern
+    // (see src/ui/export-menu-helpers.ts CANVAS_SELECTOR) resolves.
+    render(<DeckScene />);
+    const found = document.querySelector(`canvas.${WOODDECK_CANVAS_CLASSNAME}`);
+    expect(found).not.toBeNull();
+    expect(found?.tagName).toBe('CANVAS');
   });
 });
 

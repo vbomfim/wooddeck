@@ -221,7 +221,20 @@ export function DeckScene({ className, children }: DeckSceneProps): JSX.Element 
       // webglContextLost flag (a fresh live context is not lost),
       // then installs + stores the new cleanup. See
       // src/scene/context-loss.ts module header for the full RCA.
+      //
+      // S14 iter-2 (AC10 className fix): react-three-fiber applies
+      // the `<Canvas className>` prop to the WRAPPER <div>, NOT to
+      // the inner <canvas>. That means the AC10 ExportMenu lookup
+      // (`document.querySelector('canvas.wooddeck-canvas')`) — see
+      // src/ui/export-menu-helpers.ts CANVAS_SELECTOR — returned
+      // null in production, silently falling through to the
+      // "canvas missing" error branch even though the wrapper div
+      // carried the class. The `mergeCanvasClassName` above still
+      // sets the class on the wrapper div for symmetry / CSS use;
+      // this line puts it on the actual <canvas> so the
+      // querySelector target resolves.
       onCreated={({ gl }) => {
+        gl.domElement.classList.add(WOODDECK_CANVAS_CLASSNAME);
         reinstallContextLossHandler(gl, contextLossCleanupRef);
       }}
     >
