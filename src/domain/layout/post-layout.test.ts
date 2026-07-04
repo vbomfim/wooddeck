@@ -25,6 +25,7 @@ import {
   FOOTING_DEPTH_MM,
   FOOTING_WIDTH_MM,
   MAX_BEAM_SPAN_MM,
+  deriveStockedPostMaterial,
   layoutPostsAndBlocks,
   layoutPostsAndFootings,
 } from './post-layout';
@@ -520,5 +521,157 @@ describe('layoutPostsAndBlocks — height boundary (block-adjusted MIN)', () => 
     for (const p of posts) {
       expect(p.size.y).toBeCloseTo(MIN_POST_HEIGHT_MM, 6);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S20 review-gate FIX 1 + FIX 2 + FIX 4g — deriveStockedPostMaterial +
+// composite-beam integration + explicit derivation-locking tests +
+// trust-boundary parity coverage.
+// ---------------------------------------------------------------------------
+//
+// Rationale: the pre-FIX-1 `layoutPostsAndBlocks` blindly borrowed the
+// beam's species/grade for the derived post. For a valid FR-030
+// combination `elevated + deck-blocks + Composite beam`, the derived
+// triple `{ '4x4', 'Composite', 'NA' }` is NOT stocked in the catalog
+// (see materials-catalog.ts: composite posts explicitly excluded), so
+// the deck failed to lay out. FIX 1 adds a stocked-fallback rule.
+
+describe('deriveStockedPostMaterial — pure helper (FIX 1)', () => {
+  const oldcastle = lookupFoundationProduct('oldcastle-11x11x7');
+
+  it('nominal always equals product.acceptsPost[0] (locks derivation, FIX 2)', () => {
+    // Explicit assertion so a hardcode-refactor (`nominal: '4x4'`) is
+    // caught. Also documents the contract for future block products
+    // whose acceptsPost[0] may differ (e.g. a hypothetical 6x6-pocket
+    // block would derive a 6×6 post).
+    const beam = { nominal: '2x10' as const, species: 'PT' as const, grade: 'No2' as const };
+    const derived = deriveStockedPostMaterial(oldcastle, beam);
+    expect(derived.nominal).toBe(oldcastle.acceptsPost![0]);
+  });
+
+  it('PT beam → post is 4×4 PT No2 (beam species stocked for the post nominal)', () => {
+    const beam = { nominal: '2x10' as const, species: 'PT' as const, grade: 'No2' as const };
+    expect(deriveStockedPostMaterial(oldcastle, beam)).toEqual({
+      nominal: '4x4',
+      species: 'PT',
+      grade: 'No2',
+    });
+  });
+
+  it('Cedar beam → post is 4×4 Cedar No2 (beam species stocked for the post nominal)', () => {
+    const beam = { nominal: '2x10' as const, species: 'Cedar' as const, grade: 'No2' as const };
+    expect(deriveStockedPostMaterial(oldcastle, beam)).toEqual({
+      nominal: '4x4',
+      species: 'Cedar',
+      grade: 'No2',
+    });
+  });
+
+  it('Composite beam → falls back to 4×4 PT No2 (composite posts NOT stocked, FIX 1)', () => {
+    // The MVP catalog explicitly excludes composite posts (see
+    // materials-catalog.ts:207-213). Prior to FIX 1 this borrowed the
+    // beam's Composite/NA and threw "Unknown material" at layout
+    // time. Fallback = PT No2 (the most common stocked post species).
+    const beam = { nominal: '2x10' as const, species: 'Composite' as const, grade: 'NA' as const };
+    expect(deriveStockedPostMaterial(oldcastle, beam)).toEqual({
+      nominal: '4x4',
+      species: 'PT',
+      grade: 'No2',
+    });
+  });
+
+  it('returned material is deterministic (same input → deeply-equal output)', () => {
+    const beam = { nominal: '2x10' as const, species: 'PT' as const, grade: 'No2' as const };
+    const a = deriveStockedPostMaterial(oldcastle, beam);
+    const b = deriveStockedPostMaterial(oldcastle, beam);
+    expect(a).toEqual(b);
+  });
+});
+
+describe('layoutPostsAndBlocks — FIX 1 stocked-post fallback', () => {
+  it('Composite beam → post material is 4×4 PT No2 (fallback), NOT Composite', () => {
+    // Integration proof: a valid FR-030 combination that would have
+    // thrown pre-FIX-1 now lays out cleanly with PT posts.
+    const design: DeckDesign = {
+      ...makeDeckBlocksDesign(),
+      beam: { material: { nominal: '2x10', species: 'Composite', grade: 'NA' } },
+      joist: {
+        material: { nominal: '2x10', species: 'Composite', grade: 'NA' },
+        spacingMm: 406,
+      },
+      decking: {
+        material: { nominal: '5/4x6', species: 'Composite', grade: 'NA' },
+        orientation: 'parallel-to-width',
+      },
+    };
+    const beams = layoutBeams(design);
+    const { posts } = layoutPostsAndBlocks(design, beams);
+    for (const p of posts) {
+      expect(p.material.kind).toBe('lumber');
+      if (p.material.kind === 'lumber') {
+        expect(p.material.nominal).toBe('4x4');
+        expect(p.material.species).toBe('PT');
+        expect(p.material.grade).toBe('No2');
+      }
+    }
+  });
+
+  it('PT beam → post material is 4×4 PT No2 (species matches beam, FIX 2 lock)', () => {
+    const design = makeDeckBlocksDesign();
+    const beams = layoutBeams(design);
+    const { posts } = layoutPostsAndBlocks(design, beams);
+    for (const p of posts) {
+      expect(p.material.kind).toBe('lumber');
+      if (p.material.kind === 'lumber') {
+        expect(p.material.nominal).toBe('4x4');
+        expect(p.material.species).toBe('PT');
+        expect(p.material.grade).toBe('No2');
+      }
+    }
+  });
+
+  it('Cedar beam → post material is 4×4 Cedar No2 (species matches beam, FIX 2 lock)', () => {
+    const design: DeckDesign = {
+      ...makeDeckBlocksDesign(),
+      beam: { material: { nominal: '2x10', species: 'Cedar', grade: 'No2' } },
+      joist: {
+        material: { nominal: '2x10', species: 'Cedar', grade: 'No2' },
+        spacingMm: 406,
+      },
+      decking: {
+        material: { nominal: '5/4x6', species: 'Cedar', grade: 'No2' },
+        orientation: 'parallel-to-width',
+      },
+    };
+    const beams = layoutBeams(design);
+    const { posts } = layoutPostsAndBlocks(design, beams);
+    for (const p of posts) {
+      expect(p.material.kind).toBe('lumber');
+      if (p.material.kind === 'lumber') {
+        expect(p.material.species).toBe('Cedar');
+      }
+    }
+  });
+});
+
+describe('layoutPostsAndBlocks — FIX 4g trust-boundary guards', () => {
+  // The core `deck-blocks` guard already has a test in the pre-FIX
+  // "caller-contract guard" block above. FIX 4g adds parity coverage
+  // for the two other defensive branches in `layoutPostsAndBlocks`.
+
+  it('throws when the beam id is not one of BEAM_IDS (unrecognized-beam guard)', () => {
+    const design = makeDeckBlocksDesign();
+    const beams = layoutBeams(design);
+    // Copy the near beam but with a mangled id — simulates a caller
+    // that hand-crafts a beam array without going through
+    // `layoutBeams`.
+    const nearBeam = beams.find((b) => b.id === 'beam-near')!;
+    const bogusBeams: readonly LayoutMember[] = [
+      { ...nearBeam, id: 'beam-middle' },
+    ];
+    expect(() => layoutPostsAndBlocks(design, bogusBeams)).toThrow(
+      /unrecognized beam id/i,
+    );
   });
 });

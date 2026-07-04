@@ -77,7 +77,7 @@ import {
   LayoutError,
   MIN_DECK_DIMENSION_MM,
 } from './layout-shared';
-import { MIN_POST_HEIGHT_MM } from './y-stack';
+import { FOOTING_WIDTH_MM, MIN_POST_HEIGHT_MM } from './y-stack';
 
 // Re-export the shared symbols so the pre-S19 public API surface
 // (`import { LayoutError, MIN_DECK_DIMENSION_MM } from './layout-engine'`)
@@ -189,6 +189,28 @@ export function computeMinStructuralHeightMm(design: DeckDesign): Mm {
   // floating variants) have no block-height contribution here — the
   // floating pipeline has its own `computeMinFloatingHeightMm`.
   if (design.foundation.type === 'deck-blocks' && design.structure === 'elevated') {
+    // Defensive guard (S20 review-gate FIX 4d) — consistency with the
+    // caller-contract throws in `layoutPostsAnd{Footings,Blocks}`.
+    // The enclosing `if` already narrows `structure` to `'elevated'`,
+    // but an explicit re-check documents the intent and fires loudly
+    // if a future refactor drops the compound condition. Keep as
+    // belt-and-braces per the S20 Trust-Boundaries rule.
+    //
+    // Cast to `string` because TS narrows `design.structure` to
+    // `never` once the enclosing `if` proves it is `'elevated'` —
+    // proving the assertion is TS-unreachable today. The runtime
+    // check still catches the case where the enclosing condition is
+    // ever loosened (which is exactly the scenario the guard exists
+    // to defend).
+    const structureAtRuntime: string = design.structure;
+    if (structureAtRuntime !== 'elevated') {
+      throw new LayoutError(
+        `computeMinStructuralHeightMm: the block-adjusted branch is only ` +
+          `valid for structure === 'elevated' (got '${structureAtRuntime}'). ` +
+          `Floating decks use computeMinFloatingHeightMm — see ` +
+          `src/domain/layout/floating/y-stack-floating.ts.`,
+      );
+    }
     let product;
     try {
       product = lookupFoundationProduct(design.foundation.product.productId);
@@ -388,6 +410,56 @@ function computeElevatedDeckBlocksLayout(
 ): Layout {
   validateDesign(design);
   const now = options?.now ?? defaultNow;
+
+  // Bounds-contract runtime assertion (S20 review-gate FIX 4e) —
+  // `Layout.bounds` for elevated + deck-blocks equals
+  // `design.footprint` on the assumption that every catalog block
+  // fits INSIDE the horizontal footprint (`product.actual.widthMm <
+  // FOOTING_WIDTH_MM` AND `product.actual.depthMm < FOOTING_WIDTH_MM`
+  // — posts are inset from the footprint edge by FOOTING_WIDTH_MM/2,
+  // so blocks narrower than that anchor stay inside on x/z). A
+  // future block product that exceeds either dimension would
+  // overhang the footprint, violating the invariant, and would
+  // require porting `computeFloatingBoundsFromMembers` from S19
+  // (see `floating/floating-layout.ts`).
+  //
+  // We assert loudly at the orchestrator entry so a catalog addition
+  // that breaks the invariant fails at layout time — instead of
+  // silently emitting a `bounds` that's smaller than the actual
+  // member AABB (which would corrupt every downstream renderer /
+  // BOM / bounds-based query).
+  if (design.foundation.type !== 'deck-blocks') {
+    // Dispatcher bug — computeLayout should only route deck-blocks
+    // designs here. Defensive throw for the same reason the sibling
+    // guards in layoutPostsAnd{Footings,Blocks} throw.
+    throw new LayoutError(
+      `computeElevatedDeckBlocksLayout: expected foundation.type === ` +
+        `'deck-blocks', got '${design.foundation.type}'. Dispatch bug in ` +
+        `computeLayout — see src/domain/layout/layout-engine.ts.`,
+    );
+  }
+  const foundationProduct = lookupFoundationProduct(
+    design.foundation.product.productId,
+  );
+  if (
+    foundationProduct.actual.widthMm >= FOOTING_WIDTH_MM ||
+    foundationProduct.actual.depthMm >= FOOTING_WIDTH_MM
+  ) {
+    throw new LayoutError(
+      `computeElevatedDeckBlocksLayout: block product ` +
+        `'${foundationProduct.productId}' has width=` +
+        `${foundationProduct.actual.widthMm} mm / depth=` +
+        `${foundationProduct.actual.depthMm} mm, one of which is >= ` +
+        `FOOTING_WIDTH_MM (${FOOTING_WIDTH_MM} mm). Under this condition ` +
+        `the block would overhang the footprint on x or z, so ` +
+        `Layout.bounds = design.footprint (the current invariant) ` +
+        `would be smaller than the true member AABB. Port ` +
+        `computeFloatingBoundsFromMembers from S19 (see ` +
+        `src/domain/layout/floating/floating-layout.ts) to recompute ` +
+        `bounds from the emitted members instead of relying on the ` +
+        `footprint. See S20 review-gate FIX 4e.`,
+    );
+  }
 
   try {
     const joists = layoutJoists(design);

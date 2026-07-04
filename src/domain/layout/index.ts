@@ -25,6 +25,7 @@ export { layoutJoists } from './joist-layout';
 export { layoutBeams } from './beam-layout';
 export {
   MAX_BEAM_SPAN_MM,
+  deriveStockedPostMaterial,
   layoutPostsAndBlocks,
   layoutPostsAndFootings,
 } from './post-layout';

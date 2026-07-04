@@ -424,12 +424,14 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
   //   ones are untouched. Regeneration only writes NEW files with
   //   different member counts / positions.
   //
-  // 12 ft × 12 ft × 3 ft deck lands 4 posts (one per corner). Beam
-  // material is 2×10 PT No2 → the derived post is 4×4 PT No2 from
-  // `product.acceptsPost[0]` (autonomous decision, S20). heightMm is
-  // 914 mm (3 ft), comfortably above the block-adjusted min of
-  // 178 (block) + 25 (min post) + 235 (beam) + 235 (joist) + 25
-  // (decking) = 698 mm.
+  // 12 ft × 12 ft × 3 ft deck lands 6 posts (3 per beam × 2 beams —
+  // widthMm 3657.6 / MAX_BEAM_SPAN_MM 2438.4 = 1.5 → ceil = 2 → +1 =
+  // 3 posts per beam; one beam per near/far edge). Beam material is
+  // 2×10 PT No2 → the derived post is 4×4 PT No2 from
+  // `product.acceptsPost[0]` + FIX-1 stocked fallback (autonomous
+  // decision, S20). heightMm is 914 mm (3 ft), comfortably above the
+  // block-adjusted min of 178 (block) + 25 (min post) + 235 (beam)
+  // + 235 (joist) + 25 (decking) = 698 mm.
   // -----------------------------------------------------------------
   {
     name: 'elevated-12x12-oldcastle',

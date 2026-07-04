@@ -243,4 +243,32 @@ describe('computeBlocksUnderPosts — LayoutMember shape', () => {
       computeBlocksUnderPosts({ posts: mixed, product: OLDCASTLE }),
     ).toThrow(/joist.*joist-far-0/);
   });
+
+  it("trust-boundary guard (FIX 4f): rejects post members whose id doesn't start with 'post-'", () => {
+    // A non-canonical id like `p-0` would map to itself under the
+    // `/^post-/ → block-` replacement — the block would silently
+    // share its id with the source post, breaking `Set`-by-id
+    // downstream. The guard fails loudly instead.
+    const rogue: LayoutMember = {
+      // valid `post` kind, but non-canonical id.
+      id: 'p-0',
+      kind: 'post',
+      material: {
+        kind: 'lumber',
+        nominal: '4x4',
+        species: 'PT',
+        grade: 'No2',
+      },
+      position: { x: 0, y: 100, z: 0 },
+      size: { x: 89, y: 200, z: 89 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    expect(() =>
+      computeBlocksUnderPosts({ posts: [rogue], product: OLDCASTLE }),
+    ).toThrow(/does not start with 'post-'/);
+    // Contextful — the message names the offending id.
+    expect(() =>
+      computeBlocksUnderPosts({ posts: [rogue], product: OLDCASTLE }),
+    ).toThrow(/p-0/);
+  });
 });

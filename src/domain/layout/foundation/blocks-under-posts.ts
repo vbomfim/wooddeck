@@ -116,6 +116,27 @@ export function computeBlocksUnderPosts(
     // Block id mirrors the post id — `post-near-0` → `block-near-0`
     // — so downstream consumers (BOM, scene) see a symmetric naming
     // across posts and the block that supports them.
+    //
+    // FIX 4f (S20 review-gate) — guard against non-canonical post
+    // ids. The regex replacement `post- → block-` is a no-op when
+    // the id doesn't start with `post-`, which would silently
+    // collide with the source id (post AND block with the same
+    // string id → a downstream `Set`-by-id would drop one). We
+    // require the canonical prefix so the invariant "block id ≠
+    // post id" is structurally guaranteed.
+    if (!post.id.startsWith('post-')) {
+      throw new Error(
+        `computeBlocksUnderPosts: post member id ` +
+          `${JSON.stringify(post.id)} does not start with 'post-'. ` +
+          `Block ids are derived by rewriting the 'post-' prefix to ` +
+          `'block-', so a non-canonical post id would produce a ` +
+          `block whose id collides with the source post's id. Emit ` +
+          `posts through layoutPostsAndBlocks / layoutPostsAndFootings ` +
+          `(which use the 'post-<beam>-<index>' pattern) or update ` +
+          `this helper to accept a caller-supplied id-derivation ` +
+          `function. See src/domain/layout/foundation/blocks-under-posts.ts.`,
+      );
+    }
     const blockId = post.id.replace(/^post-/, 'block-');
     blocks.push({
       id: blockId,

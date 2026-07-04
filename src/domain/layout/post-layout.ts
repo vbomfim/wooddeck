@@ -93,9 +93,9 @@
  */
 
 import { MM_PER_FOOT, type Mm } from '../units';
-import { lookupFoundationProduct } from '../foundation-catalog';
-import { lookupMaterial } from '../materials-catalog';
-import type { DeckDesign, LayoutMember } from '../model';
+import { lookupFoundationProduct, type FoundationProduct } from '../foundation-catalog';
+import { hasMaterial, lookupMaterial } from '../materials-catalog';
+import type { DeckDesign, LayoutMember, MaterialRef } from '../model';
 
 import { BEAM_IDS, beamLabelForId, type BeamLabel } from './beam-layout';
 import { computeBlocksUnderPosts } from './foundation/blocks-under-posts';
@@ -202,6 +202,83 @@ export function layoutPostsAndFootings(
 // ---------------------------------------------------------------------------
 
 /**
+ * Derive a STOCKED post `MaterialRef` for the elevated + deck-blocks
+ * variant (S20 review-gate FIX 1).
+ *
+ * ## Contract
+ *
+ * The `deck-blocks` variant of `FoundationSpec` has no explicit
+ * `post` field (see `model.ts` FoundationSpec doc — that field only
+ * exists on the `posts-on-footings` variant). We derive the post
+ * material from two inputs:
+ *
+ *   1. **Nominal** — always `product.acceptsPost[0]`. The block's
+ *      center pocket dictates the post's cross-section. For the MVP
+ *      Oldcastle block this is `'4x4'`. A block with `acceptsPost`
+ *      null or empty is not compatible with elevated construction
+ *      and MUST be rejected earlier by the FR-030 compat matrix;
+ *      this helper does not defend against that case (the caller
+ *      does).
+ *   2. **Species / grade** — the beam's species/grade IF that
+ *      triple is stocked for the post nominal. Otherwise fall back
+ *      to `PT No2` — the most common stocked post material.
+ *
+ * ## Why the fallback exists (FIX 1)
+ *
+ * The MVP catalog explicitly excludes composite posts (see
+ * `materials-catalog.ts` MVP_SPECS: "Post sizes — PT and Cedar only"
+ * comment). A valid FR-030 combination — Composite decking / beam
+ * / joist on a deck-block foundation — has no matching stocked
+ * post SKU. Pre-FIX-1 the naive derivation produced
+ * `{'4x4', 'Composite', 'NA'}` and `lookupMaterial` threw
+ * `Unknown material`, so the deck failed to lay out for a
+ * compat-matrix-legal combination.
+ *
+ * `PT No2` is a safe default: pressure-treated posts are the
+ * default homeowner-deck choice and the species is stocked for
+ * every post nominal in the catalog. The user can override the
+ * default at a per-design level in a follow-up ticket (see the
+ * Epic 2 amendment note in `specs/mvp-deck-designer/spec.md`).
+ *
+ * ## Purity
+ *
+ * This helper is a pure function of its inputs — no I/O, no clock,
+ * no globals. Deterministic and safe to call any number of times.
+ */
+export function deriveStockedPostMaterial(
+  product: FoundationProduct,
+  beamMaterial: MaterialRef,
+): MaterialRef {
+  const acceptsPost = product.acceptsPost;
+  if (acceptsPost === null || acceptsPost.length === 0) {
+    // Caller-contract violation — the FR-030 compat matrix should
+    // have rejected an elevated pairing with a post-less block
+    // (tuffblocks, or a future product with no pocket). We fail
+    // loudly rather than silently returning a PT No2 default.
+    throw new Error(
+      `deriveStockedPostMaterial: foundation product '${product.productId}' has ` +
+        `no acceptsPost pocket. This helper is only valid for elevated + ` +
+        `deck-blocks combinations where the block has a post pocket; the ` +
+        `FR-030 compat matrix should reject this pairing earlier. See ` +
+        `src/domain/compat-matrix.ts.`,
+    );
+  }
+  const nominal = acceptsPost[0]!;
+  if (hasMaterial(nominal, beamMaterial.species, beamMaterial.grade)) {
+    return {
+      nominal,
+      species: beamMaterial.species,
+      grade: beamMaterial.grade,
+    };
+  }
+  // FIX 1 fallback — PT No2 is guaranteed stocked for every post
+  // nominal (see materials-catalog.ts MVP_SPECS). If the fallback
+  // itself is ever missing, that is an invariant violation and
+  // `lookupMaterial` at the call site will fail loudly.
+  return { nominal, species: 'PT', grade: 'No2' };
+}
+
+/**
  * Return shape for the elevated + deck-blocks post-layout entry
  * point. Same posts-first-then-foundation-members shape as
  * `PostAndFootingResult`, but the foundation members are `block`s
@@ -269,47 +346,18 @@ export function layoutPostsAndBlocks(
   const product = lookupFoundationProduct(design.foundation.product.productId);
   const blockHeightMm = product.actual.heightMm;
 
-  // ---- Post material derivation (S20 autonomous decision) --------------
+  // ---- Post material derivation (S20 autonomous decision, FIX 1) -------
   //
-  // The `deck-blocks` variant of `FoundationSpec` does NOT carry a
-  // `post` field — that field only exists on the `posts-on-footings`
-  // variant (see `model.ts` FoundationSpec doc, S17 review-gate FIX 2
-  // dual-SoT decision). For the elevated + deck-blocks combination
-  // we still need a post material to stamp on the emitted post
-  // members. Two constraints frame the choice:
-  //
-  //   1. Nominal — MUST fit the block's center pocket. The catalog
-  //      product declares `acceptsPost: readonly LumberNominal[] |
-  //      null`; for Oldcastle it is `['4x4']` (see
-  //      `foundation-catalog.ts` MVP_PRODUCTS). We pick the FIRST
-  //      accepted nominal so the emitted post is guaranteed to fit
-  //      the block's pocket. A block with `acceptsPost === null`
-  //      would fall under elevated + tuffblocks — rejected earlier
-  //      by the FR-030 compat matrix. Defensive throw here anyway
-  //      catches a future block product that slips through.
-  //   2. Species / grade — no per-post-in-blocks field exists in
-  //      the domain model yet, so we borrow the beam material's
-  //      species + grade. In the MVP catalog both PT-No2 and Cedar-
-  //      No2 are available for 4×4; this covers every realistic
-  //      combination without inventing a new design field.
+  // Delegated to the pure `deriveStockedPostMaterial` helper above.
+  // The helper picks the block's first accepted post nominal, then
+  // borrows the beam's species/grade IF that combination is stocked;
+  // otherwise it falls back to PT No2. See the helper doc for the
+  // rationale.
   //
   // Reversible when a follow-up ticket surfaces a per-design post
   // material for the deck-blocks foundation variant (spec change +
   // S18 persistence migration). Documented in the handoff table.
-  const acceptsPost = product.acceptsPost;
-  if (acceptsPost === null || acceptsPost.length === 0) {
-    throw new Error(
-      `layoutPostsAndBlocks: foundation product '${product.productId}' has no ` +
-        `acceptsPost pocket (elevated + deck-blocks requires a block with a ` +
-        `post pocket). The FR-030 compat matrix should have rejected this ` +
-        `pairing earlier; see src/domain/compat-matrix.ts.`,
-    );
-  }
-  const postMaterialRef = {
-    nominal: acceptsPost[0]!,
-    species: design.beam.material.species,
-    grade: design.beam.material.grade,
-  };
+  const postMaterialRef = deriveStockedPostMaterial(product, design.beam.material);
   const postMat = lookupMaterial(
     postMaterialRef.nominal,
     postMaterialRef.species,

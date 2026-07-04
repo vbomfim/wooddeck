@@ -412,13 +412,10 @@ describe('computeLayout — FR-030 compat matrix (FIX 1)', () => {
 });
 
 describe('computeLayout — support-gate for not-yet-implemented combos (FIX 1)', () => {
-  it('throws LayoutError "not yet implemented" for elevated + deck-blocks (S20)', () => {
-    // Legacy assertion (pre-S20). Replaced below by the positive
-    // dispatch test in the "S20 — elevated + deck-blocks pipeline"
-    // describe block. The throw was removed once S20 landed.
-    // Kept as a comment to preserve the paper trail from S17/S19.
-    expect(true).toBe(true);
-  });
+  // Note: the pre-S20 `elevated + deck-blocks "not yet implemented"`
+  // regression assertion has been removed. The positive dispatch
+  // test lives in the "S20 — elevated + deck-blocks pipeline"
+  // describe block below. Git history preserves the earlier form.
 
   it('floating + deck-blocks dispatches to the S19 floating pipeline (produces a layout, no throw)', () => {
     const design = makeDesign();
@@ -564,7 +561,7 @@ describe('computeLayout — S20 elevated + deck-blocks AC1 (block members, no fo
     }
   });
 
-  it('AC1 count reference: 12 ft × 12 ft × 4 ft yields 4 posts (2 per beam × 2 beams) and 4 blocks', () => {
+  it('AC1 count reference: 12 ft × 12 ft × 4 ft yields 6 posts / 6 blocks (3 per beam × 2 beams — ceil(widthMm/MAX_BEAM_SPAN_MM)+1=3)', () => {
     const design = makeDeckBlocksDesign({
       widthMm: 12 * MM_PER_FOOT,
       lengthMm: 12 * MM_PER_FOOT,
@@ -735,5 +732,47 @@ describe('computeLayout — S20 bounds and determinism', () => {
     const a = computeLayout(design, { now });
     const b = computeLayout(design, { now });
     expect(a).toEqual(b);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S20 review-gate FIX 1 — Composite-beam integration
+// ---------------------------------------------------------------------------
+//
+// AC-FIX1: an elevated + deck-blocks design with a Composite beam MUST
+// lay out successfully. Pre-FIX-1 this threw "Unknown material" because
+// the naive post-material derivation borrowed the beam's species/grade
+// (Composite/NA) which is NOT stocked for 4×4 posts. FIX 1 falls back
+// to PT No2 in that case.
+
+describe('computeLayout — S20 FIX 1 Composite beam + deck-blocks integration', () => {
+  it('elevated + deck-blocks + Composite beam lays out with PT posts (no throw)', () => {
+    const design: DeckDesign = {
+      ...makeDeckBlocksDesign(),
+      beam: { material: { nominal: '2x10', species: 'Composite', grade: 'NA' } },
+      joist: {
+        material: { nominal: '2x10', species: 'Composite', grade: 'NA' },
+        spacingMm: 406,
+      },
+      decking: {
+        material: { nominal: '5/4x6', species: 'Composite', grade: 'NA' },
+        orientation: 'parallel-to-width',
+      },
+    };
+    expect(() => computeLayout(design)).not.toThrow();
+    const layout = computeLayout(design);
+    const posts = layout.members.filter((m) => m.kind === 'post');
+    expect(posts.length).toBeGreaterThan(0);
+    for (const p of posts) {
+      expect(p.material.kind).toBe('lumber');
+      if (p.material.kind === 'lumber') {
+        // FIX 1 fallback: PT No2 4x4 posts for a Composite beam.
+        expect(p.material.nominal).toBe('4x4');
+        expect(p.material.species).toBe('PT');
+        expect(p.material.grade).toBe('No2');
+      }
+    }
+    const blocks = layout.members.filter((m) => m.kind === 'block');
+    expect(blocks).toHaveLength(posts.length);
   });
 });
