@@ -277,11 +277,55 @@ describe('<BomPanel /> — section order (AC4)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// FIX 0(c) — 24 ft-wide deck no longer white-screens (S24 UAT crash)
+// ---------------------------------------------------------------------------
+
+describe('<BomPanel /> — FIX 0(c): >20 ft deck renders (splice, no crash)', () => {
+  it('a joist longer than max stock (24 ft) renders with spliced boards, no throw', () => {
+    // Live-UAT repro: on a 24 ft-wide deck, a joist (7315 mm) exceeded
+    // the 20 ft (6096 mm) max stock length for 2x8 PT No.2 → packer
+    // threw → BomPanel's useMemo re-threw → uncaught render error →
+    // whole app unmounted (white screen). The FIX 0(a) splice pass
+    // removes the throw; this test guards against a regression that
+    // reintroduces it. If the throw came back, `render` would throw
+    // (jsdom re-raises boundary catches unless there's a boundary
+    // ABOVE the render root — this test intentionally has none).
+    const bigJoist: LayoutMember = {
+      id: 'joist-24ft',
+      kind: 'joist',
+      position: { x: 0, y: 200, z: 0 },
+      size: { x: 38, y: 184, z: 7315 }, // 24 ft (rounded from ftMm(24))
+      rotation: { x: 0, y: 0, z: 0 },
+      material: { kind: 'lumber', nominal: '2x8', species: 'PT', grade: 'No2' },
+    };
+    setLayout({
+      designId: 'fixture-24ft',
+      computedAt: '2024-01-01T00:00:00.000Z',
+      bounds: { widthMm: 7315, lengthMm: 7315, heightMm: 305 },
+      members: [bigJoist],
+    });
+    // MUST NOT throw. Prior to FIX 0, this render threw
+    // `/exceeds the maximum stock length/` and the app went blank.
+    expect(() => render(<BomPanel />)).not.toThrow();
+    // Sanity check: the BOM h2 is present (the tree survived).
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(/bill of materials/i);
+    // The joist SKU renders as a details disclosure with the
+    // spliced boards inside.
+    const details = screen.getByRole('group');
+    expect(details).toBeInTheDocument();
+    // Summary line must indicate the SKU (2x8 PT No.2). Two
+    // spliced boards → "2 × 2x8 PT No.2 …".
+    expect(details.textContent ?? '').toMatch(/2x8/);
+    expect(details.textContent ?? '').toMatch(/^2\s*×/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Empty layout (S24 AC5)
 // ---------------------------------------------------------------------------
 
 describe('<BomPanel /> — empty layout (AC5)', () => {
-  it('renders the "Empty layout" copy and no table', () => {
+  it('renders the "No materials yet" copy and no table', () => {
     setLayout({
       designId: 'stub',
       computedAt: '2024-01-01T00:00:00.000Z',
@@ -292,6 +336,15 @@ describe('<BomPanel /> — empty layout (AC5)', () => {
     expect(screen.getByText(EMPTY_LAYOUT_TEXT)).toBeInTheDocument();
     expect(screen.queryByRole('table')).toBeNull();
     expect(screen.queryByRole('group')).toBeNull();
+  });
+
+  it('empty-state copy matches the ticket AC5 wording verbatim', () => {
+    // S24 UAT pair-fix FIX 3: the exact copy the ticket AC5 asks
+    // for — "No materials yet — adjust the parameters to generate
+    // a design." — guarded against typos and future drift.
+    expect(EMPTY_LAYOUT_TEXT).toBe(
+      'No materials yet — adjust the parameters to generate a design.',
+    );
   });
 
   it('uses role="status" so the empty message is announced', () => {

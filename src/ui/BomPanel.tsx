@@ -73,8 +73,14 @@ import { LumberRow } from './bom/LumberRow';
 
 /**
  * The empty-layout copy. Exported so tests grep-import.
+ *
+ * S24 UAT pair-fix FIX 3 (AC5 alignment): the ticket §AC5 wording
+ * is "No materials yet — adjust the parameters to generate a
+ * design." (was "Empty layout — check your parameters." before,
+ * which was a placeholder from the S14 skeleton).
  */
-export const EMPTY_LAYOUT_TEXT = 'Empty layout — check your parameters.';
+export const EMPTY_LAYOUT_TEXT =
+  'No materials yet — adjust the parameters to generate a design.';
 
 // ---------------------------------------------------------------------------
 // Component

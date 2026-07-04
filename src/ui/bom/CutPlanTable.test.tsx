@@ -180,6 +180,73 @@ describe('<CutPlanTable /> — AC6 unit-aware rendering', () => {
     const offcutText = cells[2]?.textContent ?? '';
     expect(offcutText.trim().length).toBeGreaterThan(0);
   });
+
+  // -------------------------------------------------------------------------
+  // S24 UAT pair-fix FIX 3 (QA G3): per-COLUMN unit assertions
+  // -------------------------------------------------------------------------
+  // The prior "whole-table textContent contains ′ or m" assertions
+  // could pass even if ONE column silently dropped the unit
+  // mark. Split them: stock cell, cuts cell, offcut cell each
+  // asserted independently.
+
+  it('imperial mode: stock, cuts, and offcut cells EACH contain foot/inch marks', () => {
+    render(<CutPlanTable pack={makeMixedPack()} sku="2x8 PT No2" units="imperial" />);
+    // Row 3 has both a multi-cut set AND a non-zero offcut → every
+    // cell is a real length in imperial.
+    const table = screen.getByRole('table');
+    const cells = table.querySelectorAll('tbody tr:nth-child(3) td');
+    const stockText = cells[0]?.textContent ?? '';
+    const cutsText = cells[1]?.textContent ?? '';
+    const offcutText = cells[2]?.textContent ?? '';
+    expect(stockText).toMatch(/[′″]/);
+    expect(cutsText).toMatch(/[′″]/);
+    expect(offcutText).toMatch(/[′″]/);
+    // And imperial units MUST NOT sneak in.
+    expect(stockText).not.toMatch(/\s(m|cm|mm)\b/);
+    expect(cutsText).not.toMatch(/\s(m|cm|mm)\b/);
+    expect(offcutText).not.toMatch(/\s(m|cm|mm)\b/);
+  });
+
+  it('metric mode: stock, cuts, and offcut cells EACH contain m/cm/mm marks', () => {
+    render(<CutPlanTable pack={makeMixedPack()} sku="2x8 PT No2" units="metric" />);
+    const table = screen.getByRole('table');
+    const cells = table.querySelectorAll('tbody tr:nth-child(3) td');
+    const stockText = cells[0]?.textContent ?? '';
+    const cutsText = cells[1]?.textContent ?? '';
+    const offcutText = cells[2]?.textContent ?? '';
+    expect(stockText).toMatch(/\s(m|cm|mm)\b/);
+    expect(cutsText).toMatch(/\s(m|cm|mm)\b/);
+    expect(offcutText).toMatch(/\s(m|cm|mm)\b/);
+    // And imperial marks MUST NOT sneak in.
+    expect(stockText).not.toMatch(/[′″]/);
+    expect(cutsText).not.toMatch(/[′″]/);
+    expect(offcutText).not.toMatch(/[′″]/);
+  });
+
+  // -------------------------------------------------------------------------
+  // S24 UAT pair-fix FIX 1 (metric precision consistency)
+  // -------------------------------------------------------------------------
+  // A full-length 16 ft board is 4877 mm. The prior 'coarse'
+  // precision rendered stock as "4.9 m" but cuts/offcut at fine
+  // precision → contradictory arithmetic. All three cells must now
+  // render at the SAME precision.
+
+  it('metric mode: a full 16 ft board renders stock, cut, and offcut consistently (fine precision)', () => {
+    render(<CutPlanTable pack={makeSingleBoardPack()} sku="2x8 PT No2" units="metric" />);
+    const table = screen.getByRole('table');
+    const cells = table.querySelectorAll('tbody tr:nth-child(1) td');
+    const stockText = cells[0]?.textContent ?? '';
+    const cutsText = cells[1]?.textContent ?? '';
+    const offcutText = cells[2]?.textContent ?? '';
+    // 4877 mm → "4.877 m" at fine precision. The prior bug had
+    // stock = "4.9 m" — guard against its return.
+    expect(stockText).not.toMatch(/^4\.9\s+m$/);
+    // Stock length and cut length are IDENTICAL (single cut of
+    // stock-length). They must produce the same formatted string.
+    expect(stockText).toBe(cutsText);
+    // Offcut is 0 → "0 mm". Ensure the offcut cell isn't blank.
+    expect(offcutText).toMatch(/^0\s+mm$/);
+  });
 });
 
 describe('<CutPlanTable /> — deterministic cut ordering (tie-break)', () => {

@@ -20,13 +20,17 @@
  * before rendering. Ties break by `memberId` ascending for
  * deterministic snapshots.
  *
- * ## Unit-aware
+ * ## Unit-aware (S24 UAT pair-fix FIX 1 — precision consistency)
  *
- *   - Stock length column uses `precision: 'coarse'` (stock sizes
- *     are round — 16 ft, 4.877 m — so the fractional inch is
- *     noise here). Matches the existing lumber-summary style.
- *   - Cuts + offcut columns use the default `'fine'` precision —
- *     member lengths are arbitrary and the fraction is signal.
+ *   - All length columns (stock length, cuts, offcut) use the
+ *     DEFAULT (fine) precision. An earlier version used
+ *     `precision: 'coarse'` on the stock-length column, which
+ *     produced contradictory arithmetic in metric mode: a 16 ft
+ *     board displayed stock 4.9 m, cut 4.877 m, offcut 0 mm.
+ *     Fine precision renders imperial round stock as "16′ 0″"
+ *     (no visible change; imperial coarse and fine happen to
+ *     agree for whole-foot boards) and metric as "4.877 m",
+ *     which matches the cut and offcut cells exactly.
  *
  * ## Boundary
  *
@@ -75,7 +79,20 @@ export function CutPlanTable({ pack, sku, units }: CutPlanTableProps): JSX.Eleme
       </thead>
       <tbody>
         {pack.stockBoards.map((board, index) => (
-          <CutPlanRow key={index} board={board} boardNumber={index + 1} units={units} />
+          <CutPlanRow
+            // FIX 3 (S24 UAT pair-fix — Opus#5): stable key. `index`
+            // as a key breaks if a future refactor re-orders boards
+            // (splice pass moved boards in front of FFD boards; a
+            // future refactor could re-sort). Compose from the
+            // memberIds on the board (deterministic; boards on the
+            // same run share memberIds — the FIX 0 splice can put
+            // the SAME memberId on multiple boards, so we suffix
+            // the index to keep the key globally unique).
+            key={`${board.cuts.map((c) => c.memberId).join('|')}#${String(index)}`}
+            board={board}
+            boardNumber={index + 1}
+            units={units}
+          />
         ))}
       </tbody>
     </table>
@@ -99,7 +116,14 @@ function CutPlanRow({
   return (
     <tr>
       <th scope="row">{boardNumber}</th>
-      <td>{formatLength(board.stockLengthMm, units, { precision: 'coarse' })}</td>
+      {/*
+        FIX 1 (S24 UAT pair-fix): stock length now renders at the
+        DEFAULT (fine) precision, matching cuts + offcut. See
+        module header. The prior `precision: 'coarse'` produced
+        contradictory metric arithmetic ("4.9 m stock, 4.877 m
+        cut, 0 mm offcut" doesn't add up).
+      */}
+      <td>{formatLength(board.stockLengthMm, units)}</td>
       <td>{formatCuts(board.cuts, units)}</td>
       <td>{formatLength(board.offcutMm, units)}</td>
     </tr>
