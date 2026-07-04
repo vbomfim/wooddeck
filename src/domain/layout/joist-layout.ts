@@ -109,7 +109,9 @@ export function layoutJoists(design: DeckDesign): LayoutMember[] {
   return xCenters.map<LayoutMember>((x, i) => ({
     id: `joist-${i}`,
     kind: 'joist',
-    material: design.joist.material,
+    // S17: LayoutMember.material is the widened MemberMaterialRef;
+    // stamp the lumber variant.
+    material: { kind: 'lumber', ...design.joist.material },
     position: { x, y: yCenter, z: 0 },
     size: { x: thicknessMm, y: depthMm, z: lengthMm },
     rotation: { x: 0, y: 0, z: 0 },

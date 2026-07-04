@@ -59,8 +59,12 @@ describe('saveDesignToLocalStorage — AC6 happy path', () => {
     saveDesignToLocalStorage(FIXTURE);
     // Prove end-to-end: we can round-trip through the persistence
     // layer without going through the application-layer wrapper for
-    // the load side.
-    expect(persistenceLoadFromLocalStorage()).toEqual(FIXTURE);
+    // the load side. S18 changed the loader return to
+    // `{ design, migrated }`; destructure to keep the assertion
+    // focused on the design payload.
+    const loaded = persistenceLoadFromLocalStorage();
+    expect(loaded).not.toBeNull();
+    expect(loaded!.design).toEqual(FIXTURE);
   });
 
   it('writes to the frozen STORAGE_KEY (not some ad-hoc slot)', () => {
@@ -76,7 +80,9 @@ describe('saveDesignToLocalStorage — AC6 happy path', () => {
     saveDesignToLocalStorage(FIXTURE);
     saveDesignToLocalStorage(FIXTURE);
     saveDesignToLocalStorage(FIXTURE);
-    expect(persistenceLoadFromLocalStorage()).toEqual(FIXTURE);
+    const loaded = persistenceLoadFromLocalStorage();
+    expect(loaded).not.toBeNull();
+    expect(loaded!.design).toEqual(FIXTURE);
   });
 });
 

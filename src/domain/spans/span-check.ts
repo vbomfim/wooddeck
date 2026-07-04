@@ -200,6 +200,14 @@ export function spanCheck(layout: Layout, table: SpanTable): Warning[] {
 
   if (joistSpanMm !== null && joists.length > 0) {
     for (const joist of joists) {
+      // Joist members are ALWAYS stamped with kind='lumber' by the
+      // layout engine (see S17 MemberMaterialRef widening). This
+      // guard is defensive — a `kind='block'` joist is a domain
+      // impossibility, but silently trusting the union would open
+      // the door to a future producer bug. Skip such a member so
+      // the span check remains fail-safe rather than throwing on a
+      // `lookupJoistMaxSpan` type mismatch.
+      if (joist.material.kind !== 'lumber') continue;
       const allowableMm = table.lookupJoistMaxSpan(joist.material, joistSpacingMm);
       const citation = table.citationFor('joist', joist.material, joistSpacingMm);
       const warning = evaluateSpan({
@@ -220,6 +228,10 @@ export function spanCheck(layout: Layout, table: SpanTable): Warning[] {
       const beamPostSpanMm = deriveBeamPostToPostSpanMm(beam, posts);
       if (beamPostSpanMm === null) continue; // beam with < 2 posts — skip
 
+      // Same defensive narrowing as the joist loop above — beams
+      // are always lumber, but skip a `kind='block'` beam rather
+      // than pass a shape mismatch into the span table.
+      if (beam.material.kind !== 'lumber') continue;
       const allowableMm = table.lookupBeamMaxSpan(
         beam.material,
         joistSpanMm,

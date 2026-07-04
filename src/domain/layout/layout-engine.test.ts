@@ -42,6 +42,12 @@ function makeDesign(overrides: Partial<{
       lengthMm: overrides.lengthMm ?? 4880,
       heightMm: overrides.heightMm ?? 914,
     },
+    structure: 'elevated',
+    foundation: {
+      type: 'posts-on-footings',
+      post: { nominal: '6x6', species: 'PT', grade: 'No2' },
+      footing: { widthMm: 300, depthMm: 300 },
+    },
     joist: {
       material: { nominal: '2x10', species: 'PT', grade: 'No2' },
       spacingMm: overrides.spacingMm ?? 406,
@@ -76,9 +82,16 @@ describe('computeLayout — AC6 complete render contract', () => {
       expect(m.id.length).toBeGreaterThan(0);
       expect(m.kind).toBeTypeOf('string');
       expect(m.material).toBeDefined();
-      expect(m.material.nominal).toBeDefined();
-      expect(m.material.species).toBeDefined();
-      expect(m.material.grade).toBeDefined();
+      // S17: LayoutMember.material is the widened MemberMaterialRef
+      // discriminated union — every layout produced by the current
+      // engine (elevated + posts-on-footings only) stamps the lumber
+      // variant.
+      expect(m.material.kind).toBe('lumber');
+      if (m.material.kind === 'lumber') {
+        expect(m.material.nominal).toBeDefined();
+        expect(m.material.species).toBeDefined();
+        expect(m.material.grade).toBeDefined();
+      }
       expect(m.position.x).toBeTypeOf('number');
       expect(m.position.y).toBeTypeOf('number');
       expect(m.position.z).toBeTypeOf('number');

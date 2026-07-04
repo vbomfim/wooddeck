@@ -7,18 +7,20 @@
  *
  *   - `.dependency-cruiser.cjs` limits `state/` and `ui/` to their
  *     own trees plus `application/` and `domain/`, so a direct
- *     `import '../persistence/deck-file/schema-v1'` would be an
+ *     `import '../persistence/deck-file/schema-v2'` would be an
  *     allowlist violation anyway. This barrel is the CANONICAL way
  *     to reach the persistence API — a rewrite of the internals is
  *     invisible to consumers.
  *
- * ## Public surface (frozen — issue #7 §2)
+ * ## Public surface (S18 update)
  *
- *   type DeckFile, DeckFileV1, DeckFileMeta, DownloadDeckFileOptions,
- *        SerializeOptions, DeckFileErrorCode
- *   const STORAGE_KEY
+ *   type DeckFile, DeckFileV1, DeckFileV2, DeckFileMeta,
+ *        DownloadDeckFileOptions, SerializeOptions,
+ *        DeckFileErrorCode, DeserializeResult
+ *   const STORAGE_KEY, SCHEMA_V2_VERSION
  *   class DeckFileError
- *   fn    serialize, deserialize
+ *   fn    serialize      // v2 by default (S18 AC10)
+ *   fn    deserialize    // dispatches across schema 1 / 2 (S18)
  *   fn    saveDesignToLocalStorage, loadDesignFromLocalStorage,
  *         clearDesignFromLocalStorage
  *   fn    downloadDeckFile, readDeckFile
@@ -26,10 +28,13 @@
 export type {
   DeckFile,
   DeckFileV1,
+  DeckFileV2,
   DeckFileMeta,
   SerializeOptions,
-} from './deck-file/schema-v1';
-export { serialize, deserialize } from './deck-file/schema-v1';
+} from './deck-file/envelope-types';
+export { SCHEMA_V2_VERSION } from './deck-file/envelope-types';
+export type { DeserializeResult } from './deck-file/schema-v2';
+export { serialize, deserialize } from './deck-file/schema-v2';
 
 export type { DeckFileErrorCode } from './deck-file/errors';
 export { DeckFileError } from './deck-file/errors';

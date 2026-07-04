@@ -118,10 +118,24 @@ export function layoutPostsAndFootings(
   design: DeckDesign,
   beams: readonly LayoutMember[],
 ): PostAndFootingResult {
+  // S17: `design.post` is now optional at the type level (a floating
+  // design has no posts). `layoutPostsAndFootings` is only invoked
+  // by the elevated / posts-on-footings code path, so `design.post`
+  // must be present — throw a defensive error naming the module if
+  // it isn't. S19's structure-aware orchestrator is responsible for
+  // routing floating designs to the block-layout path instead.
+  if (!design.post) {
+    throw new Error(
+      'layoutPostsAndFootings: design.post is undefined. This function is ' +
+        'only valid for elevated / posts-on-footings designs. ' +
+        'See src/domain/layout/post-layout.ts and Epic 2 / S19.',
+    );
+  }
+  const postMaterialRef = design.post.material;
   const postMat = lookupMaterial(
-    design.post.material.nominal,
-    design.post.material.species,
-    design.post.material.grade,
+    postMaterialRef.nominal,
+    postMaterialRef.species,
+    postMaterialRef.grade,
   );
   const postThicknessX = postMat.actual.widthMm; // 6×6 post: 140 mm on x
   const postThicknessZ = postMat.actual.heightMm; // 6×6 post: 140 mm on z (square posts)
@@ -150,7 +164,8 @@ export function layoutPostsAndFootings(
       posts.push({
         id: `post-${beamLabel}-${i}`,
         kind: 'post',
-        material: design.post.material,
+        // S17: stamp the lumber variant of the widened MemberMaterialRef.
+        material: { kind: 'lumber', ...postMaterialRef },
         position: { x, y: stack.postCenterY, z },
         size: { x: postThicknessX, y: stack.postHeightMm, z: postThicknessZ },
         rotation: { x: 0, y: 0, z: 0 },
@@ -159,11 +174,11 @@ export function layoutPostsAndFootings(
         id: `footing-${beamLabel}-${i}`,
         kind: 'footing',
         // MVP placeholder: footings are CONCRETE, but the LayoutMember
-        // schema requires a MaterialRef. We reuse the post lumber ref
+        // schema requires a material ref. We reuse the post lumber ref
         // here purely so the render contract stays uniform. The BOM
         // story (S14) MUST special-case kind==='footing' and NOT count
         // this as lumber — see the module header TODO(S14/BOM).
-        material: design.post.material,
+        material: { kind: 'lumber', ...postMaterialRef },
         position: { x, y: stack.footingCenterY, z },
         size: { x: FOOTING_WIDTH_MM, y: FOOTING_DEPTH_MM, z: FOOTING_WIDTH_MM },
         rotation: { x: 0, y: 0, z: 0 },

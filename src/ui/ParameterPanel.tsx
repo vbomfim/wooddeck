@@ -233,6 +233,20 @@ export function ParameterPanel(): JSX.Element {
   const units = useUiUnits();
   const { status, lastError } = useDesignStatus();
 
+  // S17 (Epic 2): `design.post` is optional at the type level so a
+  // future floating design can omit it. The MVP UI is elevated-only
+  // (S23 owns the floating variants), so we throw a defensive error
+  // rather than render an invalid state. The default design + every
+  // v1-loaded design guarantees `design.post` is defined; hitting
+  // this branch means an upstream bug.
+  if (!design.post) {
+    throw new Error(
+      'ParameterPanel: design.post is required in the MVP UI (elevated mode). ' +
+        'A floating design without a post field is not yet renderable — see Epic 2 / S23.',
+    );
+  }
+  const postMaterialRef = design.post.material;
+
   // Catalog-filtered option lists. Each SelectField's options list
   // reflects that member's OWN species, not a shared "panel species"
   // — so if the user picks Composite (which broadcasts to joist +
@@ -246,7 +260,7 @@ export function ParameterPanel(): JSX.Element {
   // mutates.
   const joistSpecies = design.joist.material.species;
   const beamSpecies = design.beam.material.species;
-  const postSpecies = design.post.material.species;
+  const postSpecies = postMaterialRef.species;
   const deckingSpecies = design.decking.material.species;
 
   const joistSizeOptions = useMemo(
@@ -343,7 +357,7 @@ export function ParameterPanel(): JSX.Element {
     if (canStock(design.beam.material.nominal)) {
       draft.beam = { material: { species: nextSpecies, grade: nextGrade } };
     }
-    if (canStock(design.post.material.nominal)) {
+    if (canStock(postMaterialRef.nominal)) {
       draft.post = { material: { species: nextSpecies, grade: nextGrade } };
     }
     apply(draft);
@@ -447,7 +461,7 @@ export function ParameterPanel(): JSX.Element {
         />
         <SelectField<LumberNominal>
           label="Post size"
-          value={design.post.material.nominal}
+          value={postMaterialRef.nominal}
           options={postSizeOptions}
           onChange={(nominal): void => apply({ post: { material: { nominal } } })}
         />

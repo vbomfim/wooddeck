@@ -48,20 +48,29 @@ import { Ajv2020, type ValidateFunction, type ErrorObject } from 'ajv/dist/2020.
 import addFormats from 'ajv-formats';
 
 import { DeckFileError } from './errors';
-import type { DeckFileV1 } from './envelope-types';
+import type { DeckFileV1, DeckFileV2 } from './envelope-types';
 
-import deckFileSchema from '../../../docs/deck-file-schema-v1.json' with { type: 'json' };
+import deckFileSchemaV1 from '../../../docs/deck-file-schema-v1.json' with { type: 'json' };
+import deckFileSchemaV2 from '../../../docs/deck-file-schema-v2.json' with { type: 'json' };
 
 // ---------------------------------------------------------------------------
-// Ajv instance — module-scope, single validator
+// Ajv instances — module-scope, one validator per schema version
 // ---------------------------------------------------------------------------
 
 /**
- * Build the singleton Ajv instance. Kept as a function so the tests
- * can prove the same construction works when instantiated separately
- * (see `validator.test.ts` — AC5 rebuild).
+ * Build a singleton Ajv validator for a given schema. Kept as a
+ * function so the tests can prove the same construction works when
+ * instantiated separately (see `validator.test.ts` — AC5 rebuild).
+ *
+ * ## Why a fresh Ajv per validator (not a shared instance)
+ *
+ * Ajv 8+ instances are stateless once compiled, but `strict: true`
+ * validates every schema at COMPILE time — a `.compile()` failure
+ * on v2 would then break v1's cached validator too. Two separate
+ * instances isolate the failure surface and keep each schema's
+ * error semantics pristine.
  */
-function buildValidator(): ValidateFunction {
+function buildValidator(schema: object): ValidateFunction {
   const ajv = new Ajv2020({
     strict: true, // fail-compile on unknown/typo keywords
     allErrors: true, // collect every failure, not just the first
@@ -70,13 +79,11 @@ function buildValidator(): ValidateFunction {
     removeAdditional: false, // never delete unknown keys (would hide bugs)
   });
   addFormats(ajv);
-  // Ajv typing wants `object`, and TypeScript picks up the imported
-  // JSON as a wide unknown-shape record. Ajv validates the schema at
-  // compile time so a shape mismatch throws here, not later.
-  return ajv.compile(deckFileSchema as object);
+  return ajv.compile(schema);
 }
 
-const validate: ValidateFunction = buildValidator();
+const validateV1: ValidateFunction = buildValidator(deckFileSchemaV1);
+const validateV2: ValidateFunction = buildValidator(deckFileSchemaV2);
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -94,12 +101,27 @@ const validate: ValidateFunction = buildValidator();
  *         structural violation.
  */
 export function validateDeckFile(payload: unknown): DeckFileV1 {
-  if (validate(payload)) {
-    // Ajv has proven the shape at runtime; the cast reflects that.
+  if (validateV1(payload)) {
     return payload as DeckFileV1;
   }
-  const errors = validate.errors ?? [];
-  throw new DeckFileError('schema-validation-failed', formatValidationError(errors));
+  const errors = validateV1.errors ?? [];
+  throw new DeckFileError('schema-validation-failed', formatValidationError(errors, 'v1'));
+}
+
+/**
+ * Validate a payload against the `.deck` v2 JSON Schema (S18).
+ *
+ * Success returns the input NARROWED to `DeckFileV2`. Failure throws
+ * a `DeckFileError` with a v2-specific hint in the message so users
+ * loading a malformed v2 file see "v2 rejects unknown fields" rather
+ * than the v1 message.
+ */
+export function validateDeckFileV2(payload: unknown): DeckFileV2 {
+  if (validateV2(payload)) {
+    return payload as DeckFileV2;
+  }
+  const errors = validateV2.errors ?? [];
+  throw new DeckFileError('schema-validation-failed', formatValidationError(errors, 'v2'));
 }
 
 // ---------------------------------------------------------------------------
@@ -108,40 +130,81 @@ export function validateDeckFile(payload: unknown): DeckFileV1 {
 
 /**
  * Reduce Ajv's verbose error array to a single actionable message.
- * We pick the FIRST error deterministically so the message is
- * reproducible under test; the rest are still in `validate.errors`
- * if a caller needs to inspect them via `.cause` (future work).
+ *
+ * When the schema uses `oneOf` (e.g. `foundation` is a discriminated
+ * union in v2), Ajv walks EVERY branch and reports errors from each
+ * — the raw `errors[0]` is therefore often a misleading "missing
+ * required field from a branch you weren't matching". We pick the
+ * DEEPEST-path non-`oneOf` error instead: the deeper the instancePath,
+ * the more specific the offense is to the user's actual data.
  *
  * Ajv error path shape: `"/design/footprint"` — we transform to
  * dot-notation (`"design.footprint"`) for readability.
  */
-function formatValidationError(errors: readonly ErrorObject[]): string {
+function formatValidationError(
+  errors: readonly ErrorObject[],
+  schemaVersion: 'v1' | 'v2',
+): string {
   if (errors.length === 0) {
-    // Should be unreachable — `validate` returned false, so Ajv set
-    // `.errors`. Guard anyway so we NEVER throw a bare "undefined"
-    // message.
     return '.deck file failed schema validation (no details available)';
   }
-  const first = errors[0]!;
-  const pathDots = first.instancePath.replace(/^\//, '').replace(/\//g, '.');
+  const chosen = pickMostSpecificError(errors);
+  const pathDots = chosen.instancePath.replace(/^\//, '').replace(/\//g, '.');
   const location = pathDots.length > 0 ? pathDots : '(root)';
-  // Ajv's `params` payload varies by keyword. For `required` it
-  // carries `missingProperty`; for `additionalProperties` it carries
-  // `additionalProperty`; for `enum` it carries `allowedValues`. We
-  // surface the missing/extra property name explicitly so the message
-  // is specific.
-  const params = first.params as {
+  const params = chosen.params as {
     missingProperty?: string;
     additionalProperty?: string;
     allowedValues?: readonly unknown[];
   };
   if (params.missingProperty !== undefined) {
-    const missingPath = location === '(root)' ? params.missingProperty : `${location}.${params.missingProperty}`;
+    const missingPath =
+      location === '(root)' ? params.missingProperty : `${location}.${params.missingProperty}`;
     return `.deck file failed schema validation: missing required field '${missingPath}'`;
   }
   if (params.additionalProperty !== undefined) {
-    const extraPath = location === '(root)' ? params.additionalProperty : `${location}.${params.additionalProperty}`;
-    return `.deck file failed schema validation: unknown field '${extraPath}' — v1 rejects unknown fields inside 'design'`;
+    const extraPath =
+      location === '(root)' ? params.additionalProperty : `${location}.${params.additionalProperty}`;
+    return `.deck file failed schema validation: unknown field '${extraPath}' — ${schemaVersion} rejects unknown fields inside 'design'`;
   }
-  return `.deck file failed schema validation at '${location}': ${first.message ?? first.keyword}`;
+  return `.deck file failed schema validation at '${location}': ${chosen.message ?? chosen.keyword}`;
+}
+
+/**
+ * Rank Ajv errors and pick the most user-facing one.
+ *
+ * Priority order:
+ *   1. Enum/pattern/format errors on the DEEPEST path (most specific).
+ *   2. `additionalProperties` / `required` errors on the deepest path.
+ *   3. Any error, deepest-path first, `oneOf` LAST (it's the least
+ *      informative — it just says "matched no branch").
+ */
+function pickMostSpecificError(errors: readonly ErrorObject[]): ErrorObject {
+  const pathDepth = (e: ErrorObject): number =>
+    e.instancePath.length === 0 ? 0 : e.instancePath.split('/').length;
+  const priority = (e: ErrorObject): number => {
+    switch (e.keyword) {
+      case 'enum':
+      case 'pattern':
+      case 'format':
+      case 'const':
+        return 3;
+      case 'additionalProperties':
+      case 'required':
+        return 2;
+      case 'oneOf':
+      case 'anyOf':
+      case 'allOf':
+      case 'not':
+        return 0;
+      default:
+        return 1;
+    }
+  };
+  // Sort descending by (priority, path depth). Stable — first wins ties.
+  const ranked = [...errors].sort((a, b) => {
+    const dp = priority(b) - priority(a);
+    if (dp !== 0) return dp;
+    return pathDepth(b) - pathDepth(a);
+  });
+  return ranked[0]!;
 }

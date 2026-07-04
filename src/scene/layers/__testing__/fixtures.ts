@@ -47,25 +47,34 @@
  * (`domain/model.ts` "LAYOUT COORDINATE FRAME").
  */
 
-import type { Layout, LayoutMember, MaterialRef, MemberKind, Warning } from '../../../domain/model';
+import type { Layout, LayoutMember, LumberMemberMaterial, MemberKind, Warning } from '../../../domain/model';
 
 /**
  * Default material — used when a fixture caller does not care about
  * the species. Every scene-layer test that cares picks its own.
+ *
+ * ## S17 — MemberMaterialRef widening
+ *
+ * Scene-layer fixtures MUST return `LumberMemberMaterial` (`kind:'lumber'`)
+ * — the scene layers under test render lumber members. Block-typed
+ * members belong to a separate layer (see Epic 2 / S22).
  */
-export const FIXTURE_MATERIAL_PT: MaterialRef = Object.freeze({
+export const FIXTURE_MATERIAL_PT: LumberMemberMaterial = Object.freeze({
+  kind: 'lumber',
   nominal: '2x8',
   species: 'PT',
   grade: 'No2',
 });
 
-export const FIXTURE_MATERIAL_CEDAR: MaterialRef = Object.freeze({
+export const FIXTURE_MATERIAL_CEDAR: LumberMemberMaterial = Object.freeze({
+  kind: 'lumber',
   nominal: '2x8',
   species: 'Cedar',
   grade: 'No2',
 });
 
-export const FIXTURE_MATERIAL_COMPOSITE: MaterialRef = Object.freeze({
+export const FIXTURE_MATERIAL_COMPOSITE: LumberMemberMaterial = Object.freeze({
+  kind: 'lumber',
   nominal: '5/4x6',
   species: 'Composite',
   grade: 'NA',

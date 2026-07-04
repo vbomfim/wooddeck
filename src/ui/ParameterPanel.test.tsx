@@ -236,7 +236,7 @@ describe('<ParameterPanel /> — AC7 species propagation', () => {
     const before = useDesignStore.getState().bundle.design;
     expect(before.joist.material.species).toBe('PT');
     expect(before.beam.material.species).toBe('PT');
-    expect(before.post.material.species).toBe('PT');
+    expect(before.post?.material.species).toBe('PT');
     expect(before.decking.material.species).toBe('PT');
 
     const species = screen.getByLabelText(/^species/i);
@@ -245,7 +245,7 @@ describe('<ParameterPanel /> — AC7 species propagation', () => {
     const after = useDesignStore.getState().bundle.design;
     expect(after.joist.material.species).toBe('Cedar');
     expect(after.beam.material.species).toBe('Cedar');
-    expect(after.post.material.species).toBe('Cedar');
+    expect(after.post?.material.species).toBe('Cedar');
     // Decking is INDEPENDENT — untouched by the species control.
     expect(after.decking.material.species).toBe('PT');
   });
@@ -319,7 +319,7 @@ describe('<ParameterPanel /> — edges: catalog-invalid combos filtered / safe-b
     const design = useDesignStore.getState().bundle.design;
     expect(design.joist.material.species).toBe('Composite');
     expect(design.beam.material.species).toBe('Composite');
-    expect(design.post.material.species).toBe('PT'); // kept
+    expect(design.post?.material.species).toBe('PT'); // kept
     expect(useDesignStore.getState().status).toBe('idle');
   });
 
@@ -426,7 +426,7 @@ describe('<ParameterPanel /> — FIX 1 Grade options are catalog-filtered', () =
     const after = useDesignStore.getState().bundle.design;
     expect(after.joist.material.grade).toBe('No2');
     expect(after.beam.material.grade).toBe('No2');
-    expect(after.post.material.grade).toBe('No2');
+    expect(after.post?.material.grade).toBe('No2');
     expect(after.decking.material.grade).toBe('No2');
   });
 });
@@ -561,7 +561,7 @@ describe('<ParameterPanel /> — FIX 4 every field applies to its own store slic
     render(<ParameterPanel />);
     const postSize = screen.getByLabelText(/post size/i);
     await user.selectOptions(postSize, '6x6');
-    expect(useDesignStore.getState().bundle.design.post.material.nominal).toBe('6x6');
+    expect(useDesignStore.getState().bundle.design.post?.material.nominal).toBe('6x6');
   });
 
   it('Decking board size select applies decking.material.nominal', async () => {

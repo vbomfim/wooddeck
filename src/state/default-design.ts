@@ -69,6 +69,7 @@
 
 import type { DeckDesign } from '../domain/model';
 import { MM_PER_FOOT } from '../domain/units';
+import { FOOTING_DEPTH_MM, FOOTING_WIDTH_MM } from '../domain/layout';
 
 /**
  * The frozen 5-tuple of default design parameters — issue #9 AC8
@@ -81,6 +82,18 @@ import { MM_PER_FOOT } from '../domain/units';
  * The units in the parameter names use the vocabulary the ticket
  * uses (`Ft`, `Mm`) — millimeter conversion happens inside the
  * factory so no other module has to know `MM_PER_FOOT`.
+ *
+ * Epic 2 / S17 addition (issue #39 AC2): the default carries an
+ * explicit `structure: 'elevated'` + `foundation: { type:
+ * 'posts-on-footings', post: <existing 6×6 PT No2>, footing: {
+ * widthMm: 300, depthMm: 300 } }` so downstream Epic 2 use-cases
+ * always see a fully-populated design. The 300 mm values come from
+ * `FOOTING_WIDTH_MM` / `FOOTING_DEPTH_MM` (`src/domain/layout/y-stack.ts`)
+ * so a future footing-dimension revision propagates automatically.
+ * AC2 pins the invariant `spanCheck(computeLayout(defaultDesign),
+ * IrcSpanTable) === []` — the new fields must NOT change the
+ * layout math (they carry the same MaterialRef the top-level
+ * `design.post` already carried).
  */
 export const DEFAULT_DESIGN_PARAMS = Object.freeze({
   widthFt: 12,
@@ -121,6 +134,7 @@ export function makeDefaultDesign(id: string, createdAt: string): DeckDesign {
     deckingOrientation,
     bayRemainderStrategy,
   } = DEFAULT_DESIGN_PARAMS;
+  const postMaterial = { nominal: postNominal, species, grade } as const;
   return {
     id,
     createdAt,
@@ -129,12 +143,24 @@ export function makeDefaultDesign(id: string, createdAt: string): DeckDesign {
       lengthMm: lengthFt * MM_PER_FOOT,
       heightMm: heightFt * MM_PER_FOOT,
     },
+    // Epic 2 / S17 (issue #39 AC2) — the default is elevated +
+    // posts-on-footings so downstream layout & span-check math is
+    // byte-identical to the pre-S17 default (SC-004 invariant).
+    structure: 'elevated',
+    foundation: {
+      type: 'posts-on-footings',
+      post: postMaterial,
+      footing: { widthMm: FOOTING_WIDTH_MM, depthMm: FOOTING_DEPTH_MM },
+    },
     joist: {
       material: { nominal: joistNominal, species, grade },
       spacingMm: joistSpacingMm,
     },
     beam: { material: { nominal: beamNominal, species, grade } },
-    post: { material: { nominal: postNominal, species, grade } },
+    // Retained for elevated backward compatibility — carries the
+    // SAME MaterialRef as `foundation.post` above. See §4b of ticket
+    // #39 for the deprecation policy.
+    post: { material: postMaterial },
     decking: {
       material: { nominal: deckingNominal, species, grade },
       orientation: deckingOrientation,

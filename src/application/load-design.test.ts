@@ -83,15 +83,15 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('loadDesignFromFile — AC2 happy path', () => {
-  it('resolves a DesignBundle with a design deep-equal to the source', async () => {
+  it('resolves a result with a design deep-equal to the source', async () => {
     const file = makeDeckFile(serialize(FIXTURE.design));
-    const bundle = await loadDesignFromFile(file, table);
+    const { bundle } = await loadDesignFromFile(file, table);
     expect(bundle.design).toEqual(FIXTURE.design);
   });
 
   it('returns a layout + warnings consistent with computeLayout + spanCheck', async () => {
     const file = makeDeckFile(serialize(FIXTURE.design));
-    const bundle = await loadDesignFromFile(file, table);
+    const { bundle } = await loadDesignFromFile(file, table);
     const expectedLayout = computeLayout(FIXTURE.design);
     const expectedWarnings = spanCheck(expectedLayout, table);
     // With fake timers frozen the `computedAt` inside both layouts is
@@ -100,12 +100,18 @@ describe('loadDesignFromFile — AC2 happy path', () => {
     expect(bundle.warnings).toEqual(expectedWarnings);
   });
 
-  it('returns exactly three enumerable own keys — { design, layout, warnings }', async () => {
+  it('returns a bundle with exactly three enumerable own keys — { design, layout, warnings }', async () => {
     // Locks the S8-store spread contract: `set({ ...bundle })` must
     // populate exactly the three DesignBundle slots and NOTHING else.
     const file = makeDeckFile(serialize(FIXTURE.design));
-    const bundle = await loadDesignFromFile(file, table);
+    const { bundle } = await loadDesignFromFile(file, table);
     expect(Object.keys(bundle).sort()).toEqual(['design', 'layout', 'warnings']);
+  });
+
+  it('reports `migrated: false` when the file is a native v2 envelope (S18 AC9)', async () => {
+    const file = makeDeckFile(serialize(FIXTURE.design));
+    const { migrated } = await loadDesignFromFile(file, table);
+    expect(migrated).toBe(false);
   });
 });
 
@@ -236,14 +242,16 @@ describe('loadDesignFromLocalStorage — returns null when no stored design', ()
   });
 });
 
-describe('loadDesignFromLocalStorage — returns DesignBundle when valid', () => {
+describe('loadDesignFromLocalStorage — returns bundle-result when valid', () => {
   it('returns a DesignBundle consistent with computeLayoutAndCheck for a stored design', () => {
     persistenceSaveToLocalStorage(FIXTURE.design);
-    const bundle = loadDesignFromLocalStorage(table);
-    expect(bundle).not.toBeNull();
-    expect(bundle!.design).toEqual(FIXTURE.design);
+    const result = loadDesignFromLocalStorage(table);
+    expect(result).not.toBeNull();
+    expect(result!.bundle.design).toEqual(FIXTURE.design);
     const expectedLayout = computeLayout(FIXTURE.design);
-    expect(bundle!.layout).toEqual(expectedLayout);
-    expect(bundle!.warnings).toEqual(spanCheck(expectedLayout, table));
+    expect(result!.bundle.layout).toEqual(expectedLayout);
+    expect(result!.bundle.warnings).toEqual(spanCheck(expectedLayout, table));
+    // S18 AC9: v2 native envelope → migrated:false.
+    expect(result!.migrated).toBe(false);
   });
 });

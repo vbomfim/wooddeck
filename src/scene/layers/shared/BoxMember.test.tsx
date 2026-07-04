@@ -150,7 +150,7 @@ describe('<BoxMember /> — material sharing (AC6)', () => {
     const member = makeMember({
       id: 'joist-pt',
       kind: 'joist',
-      material: { nominal: '2x8', species: 'PT', grade: 'No2' },
+      material: { kind: 'lumber', nominal: '2x8', species: 'PT', grade: 'No2' },
     });
     const renderer = await ReactThreeTestRenderer.create(<BoxMember member={member} />);
     const mesh = renderer.scene.findByType('Mesh').instance as Mesh;
@@ -166,7 +166,7 @@ describe('<BoxMember /> — material sharing (AC6)', () => {
     const member = makeMember({
       id: 'joist-cedar',
       kind: 'joist',
-      material: { nominal: '2x8', species: 'Cedar', grade: 'No2' },
+      material: { kind: 'lumber', nominal: '2x8', species: 'Cedar', grade: 'No2' },
     });
     const renderer = await ReactThreeTestRenderer.create(<BoxMember member={member} />);
     const mesh = renderer.scene.findByType('Mesh').instance as Mesh;
@@ -178,7 +178,7 @@ describe('<BoxMember /> — material sharing (AC6)', () => {
     const member = makeMember({
       id: 'board-composite',
       kind: 'board',
-      material: { nominal: '5/4x6', species: 'Composite', grade: 'NA' },
+      material: { kind: 'lumber', nominal: '5/4x6', species: 'Composite', grade: 'NA' },
     });
     const renderer = await ReactThreeTestRenderer.create(<BoxMember member={member} />);
     const mesh = renderer.scene.findByType('Mesh').instance as Mesh;
@@ -214,7 +214,7 @@ describe('<BoxMember /> — optional material override (Fix F, Opus #6)', () => 
     const member = makeMember({
       id: 'joist-overlay',
       kind: 'joist',
-      material: { nominal: '2x8', species: 'PT', grade: 'No2' },
+      material: { kind: 'lumber', nominal: '2x8', species: 'PT', grade: 'No2' },
     });
     const override = new MeshBasicMaterial({ color: 0xff0000 });
     const renderer = await ReactThreeTestRenderer.create(
@@ -239,7 +239,7 @@ describe('<BoxMember /> — optional material override (Fix F, Opus #6)', () => 
     const member = makeMember({
       id: 'joist-default',
       kind: 'joist',
-      material: { nominal: '2x8', species: 'PT', grade: 'No2' },
+      material: { kind: 'lumber', nominal: '2x8', species: 'PT', grade: 'No2' },
     });
     const renderer = await ReactThreeTestRenderer.create(<BoxMember member={member} />);
     const mesh = renderer.scene.findByType('Mesh').instance as Mesh;

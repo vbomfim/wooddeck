@@ -43,7 +43,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type { Layout, LayoutMember, MaterialRef, MemberKind } from '../../domain/model';
+import type { Layout, LayoutMember, LumberMemberMaterial, MemberKind } from '../../domain/model';
 
 import { deriveBom, type BomLine } from './derive-bom';
 
@@ -51,10 +51,14 @@ import { deriveBom, type BomLine } from './derive-bom';
 // Fixture builders — kept tiny so the test file reads TOP-DOWN.
 // --------------------------------------------------------------------------
 
-const PT_2x8: MaterialRef = { nominal: '2x8', species: 'PT', grade: 'No2' };
-const PT_6x6: MaterialRef = { nominal: '6x6', species: 'PT', grade: 'No2' };
-const PT_5_4x6: MaterialRef = { nominal: '5/4x6', species: 'PT', grade: 'No2' };
-const CEDAR_2x8: MaterialRef = { nominal: '2x8', species: 'Cedar', grade: 'No2' };
+// S17 note: `LayoutMember.material` is now a `MemberMaterialRef`
+// discriminated union; deriveBom's grouping only emits lumber rows,
+// so the fixture materials are all `LumberMemberMaterial`
+// (`kind: 'lumber'`).
+const PT_2x8: LumberMemberMaterial = { kind: 'lumber', nominal: '2x8', species: 'PT', grade: 'No2' };
+const PT_6x6: LumberMemberMaterial = { kind: 'lumber', nominal: '6x6', species: 'PT', grade: 'No2' };
+const PT_5_4x6: LumberMemberMaterial = { kind: 'lumber', nominal: '5/4x6', species: 'PT', grade: 'No2' };
+const CEDAR_2x8: LumberMemberMaterial = { kind: 'lumber', nominal: '2x8', species: 'Cedar', grade: 'No2' };
 
 /**
  * Make a layout member with axis-aligned size + zero rotation. The
@@ -70,7 +74,7 @@ const CEDAR_2x8: MaterialRef = { nominal: '2x8', species: 'Cedar', grade: 'No2' 
 function makeMember(
   id: string,
   kind: MemberKind,
-  material: MaterialRef,
+  material: LumberMemberMaterial,
   lengthMm: number,
 ): LayoutMember {
   // Approximate cross-section per SKU. Not asserted; just for

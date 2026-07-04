@@ -85,7 +85,7 @@ describe('makeDefaultDesign — AC8 factory', () => {
     expect(design.joist.material).toEqual({ nominal: '2x8', species: 'PT', grade: 'No2' });
     expect(design.joist.spacingMm).toBe(406);
     expect(design.beam.material).toEqual({ nominal: '2x8', species: 'PT', grade: 'No2' });
-    expect(design.post.material).toEqual({ nominal: '6x6', species: 'PT', grade: 'No2' });
+    expect(design.post?.material).toEqual({ nominal: '6x6', species: 'PT', grade: 'No2' });
     expect(design.decking.material).toEqual({
       nominal: '5/4x6',
       species: 'PT',

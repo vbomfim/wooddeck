@@ -193,7 +193,7 @@ describe('<DeckLayers /> — G5 heterogeneous-species render (per-species materi
           makeMember({
             id: `${s}-${k}-${index++}`,
             kind: k,
-            material: { nominal: '2x8', species: s, grade: 'No2' },
+            material: { kind: 'lumber', nominal: '2x8', species: s, grade: 'No2' },
             position: { x: index * 100, y: 100, z: 0 },
           }),
         );

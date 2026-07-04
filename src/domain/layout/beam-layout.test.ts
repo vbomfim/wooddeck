@@ -31,6 +31,12 @@ function makeDesign(overrides: Partial<{
       lengthMm: overrides.lengthMm ?? 4880,
       heightMm: overrides.heightMm ?? 914,
     },
+    structure: 'elevated',
+    foundation: {
+      type: 'posts-on-footings',
+      post: { nominal: '6x6', species: 'PT', grade: 'No2' },
+      footing: { widthMm: 300, depthMm: 300 },
+    },
     joist: {
       material: { nominal: '2x10', species: 'PT', grade: 'No2' },
       spacingMm: 406,
@@ -61,7 +67,9 @@ describe('layoutBeams — count and identity', () => {
   it('every beam carries the beam material reference from the design', () => {
     const design = makeDesign();
     for (const b of layoutBeams(design)) {
-      expect(b.material).toEqual(design.beam.material);
+      // S17 MemberMaterialRef widening — beams are stamped
+      // `{kind:'lumber', ...design.beam.material}`.
+      expect(b.material).toEqual({ kind: 'lumber', ...design.beam.material });
     }
   });
 });

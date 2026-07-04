@@ -32,6 +32,12 @@ function makeDesign(overrides: Partial<{
       lengthMm: overrides.lengthMm ?? 4880,
       heightMm: overrides.heightMm ?? 914,
     },
+    structure: 'elevated',
+    foundation: {
+      type: 'posts-on-footings',
+      post: { nominal: '6x6', species: 'PT', grade: 'No2' },
+      footing: { widthMm: 300, depthMm: 300 },
+    },
     joist: {
       material: { nominal: '2x10', species: 'PT', grade: 'No2' },
       spacingMm: 406,
@@ -160,7 +166,9 @@ describe('decking-layout — default orientation (parallel-to-width)', () => {
     const design = makeDesign();
     for (const b of layoutDecking(design)) {
       expect(b.rotation).toEqual({ x: 0, y: 0, z: 0 });
-      expect(b.material).toEqual(design.decking.material);
+      // S17 MemberMaterialRef widening — decking boards are
+      // stamped `{kind:'lumber', ...design.decking.material}`.
+      expect(b.material).toEqual({ kind: 'lumber', ...design.decking.material });
       expect(b.kind).toBe('board');
     }
   });

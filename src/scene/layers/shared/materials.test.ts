@@ -36,7 +36,7 @@ function makeMember(species: Species): LayoutMember {
   return {
     id: 'test',
     kind: 'joist',
-    material: { nominal: '2x8', species, grade: species === 'Composite' ? 'NA' : 'No2' },
+    material: { kind: 'lumber', nominal: '2x8', species, grade: species === 'Composite' ? 'NA' : 'No2' },
     position: { x: 0, y: 0, z: 0 },
     size: { x: 100, y: 100, z: 100 },
     rotation: { x: 0, y: 0, z: 0 },

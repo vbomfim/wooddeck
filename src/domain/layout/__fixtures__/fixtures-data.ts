@@ -24,25 +24,36 @@
  */
 
 import { MM_PER_FOOT } from '../../units';
-import type { DeckDesign } from '../../model';
+import type { DeckDesign, MaterialRef } from '../../model';
+import { FOOTING_DEPTH_MM, FOOTING_WIDTH_MM } from '../y-stack';
 
-const PT_2X10: DeckDesign['joist']['material'] = { nominal: '2x10', species: 'PT', grade: 'No2' };
-const PT_6X6: DeckDesign['post']['material'] = { nominal: '6x6', species: 'PT', grade: 'No2' };
-const PT_54: DeckDesign['decking']['material'] = { nominal: '5/4x6', species: 'PT', grade: 'No2' };
-const CEDAR_54: DeckDesign['decking']['material'] = {
+const PT_2X10: MaterialRef = { nominal: '2x10', species: 'PT', grade: 'No2' };
+const PT_6X6: MaterialRef = { nominal: '6x6', species: 'PT', grade: 'No2' };
+const PT_54: MaterialRef = { nominal: '5/4x6', species: 'PT', grade: 'No2' };
+const CEDAR_54: MaterialRef = {
   nominal: '5/4x6',
   species: 'Cedar',
   grade: 'No2',
 };
-const CEDAR_2X10: DeckDesign['joist']['material'] = {
+const CEDAR_2X10: MaterialRef = {
   nominal: '2x10',
   species: 'Cedar',
   grade: 'No2',
 };
-const COMPOSITE_54: DeckDesign['decking']['material'] = {
+const COMPOSITE_54: MaterialRef = {
   nominal: '5/4x6',
   species: 'Composite',
   grade: 'NA',
+};
+
+// S17: every fixture DeckDesign carries the SAME structure/foundation
+// (elevated + posts-on-footings) so the pre-S17 layout math is
+// unchanged and SC-004 golden fixtures stay byte-stable. Reused by
+// every literal + factory below.
+const FIXTURE_FOUNDATION = {
+  type: 'posts-on-footings' as const,
+  post: PT_6X6,
+  footing: { widthMm: FOOTING_WIDTH_MM, depthMm: FOOTING_DEPTH_MM },
 };
 
 /**
@@ -72,6 +83,8 @@ function design(args: {
       lengthMm: args.lengthFt * MM_PER_FOOT,
       heightMm: args.heightFt * MM_PER_FOOT,
     },
+    structure: 'elevated',
+    foundation: FIXTURE_FOUNDATION,
     joist: { material: joistMat, spacingMm: args.spacingMm },
     beam: { material: joistMat },
     post: { material: PT_6X6 },
@@ -168,6 +181,8 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       id: '77777777-7777-4777-8777-777777777777',
       createdAt: '2026-07-02T00:00:06.000Z',
       footprint: { widthMm: 4064, lengthMm: 6096, heightMm: 914 },
+      structure: 'elevated',
+      foundation: FIXTURE_FOUNDATION,
       joist: { material: PT_2X10, spacingMm: 508 },
       beam: { material: PT_2X10 },
       post: { material: PT_6X6 },
@@ -182,6 +197,8 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       id: '88888888-8888-4888-8888-888888888888',
       createdAt: '2026-07-02T00:00:07.000Z',
       footprint: { widthMm: 3660, lengthMm: 4880, heightMm: 914 },
+      structure: 'elevated',
+      foundation: FIXTURE_FOUNDATION,
       joist: { material: PT_2X10, spacingMm: 406 },
       beam: { material: PT_2X10 },
       post: { material: PT_6X6 },
@@ -240,6 +257,8 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
       createdAt: '2026-07-02T00:00:11.000Z',
       footprint: { widthMm: 10 * MM_PER_FOOT, lengthMm: 10 * MM_PER_FOOT, heightMm: 520 },
+      structure: 'elevated',
+      foundation: FIXTURE_FOUNDATION,
       joist: { material: PT_2X10, spacingMm: 406 },
       beam: { material: PT_2X10 },
       post: { material: PT_6X6 },

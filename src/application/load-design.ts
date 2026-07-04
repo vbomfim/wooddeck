@@ -63,6 +63,19 @@ import { computeLayoutAndCheck } from './compute-layout';
 import type { DesignBundle } from './types';
 
 /**
+ * Result of `loadDesignFromFile` and `loadDesignFromLocalStorage` —
+ * the fully computed `DesignBundle` plus the `migrated` boolean
+ * introduced in S18 (AC9). When `true`, the on-disk file was a v1
+ * envelope that was upgraded to v2 during load; S23 will wire a
+ * migration toast off this seam. Callers that don't care about the
+ * flag can destructure `{ bundle }` and drop `migrated`.
+ */
+export interface LoadDesignResult {
+  readonly bundle: DesignBundle;
+  readonly migrated: boolean;
+}
+
+/**
  * Parse + validate a `.deck` file uploaded by the user, then compute
  * its layout and run the span-check.
  *
@@ -75,7 +88,7 @@ import type { DesignBundle } from './types';
  *
  * @throws {DeckFileError} propagated unchanged from `readDeckFile`
  *   (codes: `file-too-large`, `file-read-failed`, `invalid-json`,
- *   `schema-validation-failed`, `unknown-schema`).
+ *   `schema-validation-failed`, `unknown-schema`, `migration-failed`).
  * @throws {LayoutError} propagated from `computeLayout` when the
  *   parsed design references an unknown catalog material OR is
  *   dimensionally invalid (issue #8 §4 Edge cases).
@@ -83,10 +96,10 @@ import type { DesignBundle } from './types';
 export async function loadDesignFromFile(
   file: File,
   table: SpanTable,
-): Promise<DesignBundle> {
-  const design = await readDeckFile(file);
+): Promise<LoadDesignResult> {
+  const { design, migrated } = await readDeckFile(file);
   const { layout, warnings } = computeLayoutAndCheck(design, table);
-  return { design, layout, warnings };
+  return { bundle: { design, layout, warnings }, migrated };
 }
 
 /**
@@ -101,12 +114,17 @@ export async function loadDesignFromFile(
  * swallows any `DeckFileError`, so `LayoutError` is the only
  * remaining failure mode we might see here.
  *
+ * The returned `migrated` flag propagates the persistence-layer
+ * migration boolean unchanged — `true` iff the stored slot held a v1
+ * envelope that was upgraded to v2 in-flight.
+ *
  * @param table `SpanTable` instance (see `loadDesignFromFile` param
  *   docs for why it is passed here).
  */
-export function loadDesignFromLocalStorage(table: SpanTable): DesignBundle | null {
-  const design = persistenceLoadFromLocalStorage();
-  if (design === null) return null;
+export function loadDesignFromLocalStorage(table: SpanTable): LoadDesignResult | null {
+  const loaded = persistenceLoadFromLocalStorage();
+  if (loaded === null) return null;
+  const { design, migrated } = loaded;
   const { layout, warnings } = computeLayoutAndCheck(design, table);
-  return { design, layout, warnings };
+  return { bundle: { design, layout, warnings }, migrated };
 }

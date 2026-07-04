@@ -82,6 +82,16 @@ const NOT_APPLICABLE = '—';
  * Human-readable label for each `MemberKind`. Extracted so a
  * future rename (e.g. `board` → `deck-board`) touches one place.
  * Uses a `Record<MemberKind, string>` for the exhaustive-check.
+ *
+ * ## S17 — MemberKind widening
+ *
+ * `block` (foundation block placement — S22) and `blocking`
+ * (between-joist blocking members — S24+) are stubbed with
+ * provisional labels. The BOM UI does not yet render block/
+ * blocking rows (they are excluded upstream by `deriveBom`
+ * which currently only emits joist/beam/post/footing/board
+ * rows); the labels exist so the exhaustive `Record<MemberKind, string>`
+ * check compiles.
  */
 const KIND_LABEL: Record<MemberKind, string> = {
   joist: 'Joist',
@@ -89,6 +99,8 @@ const KIND_LABEL: Record<MemberKind, string> = {
   post: 'Post',
   footing: 'Footing',
   board: 'Board',
+  block: 'Foundation block',
+  blocking: 'Blocking',
 };
 
 /**

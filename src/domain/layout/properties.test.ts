@@ -82,6 +82,12 @@ const designArb = fc
       lengthMm: r.lengthMm,
       heightMm: r.heightMm,
     },
+    structure: 'elevated',
+    foundation: {
+      type: 'posts-on-footings',
+      post: { nominal: '6x6', species: 'PT', grade: 'No2' },
+      footing: { widthMm: 300, depthMm: 300 },
+    },
     joist: {
       material: { nominal: '2x10', species: 'PT', grade: 'No2' },
       spacingMm: r.spacingMm,
@@ -251,6 +257,12 @@ describe('layout engine — AC3 property: no same-kind bounding-box overlap', ()
         id: '00000000-0000-4000-8000-0000000000ff',
         createdAt: '2026-07-02T00:00:00.000Z',
         footprint: { widthMm: r.widthMm, lengthMm: r.lengthMm, heightMm: r.heightMm },
+        structure: 'elevated',
+        foundation: {
+          type: 'posts-on-footings',
+          post: { nominal: '6x6', species: 'PT', grade: 'No2' },
+          footing: { widthMm: 300, depthMm: 300 },
+        },
         joist: {
           material: { nominal: '2x10', species: 'PT', grade: 'No2' },
           spacingMm: r.spacingMm,
@@ -451,6 +463,12 @@ describe('layout engine — AC4 width/length swap ⇒ rotated layout', () => {
       id: '00000000-0000-4000-8000-000000000006',
       createdAt: '2026-07-02T00:00:00.000Z',
       footprint: { widthMm: 3660, lengthMm: 6096, heightMm: 914 },
+      structure: 'elevated',
+      foundation: {
+        type: 'posts-on-footings',
+        post: { nominal: '6x6', species: 'PT', grade: 'No2' },
+        footing: { widthMm: 300, depthMm: 300 },
+      },
       joist: {
         material: { nominal: '2x10', species: 'PT', grade: 'No2' },
         spacingMm: 406,
@@ -575,10 +593,14 @@ describe('layout engine — AC6 amplified property (Fix E / QA-Gap#2)', () => {
           expect(m.id.length).toBeGreaterThan(0);
           expect(ids.has(m.id), `duplicate id: ${m.id}`).toBe(false);
           ids.add(m.id);
-          // material triple defined.
-          expect(m.material.nominal).toBeDefined();
-          expect(m.material.species).toBeDefined();
-          expect(m.material.grade).toBeDefined();
+          // S17: material is the widened MemberMaterialRef discriminated
+          // union — the current engine only emits the lumber variant.
+          expect(m.material.kind).toBe('lumber');
+          if (m.material.kind === 'lumber') {
+            expect(m.material.nominal).toBeDefined();
+            expect(m.material.species).toBeDefined();
+            expect(m.material.grade).toBeDefined();
+          }
           // position/size/rotation: finite numbers on every axis.
           for (const axis of ['x', 'y', 'z'] as const) {
             expect(Number.isFinite(m.position[axis])).toBe(true);

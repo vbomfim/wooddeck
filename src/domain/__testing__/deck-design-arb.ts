@@ -38,7 +38,14 @@
  */
 import fc from 'fast-check';
 
-import type { DeckDesign, LumberNominal, MaterialRef, Species } from '../model';
+import type {
+  DeckDesign,
+  FoundationSpec,
+  LumberNominal,
+  MaterialRef,
+  Species,
+  StructureMode,
+} from '../model';
 
 // ---------------------------------------------------------------------------
 // Catalog subsets — narrow to the triples actually present in the MVP
@@ -120,6 +127,17 @@ export const deckingMaterialArb: fc.Arbitrary<MaterialRef> = fc.oneof(
  * Numeric ranges: `widthMm`/`lengthMm` cap at 20 m (larger than any
  * residential deck IRC allows), `heightMm` at 3 m (top of a 2-storey
  * post), joist spacing pinned to code-legal 12"/16"/24" values.
+ *
+ * ## S17 update — foundation + structure fields
+ *
+ * The generator ALWAYS emits `structure: 'elevated'` + `foundation:
+ * { type: 'posts-on-footings', post: <same as top-level postMaterial>,
+ * footing: { widthMm: 300, depthMm: 300 } }`. This mirrors the
+ * pre-S17 semantic (every generated design is an elevated post-
+ * supported deck) so the AC4 JSON round-trip property continues to
+ * pass. The S6 persistence round-trip property test that uses this
+ * arb DOES NOT exercise the new fields against the v1 Ajv schema;
+ * S18 owns the schema/migration for `structure` and `foundation`.
  */
 export const deckDesignArb: fc.Arbitrary<DeckDesign> = fc
   .record({
@@ -139,15 +157,28 @@ export const deckDesignArb: fc.Arbitrary<DeckDesign> = fc
       'centered' as const,
     ),
   })
-  .map(
-    (r): DeckDesign => ({
+  .map((r): DeckDesign => {
+    // S17: seed elevated + posts-on-footings for every generated
+    // design. See module docs above. Reusing `postMaterial` as
+    // `foundation.post` maintains the pre-S17 invariant that
+    // `design.post` and `foundation.post` carry the SAME
+    // MaterialRef when the structure is elevated.
+    const structure: StructureMode = 'elevated';
+    const foundation: FoundationSpec = {
+      type: 'posts-on-footings',
+      post: r.postMaterial,
+      footing: { widthMm: 300, depthMm: 300 },
+    };
+    return {
       id: r.id,
       createdAt: new Date(r.createdAtEpochMs).toISOString(),
       footprint: { widthMm: r.widthMm, lengthMm: r.lengthMm, heightMm: r.heightMm },
+      structure,
+      foundation,
       joist: { material: r.joistMaterial, spacingMm: r.joistSpacingMm },
       beam: { material: r.beamMaterial },
       post: { material: r.postMaterial },
       decking: { material: r.deckingMaterial, orientation: r.orientation },
       layout: { bayRemainderStrategy: r.bayRemainderStrategy },
-    }),
-  );
+    };
+  });
