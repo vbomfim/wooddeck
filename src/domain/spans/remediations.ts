@@ -4,29 +4,65 @@
  * ## Purpose
  *
  * Given a single `Warning` (from `spanCheck`), the current
- * `DeckDesign`, and any conforming `SpanTable`, derive the set of
- * ONE-CLICK REMEDIATION OPTIONS the ui layer can offer the user to
- * clear the warning. Each option carries:
+ * `DeckDesign`, any conforming `SpanTable`, and an injected
+ * `recompute` function, derive the set of ONE-CLICK REMEDIATION
+ * OPTIONS the ui layer can offer the user to clear the warning.
+ * Each option carries:
  *
  *   - A discriminated-union `patch` describing WHAT to change
  *     (spacing / joist size / beam size / joist species / beam
  *     species). The state layer converts the patch into a
  *     `DeepPartial<DeckDesign>` at apply time (see
  *     `state/design-store.applyRemediation`).
- *   - A pre-computed `newAllowableMm` from a hypothetical SpanTable
- *     lookup under the patched configuration — so the ui can render
- *     "new allowable ~14 ft ← was ~11 ft" without re-running the
- *     layout engine.
+ *   - A `newAllowableMm` derived from the RECOMPUTED design (or
+ *     the SpanTable when the recompute clears the warning entirely
+ *     — the "new allowable" is then a display estimate).
  *   - `wouldClear` (a boolean) + `disabled`/`disabledReason` — the
  *     UI hides nothing: even "not viable" options surface with a
  *     reason.
+ *
+ * ## Correct-by-construction `wouldClear` (S16 pair-fix)
+ *
+ * Every candidate patch is verified against a REAL recompute of
+ * the patched design (`recompute(patchedDesign)`) — NOT against
+ * SpanTable proxies. The proxy approach was flawed:
+ *   - beam options used `warning.actualMm` (post-to-post span) as
+ *     the beam-table tributary, but `spanCheck` uses the JOIST
+ *     span → 12'×18' 2×8 PT beam "upgrade to 2×10" previewed
+ *     wouldClear=true but the real recompute kept the warning.
+ *   - joist options used the NOMINAL `design.joist.spacingMm`,
+ *     but `spanCheck` reads ACTUAL spacing from the layout with
+ *     snap tolerance → 10'×8' Cedar 2×6 @ 24″ "reduce to 406mm"
+ *     previewed wouldClear=true but the layout's actual spacing
+ *     tripped span-check's fail-safe (allowable=0) → warning
+ *     REMAINED.
+ * A tool that says "this fixes your over-spanned deck" when it
+ * doesn't is dangerous. The recompute-injection gives us
+ * ground-truth verification per candidate.
+ *
+ * ### Why an INJECTED recompute (not a direct import)
+ *
+ * S19 added `domain/layout/floating → domain/spans`. If
+ * `remediations.ts` (in `domain/spans`) imported `computeLayout`
+ * from `domain/layout`, we would have a `spans → layout → spans`
+ * cycle → dep-cruiser `no-circular` fails, and the boundary
+ * discipline that keeps each layer independently rewritable would
+ * be broken. Instead we invert: `computeRemediations` takes
+ * `recompute` as a parameter. The state-layer hook
+ * (`useRemediationsForWarning`) wires `recompute =
+ * (d) => computeLayoutAndCheck(d, spanTable).warnings`. Domain
+ * remains pure, no import edges added.
  *
  * ## Fail-safe / NEVER-throws discipline (AC5)
  *
  * Mirrors `spanCheck`: the compute NEVER throws. A malformed
  * warning kind, a Composite species (fail-safe from the IRC table),
- * a zero-returning mock table — every branch returns a stable
- * (possibly all-disabled) array. Silently returning `[]` is
+ * a zero-returning mock table, a `recompute` that throws
+ * `LayoutError` on an invalid patched design — every branch
+ * returns a stable (possibly all-disabled) array. When
+ * `recompute` throws for a candidate, that candidate is surfaced
+ * as `disabled` with a reason ("would produce an invalid design")
+ * rather than propagating the throw. Silently returning `[]` is
  * acceptable ONLY when the warning kind is not one we model
  * (e.g., a future `over-span-post`); when we DO model a warning,
  * we must surface every option — enabled or disabled — so the user
@@ -62,6 +98,15 @@
  * `Composite` is fail-safe in `IrcSpanTable` (returns 0). We NEVER
  * offer a species swap that TARGETS Composite framing.
  *
+ * ## Composite → wood grade override (S16 pair-fix)
+ *
+ * A design with Composite framing has `grade: 'NA'`. When we swap
+ * to a wood species (Cedar / PT), we MUST also set `grade: 'No2'`
+ * on the candidate material — otherwise the SpanTable lookup (and
+ * the recompute) would keep the inherited `'NA'` grade, return 0,
+ * and every wood swap would surface as disabled with a misleading
+ * reason. `candidateSpeciesMaterial` centralizes this rule.
+ *
  * ## Partial-fix tier NOT in MVP (§17 Q3)
  *
  * If no clearing option exists for any KIND, every option surfaces
@@ -76,25 +121,23 @@
  * a grade-upgrade remediation — grade is not on the ParameterPanel
  * surface and would produce a design the user can't inspect.
  *
- * ## Known limitation — no cross-warning coupling
+ * ## Known limitation — recompute cost bound
  *
- * `computeRemediations` computes `newAllowableMm` from the
- * `SpanTable` ONLY. It does NOT run the full `computeLayout` in the
- * loop (that would (a) be expensive, and (b) loop back into
- * span-check). Applying a remediation MIGHT trip a DIFFERENT
- * warning (e.g., a spacing floor from the layout engine); the
- * `application/apply-remediation.ts` step runs the full recompute,
- * and if it produces a `LayoutError` the store's error branch
- * surfaces it. Document this at the module boundary; do not paper
- * over it here.
+ * `computeRemediations` calls the injected `recompute` up to
+ * ~4 times per remediation KIND (framing-size ladder, spacing
+ * ladder, species swap) → ~15 recomputes per warning. Layout
+ * benchmarks show ~0.03ms per recompute at 20×30 → total < 1ms
+ * per call. The state-layer hook memoizes on `(memberId, design)`
+ * so this cost only occurs on genuine design changes.
  *
  * ## Rewritability
  *
  * The compute is a pure function of `(Warning, DeckDesign,
- * SpanTable)`. Every branch is either "add an option" or "add a
- * disabled option with a reason" — no shared mutable state, no
- * clock, no I/O. An alternative implementation from the interface
- * contract + this test file is a mechanical exercise.
+ * SpanTable, recompute)`. Every branch is either "add an option"
+ * or "add a disabled option with a reason" — no shared mutable
+ * state, no clock, no I/O beyond the injected recompute. An
+ * alternative implementation from the interface contract + this
+ * test file is a mechanical exercise.
  */
 
 import type {
@@ -159,9 +202,13 @@ export interface RemediationOption {
   /** `Warning.allowableMm` at compute time. Pass-through. */
   readonly currentAllowableMm: Mm;
   /**
-   * Hypothetical allowable under the patch — read from
-   * `SpanTable.lookup*` for the patched material. `0` indicates
-   * fail-safe / not-covered (matches SpanTable's contract).
+   * Hypothetical allowable under the patch. When `wouldClear` is
+   * `false` this is the recomputed allowable from `spanCheck` on
+   * the patched design — an honest "you would improve from X to Y
+   * but still be over-span". When `wouldClear` is `true` this is
+   * the SpanTable lookup for the patched material (a display
+   * estimate; the true allowable is at least `actualSpanMm`).
+   * `0` indicates fail-safe / not-covered.
    */
   readonly newAllowableMm: Mm;
   /** `Warning.actualMm` at compute time. Pass-through. */
@@ -275,10 +322,165 @@ function speciesLabel(species: Species): string {
  * Compute `wouldClear` from `(newAllowableMm, actualSpanMm)`. Pulls
  * the boolean-derivation into ONE place so the invariant
  * `wouldClear implies newAllowableMm > 0 && newAllowableMm >=
- * actualSpanMm` cannot drift across producers.
+ * actualSpanMm` cannot drift across producers. Retained as a
+ * DISPLAY-only guard for the `newAllowableMm` estimate — the
+ * ground-truth `wouldClear` decision comes from `verifyPatchClears`
+ * (S16 pair-fix).
  */
 function computeWouldClear(newAllowableMm: Mm, actualSpanMm: Mm): boolean {
   return newAllowableMm > 0 && newAllowableMm >= actualSpanMm;
+}
+
+/**
+ * Build a candidate `MaterialRef` for a species swap. When the
+ * CURRENT species is `Composite` (grade `NA`) and we swap to a
+ * wood species (Cedar / PT), the grade MUST become `No2` — the
+ * S13 catalog rule for wood framing. Without this, the swap would
+ * inherit `grade: 'NA'`, the wood-species SpanTable lookup would
+ * return 0, and the swap would surface as disabled with a
+ * misleading reason (S16 pair-fix, Opus review #6).
+ *
+ * For a WOOD → wood swap (Cedar → PT), the grade is retained
+ * as-is (typically `No2`).
+ */
+function candidateSpeciesMaterial(
+  current: MaterialRef,
+  target: Species,
+): MaterialRef {
+  const isCompositeToWood =
+    current.species === 'Composite' && target !== 'Composite';
+  return {
+    ...current,
+    species: target,
+    grade: isCompositeToWood ? 'No2' : current.grade,
+  };
+}
+
+/**
+ * Build a candidate `DeckDesign` from the current design + a
+ * `RemediationPatch`. Mirrors the `patchFromRemediation` mapping
+ * in `application/apply-remediation.ts` but is INLINED here so the
+ * domain module stays independent of the application layer. The
+ * shallow-merge is safe because every `RemediationPatch` variant
+ * targets a specific leaf path.
+ *
+ * @param design The current `DeckDesign`.
+ * @param patch  The `RemediationPatch` describing the change.
+ * @returns The patched `DeckDesign` (a fresh object; the caller's
+ *          original is not mutated).
+ */
+function applyPatchForVerification(
+  design: DeckDesign,
+  patch: RemediationPatch,
+): DeckDesign {
+  switch (patch.kind) {
+    case 'reduce-joist-spacing':
+      return {
+        ...design,
+        joist: { ...design.joist, spacingMm: patch.newSpacingMm },
+      };
+    case 'upgrade-joist-size':
+      return {
+        ...design,
+        joist: {
+          ...design.joist,
+          material: { ...design.joist.material, nominal: patch.newNominal },
+        },
+      };
+    case 'upgrade-beam-size':
+      return {
+        ...design,
+        beam: {
+          ...design.beam,
+          material: { ...design.beam.material, nominal: patch.newNominal },
+        },
+      };
+    case 'change-joist-species':
+      return {
+        ...design,
+        joist: {
+          ...design.joist,
+          material: candidateSpeciesMaterial(
+            design.joist.material,
+            patch.newSpecies,
+          ),
+        },
+      };
+    case 'change-beam-species':
+      return {
+        ...design,
+        beam: {
+          ...design.beam,
+          material: candidateSpeciesMaterial(
+            design.beam.material,
+            patch.newSpecies,
+          ),
+        },
+      };
+    /* c8 ignore next 5 */
+    default: {
+      const _exhaustive: never = patch;
+      void _exhaustive;
+      return design;
+    }
+  }
+}
+
+/**
+ * Verify a candidate patch against a REAL recompute of the patched
+ * design (S16 pair-fix). Returns the ground-truth `wouldClear`
+ * decision plus the recomputed `newAllowableMm` (from the persisted
+ * warning if the patch reduced but did not clear, else `null` —
+ * caller falls back to a display estimate).
+ *
+ * ### Error handling
+ *
+ * If `recompute` throws (LayoutError — e.g. the patched design has
+ * a below-minimum dimension), we return
+ * `{ wouldClear: false, invalidPatch: true, newAllowableMm: null }`
+ * so the caller can surface the candidate as disabled with a
+ * clear reason. `computeRemediations` NEVER throws — that
+ * discipline is preserved end-to-end.
+ */
+function verifyPatchClears(
+  warning: Warning,
+  design: DeckDesign,
+  patch: RemediationPatch,
+  recompute: (design: DeckDesign) => readonly Warning[],
+): {
+  readonly wouldClear: boolean;
+  readonly newAllowableMm: Mm | null;
+  readonly invalidPatch: boolean;
+} {
+  const patched = applyPatchForVerification(design, patch);
+  let warnings: readonly Warning[];
+  try {
+    warnings = recompute(patched);
+  } catch {
+    // The patched design is invalid (e.g. LayoutError). The
+    // candidate can't be evaluated → mark as invalid so caller
+    // disables with a reason.
+    return { wouldClear: false, newAllowableMm: null, invalidPatch: true };
+  }
+  // A warning at the SAME (memberId, kind) is the "still
+  // over-spanned" signal. If we find one, the patch reduced (or
+  // didn't change) the situation — report the recomputed allowable.
+  // If we find NONE, the patch cleared the warning.
+  const persistent = warnings.find(
+    (w) => w.memberId === warning.memberId && w.kind === warning.kind,
+  );
+  if (persistent) {
+    return {
+      wouldClear: false,
+      newAllowableMm: persistent.allowableMm,
+      invalidPatch: false,
+    };
+  }
+  return {
+    wouldClear: true,
+    newAllowableMm: null,
+    invalidPatch: false,
+  };
 }
 
 /**
@@ -381,6 +583,7 @@ function produceReduceJoistSpacing(
   warning: Warning,
   design: DeckDesign,
   table: SpanTable,
+  recompute: (design: DeckDesign) => readonly Warning[],
 ): RemediationOption {
   const currentSpacingMm = design.joist.spacingMm;
   const material = design.joist.material;
@@ -407,44 +610,57 @@ function produceReduceJoistSpacing(
     });
   }
 
-  // Ascending order: smallest DECREASE first (i.e., largest spacing
-  // still less than current). We iterate DESCENDING (largest of the
-  // tighter values) so 610 → 406 is tried before 610 → 305 — matches
-  // "smallest change first" per AC3.
+  // DESCENDING iteration (largest tighter first) → "smallest change
+  // first" per AC3: try 610→406 before 610→305.
   const orderedTighter = [...tighterSpacings].sort((a, b) => b - a);
+  let lastVerified: {
+    readonly spacing: Mm;
+    readonly newAllowableMm: Mm | null;
+    readonly invalidPatch: boolean;
+  } | null = null;
   for (const spacing of orderedTighter) {
-    const newAllowableMm = table.lookupJoistMaxSpan(material, spacing);
-    if (computeWouldClear(newAllowableMm, warning.actualMm)) {
+    const patch: RemediationPatch = {
+      kind: 'reduce-joist-spacing',
+      newSpacingMm: spacing,
+    };
+    const verify = verifyPatchClears(warning, design, patch, recompute);
+    lastVerified = {
+      spacing,
+      newAllowableMm: verify.newAllowableMm,
+      invalidPatch: verify.invalidPatch,
+    };
+    if (verify.wouldClear) {
+      // Display estimate — table lookup on the patched material at
+      // the new spacing. Only used for the "was X, now Y" label.
+      const displayAllowable = table.lookupJoistMaxSpan(material, spacing);
       return makeOption({
         kind: 'reduce-joist-spacing',
         memberId: warning.memberId,
-        patch: { kind: 'reduce-joist-spacing', newSpacingMm: spacing },
+        patch,
         summary:
           `Reduce joist spacing to ${spacingInchesLabel(spacing)} in o.c.`,
         currentAllowableMm: warning.allowableMm,
-        newAllowableMm,
+        // Display value: if the SpanTable lookup returned 0
+        // (fail-safe / not-covered) but recompute says the warning
+        // cleared, use `actualMm` as a lower-bound estimate so
+        // the label reads sensibly.
+        newAllowableMm:
+          displayAllowable > 0 ? displayAllowable : warning.actualMm,
         actualSpanMm: warning.actualMm,
       });
     }
   }
 
-  // No tighter spacing clears — still surface as disabled (AC4).
-  // Use the tightest tabulated as the placeholder patch value; UI
-  // will render the reason.
-  const tightestNewAllowable = table.lookupJoistMaxSpan(
-    material,
-    orderedTighter[orderedTighter.length - 1]!,
-  );
+  // No tighter spacing clears — surface as disabled (AC4).
+  const attempted = lastVerified?.spacing ?? orderedTighter[orderedTighter.length - 1]!;
+  const attemptedAllowable = lastVerified?.newAllowableMm ?? 0;
   return {
     kind: 'reduce-joist-spacing',
     memberId: warning.memberId,
-    patch: {
-      kind: 'reduce-joist-spacing',
-      newSpacingMm: orderedTighter[orderedTighter.length - 1]!,
-    },
+    patch: { kind: 'reduce-joist-spacing', newSpacingMm: attempted },
     summary: `Reduce joist spacing (disabled)`,
     currentAllowableMm: warning.allowableMm,
-    newAllowableMm: tightestNewAllowable,
+    newAllowableMm: attemptedAllowable,
     actualSpanMm: warning.actualMm,
     wouldClear: false,
     disabled: true,
@@ -461,20 +677,19 @@ function produceUpgradeJoistSize(
   warning: Warning,
   design: DeckDesign,
   table: SpanTable,
+  recompute: (design: DeckDesign) => readonly Warning[],
 ): RemediationOption {
   const currentNominal = design.joist.material.nominal;
   const material = design.joist.material;
   const spacingMm = design.joist.spacingMm;
 
   const currentIdx = FRAMING_SIZES.indexOf(currentNominal);
-  // Nominals larger than the current — SORTED ASCENDING is intrinsic
-  // to `FRAMING_SIZES` (2x6 < 2x8 < 2x10 < 2x12), so we just slice.
   const largerNominals =
     currentIdx === -1
       ? // Current is a non-framing SKU (4x4 / 6x6 / 5/4x6) — offer
-        // the full framing set (2x6..2x12). This is defensive; the
-        // layout engine shouldn't produce a joist over-span warning
-        // for a non-framing SKU today, but a future stricter layout
+        // the full framing set (2x6..2x12). Defensive; the layout
+        // engine shouldn't produce a joist over-span warning for a
+        // non-framing SKU today, but a future stricter layout
         // enforcement could.
         FRAMING_SIZES
       : FRAMING_SIZES.slice(currentIdx + 1);
@@ -495,17 +710,31 @@ function produceUpgradeJoistSize(
     });
   }
 
+  let lastVerified: {
+    readonly nominal: LumberNominal;
+    readonly newAllowableMm: Mm | null;
+  } | null = null;
   for (const nominal of largerNominals) {
-    const candidateMaterial: MaterialRef = { ...material, nominal };
-    const newAllowableMm = table.lookupJoistMaxSpan(candidateMaterial, spacingMm);
-    if (computeWouldClear(newAllowableMm, warning.actualMm)) {
+    const patch: RemediationPatch = {
+      kind: 'upgrade-joist-size',
+      newNominal: nominal,
+    };
+    const verify = verifyPatchClears(warning, design, patch, recompute);
+    lastVerified = { nominal, newAllowableMm: verify.newAllowableMm };
+    if (verify.wouldClear) {
+      const candidateMaterial: MaterialRef = { ...material, nominal };
+      const displayAllowable = table.lookupJoistMaxSpan(
+        candidateMaterial,
+        spacingMm,
+      );
       return makeOption({
         kind: 'upgrade-joist-size',
         memberId: warning.memberId,
-        patch: { kind: 'upgrade-joist-size', newNominal: nominal },
+        patch,
         summary: `Upgrade joists to ${nominalLabel(nominal)}`,
         currentAllowableMm: warning.allowableMm,
-        newAllowableMm,
+        newAllowableMm:
+          displayAllowable > 0 ? displayAllowable : warning.actualMm,
         actualSpanMm: warning.actualMm,
       });
     }
@@ -513,9 +742,8 @@ function produceUpgradeJoistSize(
 
   // No larger size clears — surface the largest available as
   // disabled with a reason naming the limit.
-  const largest = largerNominals[largerNominals.length - 1]!;
-  const largestMaterial: MaterialRef = { ...material, nominal: largest };
-  const largestAllowable = table.lookupJoistMaxSpan(largestMaterial, spacingMm);
+  const largest = lastVerified?.nominal ?? largerNominals[largerNominals.length - 1]!;
+  const largestAllowable = lastVerified?.newAllowableMm ?? 0;
   return {
     kind: 'upgrade-joist-size',
     memberId: warning.memberId,
@@ -544,6 +772,7 @@ function produceChangeJoistSpecies(
   warning: Warning,
   design: DeckDesign,
   table: SpanTable,
+  recompute: (design: DeckDesign) => readonly Warning[],
 ): RemediationOption {
   const currentSpecies = design.joist.material.species;
   const material = design.joist.material;
@@ -577,31 +806,39 @@ function produceChangeJoistSpecies(
     });
   }
 
+  let lastVerified: {
+    readonly species: Species;
+    readonly newAllowableMm: Mm | null;
+  } | null = null;
   for (const species of strongerSpecies) {
-    const candidateMaterial: MaterialRef = {
-      ...material,
-      species,
-      // Species swap keeps grade at the CURRENT grade — the S13
-      // grade discipline filters to catalog (No2 for wood).
+    const patch: RemediationPatch = {
+      kind: 'change-joist-species',
+      newSpecies: species,
     };
-    const newAllowableMm = table.lookupJoistMaxSpan(candidateMaterial, spacingMm);
-    if (computeWouldClear(newAllowableMm, warning.actualMm)) {
+    const verify = verifyPatchClears(warning, design, patch, recompute);
+    lastVerified = { species, newAllowableMm: verify.newAllowableMm };
+    if (verify.wouldClear) {
+      const candidateMaterial = candidateSpeciesMaterial(material, species);
+      const displayAllowable = table.lookupJoistMaxSpan(
+        candidateMaterial,
+        spacingMm,
+      );
       return makeOption({
         kind: 'change-joist-species',
         memberId: warning.memberId,
-        patch: { kind: 'change-joist-species', newSpecies: species },
+        patch,
         summary: `Change joist species to ${speciesLabel(species)}`,
         currentAllowableMm: warning.allowableMm,
-        newAllowableMm,
+        newAllowableMm:
+          displayAllowable > 0 ? displayAllowable : warning.actualMm,
         actualSpanMm: warning.actualMm,
       });
     }
   }
 
   // No stronger species clears — surface as disabled (AC4).
-  const strongest = strongerSpecies[strongerSpecies.length - 1]!;
-  const strongestMaterial: MaterialRef = { ...material, species: strongest };
-  const strongestAllowable = table.lookupJoistMaxSpan(strongestMaterial, spacingMm);
+  const strongest = lastVerified?.species ?? strongerSpecies[strongerSpecies.length - 1]!;
+  const strongestAllowable = lastVerified?.newAllowableMm ?? 0;
   return {
     kind: 'change-joist-species',
     memberId: warning.memberId,
@@ -634,26 +871,11 @@ function produceUpgradeBeamSize(
   warning: Warning,
   design: DeckDesign,
   table: SpanTable,
+  recompute: (design: DeckDesign) => readonly Warning[],
 ): RemediationOption {
   const currentNominal = design.beam.material.nominal;
   const material = design.beam.material;
 
-  // Beam-lookup's second argument is the tributary joist span
-  // (the beam-table's "Joist Span" column). We use the design's
-  // joist tributary approximation: for elevated, this is the
-  // beam-to-beam z-delta, which the layout engine derives from
-  // the footprint. Without running the layout engine here we
-  // approximate by the beam's `actualMm` as an UPPER-BOUND proxy —
-  // conservative (larger tributary → smaller allowable), matches
-  // the `spanCheck`-side conservative default.
-  //
-  // NOTE: this is a conservative approximation, not exact. If it
-  // undercounts, we FAIL SAFE (option surfaces as disabled when it
-  // would in fact clear). Correcting this requires re-running
-  // `computeLayout` in the loop, which is expensive and can loop
-  // back into span-check. Accepted per the "known limitation"
-  // section in the module header.
-  const tributaryMm = warning.actualMm;
   const currentIdx = FRAMING_SIZES.indexOf(currentNominal);
   const largerNominals =
     currentIdx === -1 ? FRAMING_SIZES : FRAMING_SIZES.slice(currentIdx + 1);
@@ -672,33 +894,44 @@ function produceUpgradeBeamSize(
     });
   }
 
+  let lastVerified: {
+    readonly nominal: LumberNominal;
+    readonly newAllowableMm: Mm | null;
+  } | null = null;
   for (const nominal of largerNominals) {
-    const candidate: MaterialRef = { ...material, nominal };
-    const newAllowableMm = table.lookupBeamMaxSpan(
-      candidate,
-      tributaryMm,
-      DEFAULT_BEAM_PLY_COUNT,
-    );
-    if (computeWouldClear(newAllowableMm, warning.actualMm)) {
+    const patch: RemediationPatch = {
+      kind: 'upgrade-beam-size',
+      newNominal: nominal,
+    };
+    const verify = verifyPatchClears(warning, design, patch, recompute);
+    lastVerified = { nominal, newAllowableMm: verify.newAllowableMm };
+    if (verify.wouldClear) {
+      // Display estimate — use the beam-table lookup at the
+      // warning's `actualMm` as a conservative tributary. If the
+      // recompute confirmed clearing but the SpanTable lookup
+      // returns 0, fall back to `actualMm` so the label reads
+      // sensibly (the true allowable is at least `actualMm`).
+      const candidate: MaterialRef = { ...material, nominal };
+      const displayAllowable = table.lookupBeamMaxSpan(
+        candidate,
+        warning.actualMm,
+        DEFAULT_BEAM_PLY_COUNT,
+      );
       return makeOption({
         kind: 'upgrade-beam-size',
         memberId: warning.memberId,
-        patch: { kind: 'upgrade-beam-size', newNominal: nominal },
+        patch,
         summary: `Upgrade beams to ${nominalLabel(nominal)}`,
         currentAllowableMm: warning.allowableMm,
-        newAllowableMm,
+        newAllowableMm:
+          displayAllowable > 0 ? displayAllowable : warning.actualMm,
         actualSpanMm: warning.actualMm,
       });
     }
   }
 
-  const largest = largerNominals[largerNominals.length - 1]!;
-  const largestMaterial: MaterialRef = { ...material, nominal: largest };
-  const largestAllowable = table.lookupBeamMaxSpan(
-    largestMaterial,
-    tributaryMm,
-    DEFAULT_BEAM_PLY_COUNT,
-  );
+  const largest = lastVerified?.nominal ?? largerNominals[largerNominals.length - 1]!;
+  const largestAllowable = lastVerified?.newAllowableMm ?? 0;
   return {
     kind: 'upgrade-beam-size',
     memberId: warning.memberId,
@@ -722,10 +955,10 @@ function produceChangeBeamSpecies(
   warning: Warning,
   design: DeckDesign,
   table: SpanTable,
+  recompute: (design: DeckDesign) => readonly Warning[],
 ): RemediationOption {
   const currentSpecies = design.beam.material.species;
   const material = design.beam.material;
-  const tributaryMm = warning.actualMm;
 
   const currentIdx = CLEARING_SPECIES_ORDER.indexOf(currentSpecies);
   const strongerSpecies =
@@ -750,33 +983,39 @@ function produceChangeBeamSpecies(
     });
   }
 
+  let lastVerified: {
+    readonly species: Species;
+    readonly newAllowableMm: Mm | null;
+  } | null = null;
   for (const species of strongerSpecies) {
-    const candidate: MaterialRef = { ...material, species };
-    const newAllowableMm = table.lookupBeamMaxSpan(
-      candidate,
-      tributaryMm,
-      DEFAULT_BEAM_PLY_COUNT,
-    );
-    if (computeWouldClear(newAllowableMm, warning.actualMm)) {
+    const patch: RemediationPatch = {
+      kind: 'change-beam-species',
+      newSpecies: species,
+    };
+    const verify = verifyPatchClears(warning, design, patch, recompute);
+    lastVerified = { species, newAllowableMm: verify.newAllowableMm };
+    if (verify.wouldClear) {
+      const candidate = candidateSpeciesMaterial(material, species);
+      const displayAllowable = table.lookupBeamMaxSpan(
+        candidate,
+        warning.actualMm,
+        DEFAULT_BEAM_PLY_COUNT,
+      );
       return makeOption({
         kind: 'change-beam-species',
         memberId: warning.memberId,
-        patch: { kind: 'change-beam-species', newSpecies: species },
+        patch,
         summary: `Change beam species to ${speciesLabel(species)}`,
         currentAllowableMm: warning.allowableMm,
-        newAllowableMm,
+        newAllowableMm:
+          displayAllowable > 0 ? displayAllowable : warning.actualMm,
         actualSpanMm: warning.actualMm,
       });
     }
   }
 
-  const strongest = strongerSpecies[strongerSpecies.length - 1]!;
-  const strongestMaterial: MaterialRef = { ...material, species: strongest };
-  const strongestAllowable = table.lookupBeamMaxSpan(
-    strongestMaterial,
-    tributaryMm,
-    DEFAULT_BEAM_PLY_COUNT,
-  );
+  const strongest = lastVerified?.species ?? strongerSpecies[strongerSpecies.length - 1]!;
+  const strongestAllowable = lastVerified?.newAllowableMm ?? 0;
   return {
     kind: 'change-beam-species',
     memberId: warning.memberId,
@@ -803,23 +1042,39 @@ function produceChangeBeamSpecies(
  * NEVER throws; every failure branch yields either an empty array
  * (when the warning KIND isn't one we model) or a
  * disabled-with-reason option (never silent).
+ *
+ * @param warning   The warning to remediate.
+ * @param design    The current `DeckDesign` — used to derive
+ *                  candidate patches (framing-size ladder, spacing
+ *                  ladder, species swap direction).
+ * @param table     A conforming `SpanTable`. Used ONLY for display
+ *                  estimates of `newAllowableMm`; the `wouldClear`
+ *                  decision comes from `recompute`.
+ * @param recompute A function that runs `computeLayout + spanCheck`
+ *                  on a `DeckDesign` and returns the warnings. May
+ *                  throw `LayoutError` for invalid designs — the
+ *                  compute catches and surfaces the offending
+ *                  candidate as disabled. Wired at the state layer
+ *                  via `computeLayoutAndCheck` (see
+ *                  `state/hooks.useRemediationsForWarning`).
  */
 export function computeRemediations(
   warning: Warning,
   design: DeckDesign,
   table: SpanTable,
+  recompute: (design: DeckDesign) => readonly Warning[],
 ): readonly RemediationOption[] {
   if (warning.kind === 'over-span-joist') {
     return [
-      produceReduceJoistSpacing(warning, design, table),
-      produceUpgradeJoistSize(warning, design, table),
-      produceChangeJoistSpecies(warning, design, table),
+      produceReduceJoistSpacing(warning, design, table, recompute),
+      produceUpgradeJoistSize(warning, design, table, recompute),
+      produceChangeJoistSpecies(warning, design, table, recompute),
     ];
   }
   if (warning.kind === 'over-span-beam') {
     return [
-      produceUpgradeBeamSize(warning, design, table),
-      produceChangeBeamSpecies(warning, design, table),
+      produceUpgradeBeamSize(warning, design, table, recompute),
+      produceChangeBeamSpecies(warning, design, table, recompute),
     ];
   }
   // Unknown / future warning kind — return empty (never throw).

@@ -66,9 +66,18 @@ export function patchFromRemediation(
     case 'upgrade-beam-size':
       return { beam: { material: { nominal: patch.newNominal } } };
     case 'change-joist-species':
-      return { joist: { material: { species: patch.newSpecies } } };
+      // S16 pair-fix: Composite framing has grade 'NA'. Every
+      // species swap TARGETS a wood species (Cedar / PT — Composite
+      // excluded per AC6), which the S13 catalog rates at 'No2'.
+      // Force `grade: 'No2'` in the patch so a Composite → wood
+      // swap doesn't produce a design with mismatched grade / SKU.
+      return {
+        joist: { material: { species: patch.newSpecies, grade: 'No2' } },
+      };
     case 'change-beam-species':
-      return { beam: { material: { species: patch.newSpecies } } };
+      return {
+        beam: { material: { species: patch.newSpecies, grade: 'No2' } },
+      };
     /* c8 ignore next 6 */
     default: {
       // Compile-time exhaustiveness. A new RemediationKind

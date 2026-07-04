@@ -54,6 +54,7 @@ import { useMemo } from 'react';
 
 import { computeRemediations } from '../domain/spans';
 import type { RemediationOption } from '../domain/spans';
+import { computeLayoutAndCheck } from '../application/compute-layout';
 
 import { spanTable, useDesignStore } from './design-store';
 import type { CameraPreset, LayerVisibility, StorageBanner } from './ui-store';
@@ -228,7 +229,18 @@ export function useRemediationsForWarning(
 ): readonly RemediationOption[] {
   const design = useDesignStore((s) => s.bundle.design);
   return useMemo(
-    () => computeRemediations(warning, design, spanTable),
+    () =>
+      computeRemediations(warning, design, spanTable, (d) => {
+        // Ground-truth recompute (S16 pair-fix). `computeRemediations`
+        // calls this per candidate patch to verify `wouldClear`.
+        // `computeLayoutAndCheck` throws `LayoutError` for invalid
+        // designs (e.g. a below-minimum dimension a patch produced) —
+        // `verifyPatchClears` inside `computeRemediations` catches
+        // that throw and surfaces the candidate as a disabled option
+        // with a reason. Do NOT swallow errors here; the domain-side
+        // catch is the ONE place responsible for the fail-safe.
+        return computeLayoutAndCheck(d, spanTable).warnings;
+      }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [warning.memberId, design],
   );

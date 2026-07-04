@@ -201,7 +201,20 @@
   display: block;
 }
 
-.wd-remediation-controls__item--disabled {
+/*
+ * S16 pair-fix (Opus #2, AC17): the pre-fix rule applied
+ * `opacity: 0.55` to the WHOLE item, which dropped the
+ * disabled-reason text (`#666` on a light background) below the
+ * WCAG 2.5.5 4.5:1 contrast threshold. The fix: keep the radio
+ * + headline at reduced opacity to convey "disabled", but leave
+ * the reason (`__detail`) at full contrast so the user can
+ * actually READ why it's disabled. The reason color uses a
+ * dedicated token (`--wd-color-disabled-reason`) whose 4.5:1
+ * contrast against the page background is locked by
+ * `tokens.contrast.test.ts`.
+ */
+.wd-remediation-controls__item--disabled .wd-remediation-controls__label > input,
+.wd-remediation-controls__item--disabled .wd-remediation-controls__headline {
   opacity: 0.55;
 }
 
@@ -227,6 +240,17 @@
   font-size: 0.7rem;
 }
 
+.wd-remediation-controls__item--disabled .wd-remediation-controls__detail {
+  /*
+   * Disabled reason: full contrast (opacity: 1) + a slightly
+   * darker token so contrast is guaranteed regardless of what
+   * `--wd-color-text-muted` resolves to. Colour locked at
+   * 4.5:1 minimum vs #ffffff in `tokens.contrast.test.ts`.
+   */
+  color: var(--wd-color-disabled-reason, #595959);
+  opacity: 1;
+}
+
 .wd-remediation-controls__apply {
   align-self: flex-start;
   padding: 0.25rem 0.625rem;
@@ -250,6 +274,24 @@
   color: var(--wd-color-text-muted, #666);
   font-size: 0.7rem;
   font-style: italic;
+}
+
+/*
+ * S16 pair-fix (Opus #7, AC14): sr-only spacer that varies each
+ * apply so assistive tech re-announces the region even when the
+ * user selects the same option twice. Screen-reader-only pattern
+ * from https://webaim.org/techniques/css/invisiblecontent/.
+ */
+.wd-remediation-controls__announcement-tick {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .wd-remediation-controls__empty-text {

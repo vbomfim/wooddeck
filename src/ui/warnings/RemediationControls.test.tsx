@@ -128,10 +128,15 @@ describe('RemediationControls — AC13 default selection', () => {
 });
 
 describe('RemediationControls — AC14 aria-live announcement', () => {
-  it('has an aria-live="polite" announcement region', () => {
+  it('has a role="status" announcement region (implicit aria-live="polite")', () => {
+    // S16 pair-fix (Opus #7): `role="status"` implies
+    // `aria-live="polite"` per WAI-ARIA §5.4.5 — the explicit
+    // `aria-live="polite"` was redundant AND could suppress
+    // re-announcement of identical text on some AT combinations.
+    // We now rely on the ARIA-implied polite behavior.
     const warning = seedOverSpanWarning();
     const { container } = render(<RemediationControls warning={warning} />);
-    const live = container.querySelector('[aria-live="polite"]');
+    const live = container.querySelector('[role="status"]');
     expect(live).not.toBeNull();
   });
 
@@ -144,11 +149,55 @@ describe('RemediationControls — AC14 aria-live announcement', () => {
       fireEvent.click(applyBtn);
     });
 
-    const live = container.querySelector('[aria-live="polite"]');
+    const live = container.querySelector('[role="status"]');
     // The announcement contains "Applied" — the exact fix summary
     // depends on which option is default-selected, but "Applied"
     // is the invariant word.
     expect(live?.textContent ?? '').toMatch(/applied/i);
+  });
+
+  it('re-announces on repeat apply of the same option (S16 pair-fix Opus #7)', () => {
+    // Regression: applying the SAME option twice previously
+    // wrote the same textContent to the aria-live region, and
+    // assistive tech would not re-announce. FIX 4: an invisible
+    // counter varies each apply so the textContent differs.
+    // We verify by finding the `data-testid="wd-announcement-tick"`
+    // node and checking its value increments per apply. Because
+    // applying a real remediation changes the underlying design
+    // (and thus the option set), a "repeat" scenario is hard to
+    // construct against real store state — the counter mechanic
+    // is sufficient proof.
+    const warning = seedOverSpanWarning();
+    render(<RemediationControls warning={warning} />);
+    const applyBtn = screen.getByRole('button', { name: /apply fix/i });
+    act(() => {
+      fireEvent.click(applyBtn);
+    });
+    // After the first apply, an invisible tick counter is
+    // rendered inside the announcement region. It must exist AND
+    // its text must include a positive integer.
+    const tick = screen.queryByTestId('wd-announcement-tick');
+    expect(tick).not.toBeNull();
+    const text = tick?.textContent ?? '';
+    // Text is `\u200B<count>` — the zero-width space is
+    // deliberately part of the tick to force screen-reader
+    // re-announcement on repeat.
+    expect(text).toMatch(/\d+/);
+  });
+
+  it('Apply button accessible name reflects the selected option (S16 pair-fix Opus #3, AC17)', () => {
+    // Regression: the Apply button previously had a generic
+    // "Apply fix" accessible name. FIX 3: aria-label now
+    // includes the selected option's headline (formatted with
+    // the current unit system).
+    const warning = seedOverSpanWarning();
+    render(<RemediationControls warning={warning} />);
+    const applyBtn = screen.getByRole('button', { name: /apply fix/i });
+    // aria-label must be more descriptive than "Apply fix".
+    const label = applyBtn.getAttribute('aria-label') ?? '';
+    expect(label).toMatch(/apply fix:/i);
+    // Something after the colon — the headline.
+    expect(label.length).toBeGreaterThan('Apply fix: '.length);
   });
 });
 

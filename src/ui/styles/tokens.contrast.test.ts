@@ -138,6 +138,12 @@ const PAIRS: readonly {
     bg: 'wd-color-scene-error-bg',
     min: NORMAL_TEXT_MIN,
   },
+  {
+    label: 'disabled-reason text on bg (S16 pair-fix)',
+    fg: 'wd-color-disabled-reason',
+    bg: 'wd-color-bg',
+    min: NORMAL_TEXT_MIN,
+  },
 ];
 
 describe('tokens.css — WCAG 2.2 §1.4.3 contrast (Fix I static gate)', () => {

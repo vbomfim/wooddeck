@@ -126,6 +126,14 @@ export function RemediationControls(
 
   // Announcement text — read by the aria-live region after Apply.
   const [announcement, setAnnouncement] = useState<string>('');
+  // S16 pair-fix (Opus #7 / AC14): applying the SAME option twice
+  // won't re-announce if `announcement` text is identical to the
+  // previous value — assistive tech only fires when
+  // `textContent` changes. A per-apply counter guarantees the
+  // string differs on every call. The counter is invisible (part
+  // of an sr-only spacer span) so the rendered announcement text
+  // remains user-legible.
+  const [applyCount, setApplyCount] = useState<number>(0);
 
   // All-disabled fallback (AC16). NEVER null options (compute
   // returns at least one) → but the "no clearing" case IS a
@@ -156,7 +164,18 @@ export function RemediationControls(
     useDesignStore.getState().applyRemediation(selected);
     const { headline } = formatRemediationOption(selected, units);
     setAnnouncement(`Applied: ${headline}.`);
+    setApplyCount((c) => c + 1);
   }
+
+  // S16 pair-fix (Opus #3 / AC17): the Apply button's accessible
+  // name must reflect which option is being applied so screen-
+  // reader users don't hear a generic "Apply fix" for every
+  // radio. Reuses `formatRemediationOption` — same unit-aware
+  // headline the radio labels show.
+  const applyAriaLabel =
+    selected && !selected.disabled
+      ? `Apply fix: ${formatRemediationOption(selected, units).headline}`
+      : 'Apply fix';
 
   return (
     <fieldset className="wd-remediation-controls">
@@ -211,21 +230,42 @@ export function RemediationControls(
         className="wd-remediation-controls__apply"
         disabled={!selected || selected.disabled}
         onClick={onApply}
+        aria-label={applyAriaLabel}
       >
         Apply fix
       </button>
 
       {/*
-       * aria-live announcement region. `polite` so it doesn't
-       * interrupt the user; textContent-only per AC18 (React
-       * escapes the interpolated headline).
+       * aria-live announcement region. `role="status"` implies
+       * `aria-live="polite"` (WAI-ARIA §5.4.5) — the explicit
+       * `aria-live="polite"` was redundant and, on some AT
+       * combinations, suppressed re-announcement of an identical
+       * string (S16 pair-fix Opus #7). We now rely on the ARIA
+       * mapping AND vary the invisible `applyCount` value on
+       * each apply so the textContent differs (see the
+       * sr-only counter span below), guaranteeing an
+       * announcement fires on repeat actions (AC14).
+       * textContent-only per AC18 (React escapes interpolation).
        */}
       <div
         className="wd-remediation-controls__announcement"
-        aria-live="polite"
         role="status"
       >
         {announcement}
+        {/*
+         * sr-only spacer that varies each apply. Position:
+         * absolute + clip:rect(0,0,0,0) via the class keeps
+         * this invisible visually while still contributing to
+         * textContent so AT re-announces the region.
+         */}
+        {applyCount > 0 ? (
+          <span
+            className="wd-remediation-controls__announcement-tick"
+            data-testid="wd-announcement-tick"
+          >
+            {`\u200B${applyCount}`}
+          </span>
+        ) : null}
       </div>
     </fieldset>
   );
