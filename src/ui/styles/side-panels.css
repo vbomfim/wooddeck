@@ -348,6 +348,49 @@
 }
 
 /* --------------------------------------------------------------
+ * BomPanel — S24 cut-list disclosure rows
+ * --------------------------------------------------------------
+ * Each SKU is a <details> containing a <summary> and a
+ * <CutPlanTable>. The list is a <ul> with reset padding (no
+ * bullets — the summary line already reads as a list item).
+ */
+.wd-bom-panel__lumber-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.wd-bom-panel__lumber-list-item {
+  margin: 0.25rem 0;
+}
+
+.wd-bom-panel__lumber-row {
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--wd-color-border-subtle, #eee);
+}
+
+.wd-bom-panel__lumber-row-summary {
+  font-size: 0.8125rem;
+  padding: 0.25rem 0.25rem;
+  cursor: pointer;
+  /* Reset the default focus outline colour — the browser default
+   * is fine but a tokenised value keeps the focus ring on-brand.
+   * SC 2.4.7 (Focus Visible) is satisfied by the UA outline. */
+}
+
+.wd-bom-panel__lumber-row-summary:focus-visible {
+  outline: 2px solid var(--wd-color-accent, #005fcc);
+  outline-offset: 2px;
+}
+
+.wd-bom-panel__cut-plan {
+  /* Slight left-inset so the plan visually nests under the
+   * disclosure triangle. */
+  margin-left: 1rem;
+  margin-top: 0.25rem;
+}
+
+/* --------------------------------------------------------------
  * ExportMenu
  * -------------------------------------------------------------- */
 .wd-export-menu__error {
