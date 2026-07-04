@@ -119,6 +119,7 @@ import { temporal } from 'zundo';
 import {
   ApplyParametersError,
   applyParameters as appApplyParameters,
+  applyRemediation as appApplyRemediation,
   computeLayoutAndCheck,
   DeckFileError,
   downloadDesign as appDownloadDesign,
@@ -132,6 +133,7 @@ import {
 import { makeDeckDesignId } from '../domain/id';
 import { LayoutError } from '../domain/layout';
 import { IrcSpanTable } from '../domain/spans';
+import type { RemediationOption, SpanTable } from '../domain/spans';
 import type { DeckDesign } from '../domain/model';
 
 import { makeDefaultDesign } from './default-design';
@@ -161,8 +163,20 @@ const ZUNDO_HISTORY_LIMIT = 50;
  * The ONE `SpanTable` instance the store owns for the app lifetime.
  * See module header for why this is module-scope rather than
  * per-action or module-singleton-via-import.
+ *
+ * ## S16 issue #38 exposure
+ *
+ * Exported so `src/state/hooks.ts` (specifically
+ * `useRemediationsForWarning`) can pass the SAME table instance to
+ * `computeRemediations` that the store's `applyRemediation` action
+ * passes to `applyRemediation`. Sharing the instance is not
+ * strictly required for correctness (any `IrcSpanTable` is
+ * deep-equal), but it lets a future switch to a stateful `SpanTable`
+ * (e.g. one that memoizes lookups) benefit both call sites.
+ * Marked `Readonly` at the type layer so a consumer cannot swap
+ * the reference.
  */
-const spanTable = new IrcSpanTable();
+export const spanTable: Readonly<SpanTable> = new IrcSpanTable();
 
 // ---------------------------------------------------------------------------
 // Debounced autosave — module-scope timer + flush hooks
@@ -288,6 +302,22 @@ export interface DesignStoreActions {
   loadFromFile(file: File): Promise<void>;
   loadFromLocalStorage(): void;
   applyParameters(patch: DeepPartial<DeckDesign>): void;
+  /**
+   * S16 issue #38 — apply a remediation option to the current
+   * design. Thin wrapper around
+   * `application.applyRemediation(current, option, spanTable)`:
+   *
+   *   - success → set({bundle, status:'idle', lastError:null}) +
+   *     scheduleAutosave() — ONE `set` per action (AC9 single-undo).
+   *   - failure → status:'error', lastError:new Error(...) — the
+   *     PRIOR bundle is preserved (AC10). Mirrors the
+   *     `applyParameters` error contract exactly.
+   *
+   * The option must come from `computeRemediations(warning, design,
+   * spanTable)` (via `useRemediationsForWarning`) — the ui does not
+   * synthesise options directly.
+   */
+  applyRemediation(option: RemediationOption): void;
   downloadDeckFile(): void;
   /**
    * S14 issue #15 AC10 — trigger a browser download of the
@@ -448,6 +478,53 @@ export const useDesignStore = create(
           set({
             status: 'error',
             lastError: new Error(`applyParameters: non-Error thrown: ${String(err)}`),
+          });
+        }
+      },
+
+      /**
+       * S16 issue #38 — apply a remediation option to the current
+       * design. Semantics IDENTICAL to `applyParameters` but takes a
+       * `RemediationOption` (from `domain/spans.computeRemediations`)
+       * instead of a raw patch.
+       *
+       * ## Why a separate action (not "just call applyParameters")
+       *
+       * The ui-layer boundary rule (S8 §2, S16 issue #38 §2)
+       * FORBIDS `ui/` from importing `application/` or
+       * `domain/spans/` directly. Wrapping the delegator here is
+       * what lets the ui call `applyRemediation(option)` through
+       * the store without punching a hole in the boundary rules.
+       *
+       * ## AC9 — one undoable step per user action
+       *
+       * The success path is exactly ONE `set(...)` call — zundo
+       * captures ONE pastStates entry. The failure path also
+       * captures ONE `set(...)` (for `status:'error' + lastError`)
+       * but `partialize` narrows zundo to `bundle` only, so the
+       * error `set` does NOT bump `pastStates`.
+       */
+      applyRemediation(option): void {
+        try {
+          const bundle = appApplyRemediation(get().bundle.design, option, spanTable);
+          set({ bundle, status: 'idle', lastError: null });
+          scheduleAutosave();
+        } catch (err) {
+          // ApplyParametersError / LayoutError propagate through
+          // the application delegator unchanged (see
+          // apply-remediation.ts). Preserve the prior bundle so
+          // the user can retry with a different option.
+          if (err instanceof ApplyParametersError || err instanceof LayoutError) {
+            set({ status: 'error', lastError: err });
+            return;
+          }
+          if (err instanceof Error) {
+            set({ status: 'error', lastError: err });
+            return;
+          }
+          set({
+            status: 'error',
+            lastError: new Error(`applyRemediation: non-Error thrown: ${String(err)}`),
           });
         }
       },

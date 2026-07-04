@@ -50,8 +50,13 @@
 
 import type { DeckDesign, Dimensions3D, Layout, Warning } from '../domain/model';
 import { useShallow } from 'zustand/react/shallow';
+import { useMemo } from 'react';
 
-import { useDesignStore } from './design-store';
+import { computeRemediations } from '../domain/spans';
+import type { RemediationOption } from '../domain/spans';
+import { computeLayoutAndCheck } from '../application/compute-layout';
+
+import { spanTable, useDesignStore } from './design-store';
 import type { CameraPreset, LayerVisibility, StorageBanner } from './ui-store';
 import { useUiStore } from './ui-store';
 
@@ -176,4 +181,67 @@ export function useStorageBanner(): StorageBanner {
  */
 export function useWebglContextLost(): boolean {
   return useUiStore((s) => s.webglContextLost);
+}
+
+// ---- S16 issue #38 — remediation options -----------------------------------
+
+/**
+ * The list of `RemediationOption`s produced for a specific
+ * `Warning`. Consumed by `<RemediationControls warning={w}/>` in
+ * the warnings panel.
+ *
+ * ## Purpose (S16 issue #38 §2)
+ *
+ * The ui layer is boundary-forbidden from importing
+ * `domain/spans/*` directly (see `.dependency-cruiser.cjs`
+ * `ui-no-domain-spans` rule) — the compute is reached through this
+ * hook instead. That keeps the "compute logic" and "presentation"
+ * cleanly separated: swapping the compute for a spec-driven
+ * remediation later requires touching only this hook.
+ *
+ * ## Reference stability (AC11)
+ *
+ * The hook memoizes the computed array keyed on
+ * `(warning.memberId, design)`. When the design object identity is
+ * unchanged (the store returns the same reference between renders)
+ * the returned array is REFERENTIALLY equal to the previous render's
+ * — a downstream `useEffect([options])` will NOT re-fire on a
+ * neighbouring warning's parameter drag.
+ *
+ * ## Why the memberId, not the whole warning
+ *
+ * Warnings are recomputed by span-check on every mutation — even
+ * when the memberId is stable, the warning OBJECT reference changes.
+ * Keying the memo on the memberId (a string) plus the design
+ * reference gives us the strongest cache — reference-equal design
+ * AND same warning identity → same options array.
+ *
+ * ## Why not `useShallow((s) => ({ design, warnings }))`?
+ *
+ * Because `computeRemediations` is a pure function of
+ * `(warning, design, spanTable)` and `spanTable` is a stable
+ * module singleton, the memo captures every input. Shallow-select
+ * would work but adds a hop; the direct `useDesign()` read is
+ * cleaner and matches the "one hook per slice" convention.
+ */
+export function useRemediationsForWarning(
+  warning: Warning,
+): readonly RemediationOption[] {
+  const design = useDesignStore((s) => s.bundle.design);
+  return useMemo(
+    () =>
+      computeRemediations(warning, design, spanTable, (d) => {
+        // Ground-truth recompute (S16 pair-fix). `computeRemediations`
+        // calls this per candidate patch to verify `wouldClear`.
+        // `computeLayoutAndCheck` throws `LayoutError` for invalid
+        // designs (e.g. a below-minimum dimension a patch produced) —
+        // `verifyPatchClears` inside `computeRemediations` catches
+        // that throw and surfaces the candidate as a disabled option
+        // with a reason. Do NOT swallow errors here; the domain-side
+        // catch is the ONE place responsible for the fail-safe.
+        return computeLayoutAndCheck(d, spanTable).warnings;
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [warning.memberId, design],
+  );
 }

@@ -240,6 +240,35 @@ module.exports = {
       to: { path: '^src/domain/layout(/|$)' },
     },
 
+    // ---- ui: NO direct span-check / remediation compute ------------------
+    //
+    // S16 issue #38 §2 layering: the ui layer consumes remediation
+    // options through the state store's `useRemediationsForWarning`
+    // hook — which internally calls `domain/spans.computeRemediations`
+    // and passes the module-scope `spanTable`. UI code must NOT
+    // import `domain/spans/*` directly (bypassing the hook would
+    // leak the span table + compute call site into presentation
+    // code, and defeats the "state owns the compute seam" invariant).
+    //
+    // Types (`RemediationOption`, `RemediationKind`, `RemediationPatch`)
+    // are re-exported by `state/index.ts` — the ui imports those
+    // from `../state` and stays on the correct side of the boundary.
+    //
+    // A boundary self-test probe (BLOCK-2w) exercises this rule
+    // with a fixture violation so the gate can't silently degrade.
+    {
+      name: 'ui-no-domain-spans',
+      severity: 'error',
+      comment:
+        'S16 issue #38 §2 layering: src/ui/** MUST NOT import from src/domain/spans/** — ' +
+        'remediation compute is reached through the state store hook ' +
+        '`useRemediationsForWarning`, and option TYPES are re-exported via ' +
+        '`state/index.ts`. Importing directly from domain/spans in a ui module leaks ' +
+        'the span-table + compute call site into presentation code.',
+      from: { path: '^src/ui/' },
+      to: { path: '^src/domain/spans(/|$)' },
+    },
+
     // ---- scene: layers must not couple to the layout engine ---------------
     //
     // S10 issue #11 explicitly forbids scene layer components from

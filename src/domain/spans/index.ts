@@ -23,3 +23,20 @@
 export type { SpanTable } from './span-table';
 export { IrcSpanTable } from './irc-2018-tables';
 export { spanCheck } from './span-check';
+
+// ---- S16 issue #38 — remediation compute + option types ----------------
+//
+// `computeRemediations` and its option/patch shape are consumed by
+// the state layer (`state/design-store.applyRemediation` +
+// `state/hooks.useRemediationsForWarning`). The ui layer is BLOCKED
+// from importing `src/domain/spans/**` (see `.dependency-cruiser.cjs`
+// `ui-no-domain-spans` rule + BLOCK-2w probe) — the compute is
+// reachable only through the store hook. The TYPES ARE STILL
+// NEEDED by the UI, which imports them via a re-export on the
+// state barrel (`src/state/index.ts`).
+export { computeRemediations } from './remediations';
+export type {
+  RemediationKind,
+  RemediationOption,
+  RemediationPatch,
+} from './remediations';

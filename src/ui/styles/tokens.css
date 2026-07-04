@@ -20,6 +20,8 @@
  *                                                #4b0d02 on #fbd7d0 → 10.6:1  ✓
  *   --wd-color-scene-error-text on --wd-color-scene-error-bg:
  *                                                #202020 on #f5f5f5 → 15.4:1  ✓
+ *   --wd-color-disabled-reason on --wd-color-bg:
+ *                                                #595959 on #ffffff → 7.0:1   ✓
  *
  * Contrast recomputes via a trusted checker (WebAIM). Any token
  * change here MUST be re-verified — see docs/ARCHITECTURE.md
@@ -74,6 +76,15 @@
   --wd-color-scene-error-bg: #f5f5f5;
   --wd-color-scene-error-border: #d0d0d0;
   --wd-color-scene-error-text: #202020;
+
+  /*
+   * Disabled-reason text (S16 pair-fix Opus #2 / AC17). Used
+   * in RemediationControls to keep the "why is this option
+   * disabled?" copy at ≥4.5:1 even when the surrounding radio
+   * + headline is de-emphasized via `opacity: 0.55`. #595959
+   * on #ffffff = 7.0:1 (WebAIM).
+   */
+  --wd-color-disabled-reason: #595959;
 
   /* Focus indicator — 3px so it exceeds the WCAG 2.4.11 3:1 contrast
      requirement against any --wd-color-*-bg above. */

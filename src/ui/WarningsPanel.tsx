@@ -11,7 +11,9 @@
  *   - Non-empty → an `<h2>` with an inline count badge (e.g.
  *     "Warnings (3)") + a `<ul>` where each `<li>` shows
  *     `warning.message` and the `warning.tableReference`
- *     citation on a secondary line.
+ *     citation on a secondary line PLUS a nested
+ *     `<RemediationControls warning={w} />` for actionable fixes
+ *     (S16 issue #38).
  *
  * ## textContent-only rendering (§6 security)
  *
@@ -38,10 +40,13 @@
  *   - Each `<li>` uses semantic `<strong>` + normal text for the
  *     message; the citation is inside a `<small>` for visual
  *     hierarchy without changing the reading order.
+ *   - Each `<li>` nests a `<RemediationControls>` fieldset which
+ *     carries its OWN a11y contract (see that module header).
  *
  * ## Boundary
  *
  *   - `../state`              — useWarnings.
+ *   - `./warnings/…`          — RemediationControls (co-located).
  *   - `react` (JSX)           — types.
  *   - NO domain / application — the store hands us the shape.
  *   - NO scene / persistence  — hard rule.
@@ -49,6 +54,8 @@
 import type { JSX } from 'react';
 
 import { useWarnings } from '../state';
+
+import { RemediationControls } from './warnings/RemediationControls';
 
 // ---------------------------------------------------------------------------
 // Copy constants
@@ -120,6 +127,15 @@ export function WarningsPanel(): JSX.Element {
                */}
               <span className="wd-warnings-panel__message">{w.message}</span>
               <small className="wd-warnings-panel__citation">{w.tableReference}</small>
+              {/*
+               * S16 issue #38 — per-warning remediation controls.
+               * The compute is memoized inside
+               * `useRemediationsForWarning` so this nested
+               * component adds ONE compute per unique
+               * `(memberId, design)` pair, regardless of how many
+               * warnings share the same memberId.
+               */}
+              <RemediationControls warning={w} />
             </li>
           ))}
         </ul>

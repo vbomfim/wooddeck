@@ -57,6 +57,26 @@ export {
   applyParameters,
 } from './apply-parameters';
 
+// ---- S16 issue #38 — applyRemediation delegator ------------------------
+//
+// Semantic wrapper around `applyParameters` that consumes a
+// `RemediationOption` (from `domain/spans.computeRemediations`) and
+// produces the same `DesignBundle`. Inherits every guarantee
+// `applyParameters` provides — prototype-pollution defence,
+// unknown-key rejection, LayoutError propagation. State store
+// wires this action through `applyRemediation(option)`.
+export { applyRemediation } from './apply-remediation';
+
+// Re-export remediation option types (produced in the domain layer)
+// so callers that already routed through `../application` for
+// `applyParameters` / `DesignBundle` don't need a second import
+// path for the option shape.
+export type {
+  RemediationKind,
+  RemediationOption,
+  RemediationPatch,
+} from '../domain/spans';
+
 /**
  * Re-export of the persistence-layer `DeckFileError` so downstream
  * layers (state, ui) can `instanceof` narrow save/load failures
