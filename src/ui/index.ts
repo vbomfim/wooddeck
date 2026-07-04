@@ -83,7 +83,7 @@ export { LayerTogglePanel } from './LayerTogglePanel';
 export { LAYER_ITEMS, PRESET_ITEMS } from './layer-toggle-items';
 export { WarningsPanel, NO_WARNINGS_TEXT } from './WarningsPanel';
 export { BomPanel, EMPTY_LAYOUT_TEXT } from './BomPanel';
-export { ExportMenu } from './ExportMenu';
+export { ExportMenu, PNG_UNAVAILABLE_MESSAGE } from './ExportMenu';
 export type { ExportMenuProps } from './ExportMenu';
 export {
   buildPngFilename,

@@ -81,25 +81,32 @@ describe('<LayerTogglePanel /> — heading + checkboxes (AC1)', () => {
 });
 
 describe('<LayerTogglePanel /> — checkbox toggles (AC2)', () => {
-  it('clicking a checkbox flips its store slice', async () => {
-    const user = userEvent.setup();
-    render(<LayerTogglePanel />);
+  // S14 UAT pair-fix — FIX E. Previously only the Joists checkbox
+  // was exercised, leaving five slice-mapping wires unverified.
+  // `it.each` fans over ALL six LayerVisibility keys so a bug
+  // that mis-maps (e.g. the "Beams" checkbox writes to
+  // `layerVisibility.posts`) fails a specific parameterised test.
+  it.each(LAYER_ITEMS)(
+    'clicking the $label checkbox flips ONLY layerVisibility.$key',
+    async ({ key, label }) => {
+      const user = userEvent.setup();
+      render(<LayerTogglePanel />);
 
-    const beforeJoists = useUiStore.getState().layerVisibility.joists;
-    await user.click(screen.getByRole('checkbox', { name: 'Joists' }));
-    const afterJoists = useUiStore.getState().layerVisibility.joists;
+      // Snapshot every slice so we can assert five are unchanged.
+      const before = { ...useUiStore.getState().layerVisibility };
+      await user.click(screen.getByRole('checkbox', { name: label }));
+      const after = useUiStore.getState().layerVisibility;
 
-    expect(afterJoists).toBe(!beforeJoists);
-  });
+      // The clicked slice flips.
+      expect(after[key]).toBe(!before[key]);
 
-  it('leaves other slices untouched when one is toggled', async () => {
-    const user = userEvent.setup();
-    render(<LayerTogglePanel />);
-
-    const beforeBeams = useUiStore.getState().layerVisibility.beams;
-    await user.click(screen.getByRole('checkbox', { name: 'Joists' }));
-    expect(useUiStore.getState().layerVisibility.beams).toBe(beforeBeams);
-  });
+      // The FIVE others stay exactly as they were.
+      for (const other of LAYER_ITEMS) {
+        if (other.key === key) continue;
+        expect(after[other.key]).toBe(before[other.key]);
+      }
+    },
+  );
 });
 
 describe('<LayerTogglePanel /> — bulk actions (AC3)', () => {
@@ -156,4 +163,25 @@ describe('<LayerTogglePanel /> — camera presets (AC4)', () => {
     await user.click(screen.getByRole('button', { name: 'Iso' }));
     expect(useUiStore.getState().cameraPreset).toBe('iso');
   });
+
+  // S14 UAT pair-fix — FIX F. Previously only the Iso preset was
+  // clicked, so a wire that maps every button to `iso` would have
+  // passed. `it.each` fans over all five presets so the store
+  // action-argument is asserted per-preset.
+  it.each(PRESET_ITEMS)(
+    'clicking the $label preset button sets cameraPreset to $value',
+    async ({ value, label }) => {
+      const user = userEvent.setup();
+      // Start with a preset that is DIFFERENT from the one under
+      // test so a broken action (e.g. a no-op) can't accidentally
+      // match the "before" value.
+      const seed = value === 'orbit' ? 'iso' : 'orbit';
+      act(() => {
+        useUiStore.setState({ cameraPreset: seed });
+      });
+      render(<LayerTogglePanel />);
+      await user.click(screen.getByRole('button', { name: label }));
+      expect(useUiStore.getState().cameraPreset).toBe(value);
+    },
+  );
 });

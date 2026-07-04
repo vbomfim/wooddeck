@@ -35,12 +35,31 @@ export const CANVAS_MISSING_MESSAGE =
 
 /**
  * Build the PNG filename from a UTC timestamp. Format:
- * `wooddeck-YYYY-MM-DDTHH-MM-SS.png`. Colons in ISO-8601 are
- * illegal on Windows filenames, so we replace them with hyphens.
+ * `wooddeck-YYYY-MM-DDTHH-MM-SS-SSS.png`.
+ *
+ * ## Format rationale
+ *
+ *   - **Colons removed** — Windows filesystems reject `:` in
+ *     filenames; the ISO-8601 canonical form contains two of
+ *     them. Every `:` is replaced with `-` so the same filename
+ *     is portable across macOS / Linux / Windows.
+ *   - **Milliseconds included** — S14 UAT feedback (FIX G): a
+ *     user clicking Export PNG twice within the same second
+ *     would produce two files with identical names, and the
+ *     browser's "save as" dialog would silently coalesce them.
+ *     Including the `.SSS` fraction (three digits, zero-padded)
+ *     makes collisions astronomically unlikely without adding a
+ *     random suffix that would break lexical sort order.
+ *   - **ISO date preserved** — `YYYY-MM-DD` sorts
+ *     alphabetically the same way it sorts chronologically, so
+ *     a user's Downloads folder auto-groups by day.
  */
 export function buildPngFilename(nowMs: number): string {
   const iso = new Date(nowMs).toISOString();
-  // `2024-05-01T14:23:07.129Z` → `wooddeck-2024-05-01T14-23-07.png`
-  const stamp = iso.slice(0, 19).replace(/:/g, '-');
+  // `2024-05-01T14:23:07.129Z` → `wooddeck-2024-05-01T14-23-07-129.png`
+  // Take the first 23 chars (date + `T` + hh:mm:ss.sss), drop the
+  // `Z`, replace every `:` AND the `.` with `-` so the SSS
+  // millisecond fraction merges cleanly into the timestamp.
+  const stamp = iso.slice(0, 23).replace(/[:.]/g, '-');
   return `wooddeck-${stamp}.png`;
 }

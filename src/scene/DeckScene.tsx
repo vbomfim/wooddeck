@@ -66,7 +66,7 @@ import { useCameraPreset, useLayoutBounds } from '../state';
 
 import { CAMERA_FAR_MM, CAMERA_NEAR_MM, DEFAULT_FOV_DEG } from './camera-presets';
 import { CameraRig } from './CameraRig';
-import { installContextLossHandler } from './context-loss';
+import { reinstallContextLossHandler } from './context-loss';
 import { SceneLighting } from './lighting';
 import { WebGLFallback } from './WebGLFallback';
 import { isWebGL2Available } from './webgl-support';
@@ -213,8 +213,16 @@ export function DeckScene({ className, children }: DeckSceneProps): JSX.Element 
       // diagnostic. The cleanup returned here is stashed in a ref
       // so the composition-root useEffect above un-registers on
       // unmount.
+      //
+      // S14 UAT pair-fix: use `reinstallContextLossHandler` (NOT
+      // the raw `installContextLossHandler`) so a StrictMode
+      // dev-only remount doesn't leak the first canvas's listener.
+      // The wrapper drops any prior cleanup, clears the sticky
+      // webglContextLost flag (a fresh live context is not lost),
+      // then installs + stores the new cleanup. See
+      // src/scene/context-loss.ts module header for the full RCA.
       onCreated={({ gl }) => {
-        contextLossCleanupRef.current = installContextLossHandler(gl);
+        reinstallContextLossHandler(gl, contextLossCleanupRef);
       }}
     >
       <SceneLighting />

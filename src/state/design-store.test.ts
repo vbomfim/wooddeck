@@ -895,3 +895,86 @@ describe('useDesignStore — exportScreenshot (S14 AC10)', () => {
     expect(useDesignStore.getState().bundle).toBe(before);
   });
 });
+
+describe('design-store.downloadDeckFile — S14 UAT pair-fix FIX D', () => {
+  // Before the pair-fix, downloadDeckFile was a naked
+  // appDownloadDesign(...) call — any throw escaped to the caller
+  // and the ui had no way to render the failure. Now the action
+  // mirrors loadFromFile/exportScreenshot: on error → status
+  // 'error' + lastError. Bundle is never mutated (read-only side
+  // effect).
+
+  it('when the download plumbing throws, status becomes "error" with a lastError', () => {
+    // Force document.body.appendChild to throw when the anchor
+    // is inserted — this is the last step before `.click()` in
+    // persistence/file-io.ts, so it reliably simulates a real-
+    // world failure (browser refuses to trigger download).
+    const before = useDesignStore.getState().bundle;
+    const realAppend = document.body.appendChild.bind(document.body);
+    const appendSpy = vi
+      .spyOn(document.body, 'appendChild')
+      .mockImplementation((node) => {
+        if (
+          node instanceof HTMLAnchorElement &&
+          node.download.endsWith('.deck.json')
+        ) {
+          throw new Error('simulated appendChild failure');
+        }
+        return realAppend(node);
+      });
+
+    useDesignStore.getState().downloadDeckFile();
+
+    const state = useDesignStore.getState();
+    expect(state.status).toBe('error');
+    expect(state.lastError).not.toBeNull();
+    expect(state.lastError?.message).toContain('simulated');
+    // Bundle unchanged — downloads MUST NOT mutate state.
+    expect(state.bundle).toBe(before);
+
+    appendSpy.mockRestore();
+  });
+
+  it('after a download error, a subsequent successful download clears status to idle', () => {
+    // First: force an error.
+    const realAppend = document.body.appendChild.bind(document.body);
+    const appendSpy = vi
+      .spyOn(document.body, 'appendChild')
+      .mockImplementationOnce((node) => {
+        if (
+          node instanceof HTMLAnchorElement &&
+          node.download.endsWith('.deck.json')
+        ) {
+          throw new Error('simulated appendChild failure');
+        }
+        return realAppend(node);
+      });
+
+    useDesignStore.getState().downloadDeckFile();
+    expect(useDesignStore.getState().status).toBe('error');
+
+    // Second: succeed. mockImplementationOnce reverts after one
+    // call, so appendChild is real again. Stub anchor.click so we
+    // don't actually navigate.
+    const clickSpy = vi.fn();
+    const realCreate = document.createElement.bind(document);
+    const createSpy = vi
+      .spyOn(document, 'createElement')
+      .mockImplementation((tag: string) => {
+        const el = realCreate(tag);
+        if (tag === 'a') {
+          (el as HTMLAnchorElement).click = clickSpy;
+        }
+        return el;
+      });
+
+    useDesignStore.getState().downloadDeckFile();
+
+    const state = useDesignStore.getState();
+    expect(state.status).toBe('idle');
+    expect(state.lastError).toBeNull();
+
+    createSpy.mockRestore();
+    appendSpy.mockRestore();
+  });
+});

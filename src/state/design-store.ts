@@ -442,8 +442,49 @@ export const useDesignStore = create(
         }
       },
 
+      /**
+       * S14 issue #15 AC8 — trigger a browser download of the
+       * current design as `.deck.json`.
+       *
+       * Delegates to `application/save-design.downloadDesign`
+       * which in turn delegates to
+       * `persistence/file-io.downloadDeckFile`.
+       *
+       * ## Error contract (S14 UAT pair-fix — FIX D)
+       *
+       * The download can fail (browser refuses to trigger the
+       * anchor, JSON.stringify blows up on a pathological design,
+       * etc.). Prior to the pair-fix this method let the throw
+       * escape — the ui had no way to render the failure and the
+       * user saw a silent no-op. Now we mirror
+       * `loadFromFile` / `exportScreenshot`: on failure we set
+       * `status='error'` + `lastError` so ExportMenu's inline
+       * `role="alert"` region surfaces the friendly message. The
+       * bundle is never mutated by a download attempt (read-only
+       * side effect), so the state is unchanged on error.
+       */
       downloadDeckFile(): void {
-        appDownloadDesign(get().bundle.design);
+        try {
+          appDownloadDesign(get().bundle.design);
+          // Success clears any prior error so a subsequent
+          // ExportMenu render doesn't linger on stale copy.
+          if (get().status === 'error') {
+            set({ status: 'idle', lastError: null });
+          }
+        } catch (err) {
+          if (err instanceof DeckFileError) {
+            set({ status: 'error', lastError: err });
+            return;
+          }
+          if (err instanceof Error) {
+            set({ status: 'error', lastError: err });
+            return;
+          }
+          set({
+            status: 'error',
+            lastError: new Error(`downloadDeckFile: non-Error thrown: ${String(err)}`),
+          });
+        }
       },
 
       /**

@@ -83,9 +83,17 @@ export function WarningsPanel(): JSX.Element {
         {count > 0 && (
           <>
             {' '}
+            {/*
+             * S14 UAT pair-fix — Opus I1. The visible (N) badge
+             * is aria-hidden so the h2's accessible name reads
+             * as just "Warnings" (not "Warnings 3 warnings").
+             * The screen-reader count is still conveyed via the
+             * <ul>'s "List, 3 items" announcement below, so
+             * hiding this decorative badge doesn't drop info.
+             */}
             <span
               className="wd-warnings-panel__badge"
-              aria-label={`${String(count)} warnings`}
+              aria-hidden="true"
             >
               ({count})
             </span>

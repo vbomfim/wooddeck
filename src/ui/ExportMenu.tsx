@@ -3,15 +3,16 @@
  *
  * ## Responsibility (single)
  *
- * Render four buttons that trigger the four export/lifecycle
- * actions:
+ * Render four action controls that trigger the four
+ * export/lifecycle actions:
  *
  *   1. **Download .deck** (AC8) — calls
  *      `useDesignStore.getState().downloadDeckFile()` which
  *      delegates through `application/save-design.ts` to the
  *      persistence-layer file adapter.
- *   2. **Open .deck…** (AC9) — a `<label htmlFor>` that surfaces a
- *      hidden `<input type="file">`. On selection, calls
+ *   2. **Open .deck…** (AC9) — a real `<button type="button">`
+ *      that programmatically clicks a hidden `<input type="file">`.
+ *      On selection, calls
  *      `useDesignStore.getState().loadFromFile(file)`. Failures
  *      (`DeckFileError`) land in `useDesignStatus().lastError`
  *      and render as an inline error region inside this menu.
@@ -52,17 +53,30 @@
  * Every boundary is machine-checked; the store action is the
  * ONLY inter-layer channel.
  *
+ * ## Context-loss guard (S14 UAT pair-fix — FIX A)
+ *
+ * If the ui-store's `webglContextLost` flag is `true`, the canvas
+ * may still exist with non-zero dimensions but the drawing buffer
+ * is either blank or stale. `toDataURL()` would silently return a
+ * broken PNG. The Export PNG button reads
+ * `useWebglContextLost()` and:
+ *
+ *   - is `disabled` when lost,
+ *   - carries an `aria-describedby` pointing at an inline
+ *     "3D view is unavailable — reload before exporting" note,
+ *   - short-circuits its onClick early (defense-in-depth in
+ *     case a client zeros out `disabled` via CSS).
+ *
  * ## Accessibility (§10)
  *
- *   - The `<label htmlFor>` pattern surfaces the hidden `<input
- *     type="file">` without exposing a naked file input to the
- *     user. `role="button"` on the label + `tabIndex={0}` (both
- *     applied via CSS `[htmlFor]` targeting) — but the safer
- *     pattern is to wrap the label around a real `<button>`
- *     styled to trigger the input. We use the RAW `<input
- *     type="file">` hidden + `<label htmlFor>` pattern; the
- *     label is visible and clickable, which is the pattern
- *     axe-core's "form-field-multiple-labels" rule expects.
+ *   - **Open .deck…** is a real `<button type="button">` (S14
+ *     UAT pair-fix — FIX B). Previously it was a `<label
+ *     htmlFor>` decorated as a button, but the visible label had
+ *     no `tabIndex` and the real `<input type=file>` was clipped
+ *     to 1px — the control was unreachable by keyboard. The
+ *     button's `onClick` calls `fileInputRef.current?.click()`
+ *     to open the file dialog; the hidden input keeps
+ *     `tabIndex={-1}` so it's out of tab-order.
  *   - The error region uses `role="alert"` so screen readers
  *     announce it when a `DeckFileError` surfaces.
  *   - Buttons have visible focus (inherited from
@@ -70,14 +84,13 @@
  *
  * ## Boundary
  *
- *   - `../state` (useDesignStore + useDesignStatus)
- *   - `react` (JSX + useRef + useEffect for the file-input mount
- *     hygiene)
+ *   - `../state` (useDesignStore + useDesignStatus + useWebglContextLost)
+ *   - `react` (JSX + useRef + useState)
  *   - NO domain / application / persistence / scene direct imports.
  */
 import { useRef, useState, type JSX } from 'react';
 
-import { useDesignStatus, useDesignStore } from '../state';
+import { useDesignStatus, useDesignStore, useWebglContextLost } from '../state';
 
 import {
   buildPngFilename,
@@ -85,6 +98,20 @@ import {
   CANVAS_SELECTOR,
   RESET_CONFIRM_TEXT,
 } from './export-menu-helpers';
+
+// ---------------------------------------------------------------------------
+// Copy constants
+// ---------------------------------------------------------------------------
+
+/**
+ * Inline help text explaining why Export PNG is disabled. Exposed
+ * as a named export so tests can grep-import the exact string.
+ *
+ * See FIX A in the module header — the ui-store `webglContextLost`
+ * flag flips this on and off.
+ */
+export const PNG_UNAVAILABLE_MESSAGE =
+  '3D view is unavailable — reload the page before exporting a PNG.';
 
 // ---------------------------------------------------------------------------
 // Props (for testability)
@@ -133,18 +160,21 @@ export function ExportMenu(props: ExportMenuProps = {}): JSX.Element {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const { status, lastError } = useDesignStatus();
+  // FIX A — subscribe to the context-loss flag so a change (e.g.
+  // a real GPU loss surfaces mid-session, or the driver hands
+  // context back) re-renders the Export PNG button's disabled
+  // state and inline note without a full-page reload.
+  const webglContextLost = useWebglContextLost();
 
+  // S14 UAT pair-fix — FIX J.2: inlined the previously-extracted
+  // `useCanvasMissingMsg` wrapper hook (unnecessary indirection).
+  //
   // Panel-local error state. Used ONLY for the canvas-missing
   // branch (no store action fires when findCanvas returns null,
   // so lastError doesn't populate). All other errors flow through
-  // useDesignStatus. Kept as a plain ref-like closure via
-  // useState — but useState re-renders; a plain module-local var
-  // won't. useState it is.
-  //
-  // Simpler alternative: mutate a fake DeckFileError into the
-  // store. Rejected as too magical. A separate render path is
-  // clearer.
-  const [canvasMissingMsg, setCanvasMissingMsg] = useCanvasMissingMsg();
+  // useDesignStatus. Kept in local state because a module-scope
+  // variable wouldn't trigger a re-render.
+  const [canvasMissingMsg, setCanvasMissingMsg] = useState<string | null>(null);
 
   // Prefer the store-reported error, then the local canvas-missing
   // fallback. When both are null the panel renders no error region.
@@ -187,24 +217,45 @@ export function ExportMenu(props: ExportMenuProps = {}): JSX.Element {
         </button>
 
         {/*
-         * AC9 — Open .deck… The hidden `<input type="file">` is
-         * the actual control; the `<label htmlFor>` is what the
-         * user clicks. Accepting only `.deck.json` and
-         * `application/json` matches ticket §6 Security (client-
-         * side hint only — real validation is `readDeckFile`).
+         * AC9 — Open .deck… S14 UAT pair-fix (FIX B): a real
+         * <button> is the keyboard-reachable control. It
+         * programmatically opens the hidden <input type="file">
+         * via ref.click(). The prior <label htmlFor> pattern had
+         * no tabIndex on the visible label and the real input
+         * was clipped to 1px → the control was unreachable by
+         * keyboard.
          */}
-        <label
-          htmlFor="wd-export-menu__file-input"
-          className="wd-export-menu__btn wd-export-menu__btn--file"
+        <button
+          type="button"
+          className="wd-export-menu__btn"
+          onClick={(): void => {
+            setCanvasMissingMsg(null);
+            fileInputRef.current?.click();
+          }}
         >
           Open .deck…
-        </label>
+        </button>
         <input
           id="wd-export-menu__file-input"
           ref={fileInputRef}
           type="file"
           accept=".deck.json,application/json"
           className="wd-export-menu__file-input"
+          // Keep the input out of tab-order — the visible <button>
+          // above is the keyboard-reachable control. `tabIndex=-1`
+          // + the CSS clip make this input purely a programmatic
+          // trigger surface.
+          tabIndex={-1}
+          // The input is invisible-except-to-code (visually
+          // clipped + tab-order removed). Screen readers should
+          // NOT announce it; the visible <button> above is the
+          // accessible surface. Also gets aria-label to satisfy
+          // axe's "label" rule (input without a wrapping/htmlFor
+          // <label> would otherwise fire critical) — aria-hidden
+          // means SRs skip it, but aria-label is still required
+          // by axe as a fallback.
+          aria-hidden="true"
+          aria-label="Deck file input (hidden — use the Open .deck… button)"
           onChange={(evt): void => {
             setCanvasMissingMsg(null);
             const file = evt.currentTarget.files?.[0];
@@ -228,12 +279,23 @@ export function ExportMenu(props: ExportMenuProps = {}): JSX.Element {
         {/*
          * AC10 — Export PNG. Locate the canvas via the stable
          * class, build the filename, call the store action.
+         *
+         * S14 UAT pair-fix — FIX A: when webglContextLost is
+         * true, the drawing buffer is stale/blank; disable the
+         * button, show an inline note via aria-describedby, and
+         * short-circuit the onClick (defense-in-depth).
          */}
         <button
           type="button"
           className="wd-export-menu__btn"
+          disabled={webglContextLost}
+          aria-describedby={webglContextLost ? 'wd-export-menu__png-note' : undefined}
           onClick={(): void => {
             setCanvasMissingMsg(null);
+            // Defensive short-circuit: even if a stylesheet or
+            // extension unsets `disabled`, we still refuse to
+            // snapshot a lost context.
+            if (webglContextLost) return;
             const canvas = findCanvas();
             if (canvas === null) {
               // The store action can't detect the missing element
@@ -248,6 +310,14 @@ export function ExportMenu(props: ExportMenuProps = {}): JSX.Element {
         >
           Export PNG
         </button>
+        {webglContextLost && (
+          <p
+            id="wd-export-menu__png-note"
+            className="wd-export-menu__png-note"
+          >
+            {PNG_UNAVAILABLE_MESSAGE}
+          </p>
+        )}
 
         {/*
          * AC11 — Reset with confirm. Confirmed → reset(); cancel
@@ -269,17 +339,4 @@ export function ExportMenu(props: ExportMenuProps = {}): JSX.Element {
       </div>
     </section>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Small internal hook — the canvas-missing message state.
-// ---------------------------------------------------------------------------
-
-/**
- * Extracted so the component body stays readable. React `useState`
- * around a `string | null` with a `setCanvasMissingMsg` setter.
- */
-function useCanvasMissingMsg(): [string | null, (value: string | null) => void] {
-  const [value, setValue] = useState<string | null>(null);
-  return [value, setValue];
 }

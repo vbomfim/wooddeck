@@ -247,14 +247,6 @@
   background: var(--wd-color-bg-hover, #e8e8e8);
 }
 
-.wd-export-menu__btn--file {
-  /*
-   * The Open .deck… control is a <label htmlFor>, not a <button>.
-   * Match the button styling so the two feel identical.
-   */
-  user-select: none;
-}
-
 .wd-export-menu__btn--danger {
   background: var(--wd-color-danger-bg, #fff5f5);
   border-color: var(--wd-color-danger, #e53e3e);
@@ -267,9 +259,29 @@
 }
 
 /*
- * The hidden file input — visually hidden but STILL focusable via
- * keyboard TAB (so keyboard users can trigger the file picker
- * without the mouse). Uses the standard `visually-hidden` pattern.
+ * Disabled Export PNG button (S14 UAT pair-fix — FIX A). Fades
+ * the control + removes the pointer cursor so the disabled state
+ * is visually obvious. The inline note below the button explains
+ * why (context-loss).
+ */
+.wd-export-menu__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: var(--wd-color-bg-hover, #e8e8e8);
+}
+
+.wd-export-menu__png-note {
+  font-size: 0.85em;
+  color: var(--wd-color-text-muted, #666);
+  margin: 0.25rem 0 0;
+}
+
+/*
+ * The hidden file input — visually hidden AND removed from
+ * tab-order (`tabIndex={-1}` in the JSX). The visible Open .deck…
+ * button now programmatically clicks this input. The
+ * `visually-hidden` pattern keeps the input alive in the DOM so
+ * form-input value clearing still works.
  */
 .wd-export-menu__file-input {
   position: absolute;

@@ -139,9 +139,13 @@ export function downloadCanvasScreenshot(canvas: HTMLCanvasElement, filename: st
     document.body.appendChild(anchor);
     anchor.click();
   } finally {
-    if (anchor?.parentNode !== null && anchor !== undefined) {
-      anchor.parentNode.removeChild(anchor);
-    }
+    // S14 UAT pair-fix — Opus L1: modern DOM API. `anchor?.remove()`
+    // is the direct one-liner replacement for the old
+    // `parentNode !== null && anchor !== undefined` guard: it's a
+    // no-op both when `anchor` is undefined (createElement never
+    // ran) and when the node is already detached, so we get the
+    // same safety with less noise.
+    anchor?.remove();
     // No URL.revokeObjectURL — we never created an object URL.
     // The data: URL is garbage-collected with the anchor.
   }

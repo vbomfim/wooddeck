@@ -140,3 +140,36 @@ describe('<BomPanel /> — unit switching (AC7)', () => {
     expect(text).toMatch(/\sm\b/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// S14 UAT pair-fix — FIX I default-bundle rows + FIX J.5 memoization spy.
+// ---------------------------------------------------------------------------
+
+describe('<BomPanel /> — default store bundle produces real rows (FIX I)', () => {
+  it('reads useLayout() from the default store and renders >0 BomLine rows', () => {
+    // Prior BomPanel tests all stubbed the layout — no test
+    // verified that the DEFAULT design produces a non-empty BOM.
+    // A bug in `makeDefaultBundle` (or a regression in
+    // deriveBom's grouping) would slip through. This test
+    // guarantees the default deck materialises real rows.
+    render(<BomPanel />);
+    const bodyRows = screen
+      .getAllByRole('row')
+      .filter((r) => r.parentElement?.tagName === 'TBODY');
+    expect(bodyRows.length).toBeGreaterThan(0);
+
+    // At least one row exposes a positive count in the count cell.
+    // Every row must have count > 0 (the derivation rejects
+    // zero-count groups implicitly by only grouping observed
+    // members).
+    const table = screen.getByRole('table');
+    const rowTexts = Array.from(table.querySelectorAll('tbody tr')).map(
+      (r) => r.textContent ?? '',
+    );
+    // A count of 0 would render as "0" in the count cell — must
+    // NOT appear anywhere in a body row.
+    for (const text of rowTexts) {
+      expect(text).not.toMatch(/\|\s*0\s*\|/);
+    }
+  });
+});

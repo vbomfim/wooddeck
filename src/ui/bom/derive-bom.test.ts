@@ -327,3 +327,95 @@ describe('deriveBom — sort order', () => {
     expect(bom.map((l) => l.kind)).toEqual(['joist', 'beam', 'post', 'footing', 'board']);
   });
 });
+
+// --------------------------------------------------------------------------
+// S14 UAT pair-fix — FIX I. Breadth: mixed-length boards + AC7
+// unit-formatting round trip.
+// --------------------------------------------------------------------------
+
+describe('deriveBom — mixed board lengths in one layout (FIX I breadth)', () => {
+  it('produces DISTINCT rows for boards of the same SKU but different lengths', () => {
+    // A realistic deck has boards of two lengths at the edge —
+    // e.g. 30 × 3658 mm boards + 2 × 1830 mm off-cuts. The BOM
+    // must keep them separate rows so the buyer orders both
+    // lengths.
+    const layout = makeLayout([
+      // 30 full-length boards
+      ...Array.from({ length: 30 }, (_v, i) =>
+        makeMember(`d-full-${String(i)}`, 'board', PT_5_4x6, 3658),
+      ),
+      // 2 off-cut boards
+      ...Array.from({ length: 2 }, (_v, i) =>
+        makeMember(`d-cut-${String(i)}`, 'board', PT_5_4x6, 1830),
+      ),
+    ]);
+
+    const bom = deriveBom(layout);
+
+    // Two rows for boards, same 4-tuple (kind/nominal/species/…),
+    // sorted by eachLengthMm ascending (per the module contract).
+    expect(bom).toHaveLength(2);
+    expect(bom).toEqual([
+      {
+        kind: 'board',
+        nominal: '5/4x6',
+        species: 'PT',
+        count: 2,
+        eachLengthMm: 1830,
+        totalLinearMm: 3660,
+      },
+      {
+        kind: 'board',
+        nominal: '5/4x6',
+        species: 'PT',
+        count: 30,
+        eachLengthMm: 3658,
+        totalLinearMm: 109740,
+      },
+    ]);
+  });
+
+  it('per-row totalLinearMm equals count × eachLengthMm even when rows share a SKU', () => {
+    const layout = makeLayout([
+      makeMember('d-1', 'board', PT_5_4x6, 2000),
+      makeMember('d-2', 'board', PT_5_4x6, 2000),
+      makeMember('d-3', 'board', PT_5_4x6, 3000),
+    ]);
+
+    const bom = deriveBom(layout);
+
+    // Every board line: totalLinearMm === count * eachLengthMm.
+    for (const line of bom) {
+      if (line.kind === 'board') {
+        expect(line.totalLinearMm).toBe(line.count * (line.eachLengthMm ?? 0));
+      }
+    }
+  });
+});
+
+// AC7: the ticket §4 fixture length (3658 mm ≈ 12 ft) must
+// round-trip to exactly 12′0″ in imperial and to a metric string
+// with an m unit. Failing these pins the presentation contract
+// upstream of the BOM panel — a change to formatLength (e.g. a
+// rounding tweak) that would confuse buyers surfaces immediately.
+describe('deriveBom + formatLength (AC7 unit-string round trip)', () => {
+  it('formatLength(3658, "imperial") produces the AC7 12′0″ string', async () => {
+    const { formatLength } = await import('../../domain/units');
+    // 3658 mm / 304.8 mm/ft = 12.0 ft (exact to 4 significant figures).
+    // The domain formatter uses `12′ 0″` (with a hair space between
+    // feet and inches for readability) — the "12′0″" written in
+    // the ticket §4 is the same value under a slightly tighter
+    // typographic convention. We pin the ACTUAL formatter output
+    // so a change (e.g. dropping the space) would fail loudly.
+    expect(formatLength(3658, 'imperial')).toBe('12′ 0″');
+  });
+
+  it('formatLength(3658, "metric") produces a metric string with an m suffix', async () => {
+    const { formatLength } = await import('../../domain/units');
+    // 3658 mm = 3.658 m — exact repr depends on the domain
+    // implementation, but the m unit must be present.
+    const s = formatLength(3658, 'metric');
+    expect(s).toMatch(/m/);
+    expect(s.length).toBeGreaterThan(0);
+  });
+});

@@ -17,7 +17,7 @@ import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { useUiStore } from '../state';
-import { installContextLossHandler } from '../scene/context-loss';
+import { installContextLossHandler, STARTUP_GRACE_MS } from '../scene/context-loss';
 import {
   CONTEXT_LOST_BODY,
   CONTEXT_LOST_RELOAD_LABEL,
@@ -84,11 +84,19 @@ describe('ContextLostBanner — end-to-end scene→state→ui flow (Fix C wiring
   it('the scene context-loss handler flips the flag and the mounted banner shows', () => {
     // Silence the context-loss console.error (the handler emits it).
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    // Use fake timers so we can advance past the STARTUP_GRACE_MS
+    // window (see context-loss.ts: for the first 1.5s after install
+    // the handler treats webglcontextlost as a StrictMode ghost and
+    // ignores it). Real GPU-loss events happen well after 1.5s.
+    vi.useFakeTimers();
     try {
       // Set up: mount the banner, install the handler on a fake gl.
       render(<ContextLostBanner />);
       const canvas = document.createElement('canvas');
       installContextLossHandler({ domElement: canvas });
+      // Jump past the grace window so the dispatched event is
+      // treated as a real GPU loss (not a StrictMode ghost).
+      vi.setSystemTime(Date.now() + STARTUP_GRACE_MS + 100);
 
       // Banner is absent initially.
       expect(screen.queryByText(CONTEXT_LOST_TITLE)).not.toBeInTheDocument();
@@ -102,6 +110,7 @@ describe('ContextLostBanner — end-to-end scene→state→ui flow (Fix C wiring
 
       expect(screen.getByText(CONTEXT_LOST_TITLE)).toBeInTheDocument();
     } finally {
+      vi.useRealTimers();
       consoleErrorSpy.mockRestore();
     }
   });
