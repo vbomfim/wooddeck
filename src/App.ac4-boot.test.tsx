@@ -26,7 +26,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-import { serialize } from './persistence/deck-file/schema-v1';
+import { serialize } from './persistence/deck-file/schema-v2';
 import { STORAGE_KEY } from './persistence/local-storage';
 import { FIXTURE_DESIGNS } from './domain/layout/__fixtures__/fixtures-data';
 import { resetDesignStoreForTests, useDesignStore } from './state/design-store';

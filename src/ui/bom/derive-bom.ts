@@ -120,13 +120,24 @@ export interface BomLine {
  *
  * Kept as a `const` record so a new `MemberKind` fails-compile here
  * until it's assigned an ordinal (via TS `Record<MemberKind, number>`).
+ *
+ * S17 additions: `block` and `blocking`. Both are S19+ producer
+ * outputs — the block layer emits `block`; the between-joist
+ * bracing layer emits `blocking` (short lumber pieces). Ordinals
+ * chosen so blocks slot at the "footing" tier (both are support-
+ * layer members) and blocking sits with beams (both are secondary
+ * framing). The ordering does not affect any current test; S24 will
+ * finalise the BOM row order once floating designs actually flow
+ * through `deriveBom`.
  */
 const KIND_ORDER: Record<MemberKind, number> = {
   joist: 0,
   beam: 1,
-  post: 2,
-  footing: 3,
-  board: 4,
+  blocking: 2,
+  post: 3,
+  footing: 4,
+  block: 5,
+  board: 6,
 };
 
 /**
@@ -157,10 +168,25 @@ function eachLengthOf(member: LayoutMember): Mm | null {
     case 'footing':
       // Footings are ~cubic; no meaningful "length".
       return null;
+    case 'block':
+      // Foundation blocks are ~cubic; no meaningful "length"
+      // (S17 addition — S24 will finalise the BOM shape once
+      // floating layouts flow through).
+      return null;
+    case 'blocking':
+      // Blocking members are short lumber pieces installed between
+      // joists — the "length" is the piece's x-run (parallel to beams).
+      // S17 addition; S24 confirms once floating layouts land.
+      return member.size.x;
     default: {
-      // Exhaustive check — a new MemberKind fails compile here.
-      const _exhaustive: never = member.kind;
-      return _exhaustive;
+      // Review-gate FIX 5a — throw naming the unexpected kind so a
+      // widening slip surfaces LOUDLY instead of silently returning
+      // `never` (which TS erases at runtime). Matches the pattern
+      // in `materialForMember` (scene/layers/shared/materials.ts).
+      throw new Error(
+        `derive-bom.eachLengthOf: unexpected member.kind="${(member as { kind: string }).kind}"; ` +
+          `add a case above when adding to MemberKind.`,
+      );
     }
   }
 }
@@ -218,28 +244,64 @@ interface Accumulator {
  *   surfaces the "empty layout" copy separately.
  * @returns A stable, sorted list of {@link BomLine}s. See module
  *   header for kind ordering + intra-kind tie-breaks.
+ *
+ * ## S17 note — MemberMaterialRef widening
+ *
+ * `LayoutMember.material` is now a discriminated union
+ * (`{kind:'lumber',...}` | `{kind:'block',...}`). The MVP layout
+ * engine (elevated + posts-on-footings) only emits `lumber`
+ * variants, so the current pass unconditionally reads the lumber
+ * fields after a `kind === 'lumber'` guard. A future block-emitting
+ * producer (S19 floating decks + S20 block layout) will add a
+ * separate BOM row shape — S24's ticket owns that. For now, if a
+ * non-lumber member is encountered it is SKIPPED with a defensive
+ * inline comment — never silently miscounted.
  */
 export function deriveBom(layout: Layout): readonly BomLine[] {
   // Single-pass grouping. Map key is the stringified 5-tuple.
   const groups = new Map<string, Accumulator>();
 
   for (const member of layout.members) {
+    // S17: guard against the widened MemberMaterialRef union. The
+    // S17 layout engine only stamps `kind:'lumber'` (verified by the
+    // `no-unguarded-material-nominal` audit test), so any `block`
+    // member here means an S19+ producer emitted BOM-uncounted
+    // members ahead of the S24 BOM update. Skipping is safe (the
+    // block will be re-rendered by S22's scene layer) and loud (see
+    // the switch's `never` guard).
+    switch (member.material.kind) {
+      case 'lumber':
+        break;
+      case 'block':
+        continue;
+      default: {
+        // Review-gate FIX 5a — throw naming the unexpected material
+        // variant so a widening slip surfaces LOUDLY instead of
+        // silently rendering an empty BOM. Matches the pattern in
+        // `materialForMember` (scene/layers/shared/materials.ts).
+        throw new Error(
+          `derive-bom: unexpected material.kind="${(member.material as { kind: string }).kind}" ` +
+            `on member '${member.id}'; add a case to the switch when adding to MemberMaterialRef.`,
+        );
+      }
+    }
+    const lumber = member.material;
     const rawLength = eachLengthOf(member);
     const eachLengthMm = rawLength === null ? null : roundMm(rawLength);
     const key = groupKey(
       member.kind,
-      member.material.nominal,
-      member.material.species,
-      member.material.grade,
+      lumber.nominal,
+      lumber.species,
+      lumber.grade,
       eachLengthMm,
     );
     const existing = groups.get(key);
     if (existing === undefined) {
       groups.set(key, {
         kind: member.kind,
-        nominal: member.material.nominal,
-        species: member.material.species,
-        grade: member.material.grade,
+        nominal: lumber.nominal,
+        species: lumber.species,
+        grade: lumber.grade,
         count: 1,
         eachLengthMm,
       });

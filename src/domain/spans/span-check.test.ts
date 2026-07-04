@@ -46,7 +46,7 @@ import { dirname, resolve as pathResolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { MM_PER_FOOT, ftInToMm, type Mm } from '../units';
-import type { DeckDesign, Layout, LayoutMember, MaterialRef, MemberKind } from '../model';
+import type { DeckDesign, Layout, LayoutMember, MaterialRef, MemberKind, MemberMaterialRef } from '../model';
 import { computeLayout } from '../layout';
 import { FOOTING_WIDTH_MM } from '../layout';
 
@@ -85,6 +85,12 @@ function makeDesign(overrides: DesignOverrides = {}): DeckDesign {
       lengthMm,
       heightMm: overrides.heightMm ?? 914,
     },
+    structure: 'elevated',
+    foundation: {
+      type: 'posts-on-footings',
+      post: { nominal: '6x6', species: 'PT', grade: 'No2' },
+      footing: { widthMm: 300, depthMm: 300 },
+    },
     joist: {
       material: {
         nominal: overrides.joistNominal ?? '2x10',
@@ -100,7 +106,6 @@ function makeDesign(overrides: DesignOverrides = {}): DeckDesign {
         grade: beamSpecies === 'Composite' ? 'NA' : 'No2',
       },
     },
-    post: { material: { nominal: '6x6', species: 'PT', grade: 'No2' } },
     decking: {
       material: { nominal: '5/4x6', species: 'PT', grade: 'No2' },
       orientation: 'parallel-to-width',
@@ -365,7 +370,7 @@ describe('spanCheck — AC4 missing table row is fail-safe', () => {
                               // fail-safe is FROM the spacing lookup,
                               // not because we exceeded a real row.
     const halfSpan = joistSpanMm / 2;
-    const material = { nominal: '2x10', species: 'PT', grade: 'No2' } as const;
+    const material = { kind: 'lumber' as const, nominal: '2x10', species: 'PT', grade: 'No2' } as const;
     const beamNear: LayoutMember = {
       id: 'beam-near',
       kind: 'beam',
@@ -393,7 +398,7 @@ describe('spanCheck — AC4 missing table row is fail-safe', () => {
     const posts: LayoutMember[] = [beamNear, beamFar].map((b, i) => ({
       id: `post-${i}`,
       kind: 'post',
-      material: { nominal: '6x6', species: 'PT', grade: 'No2' },
+      material: { kind: 'lumber', nominal: '6x6', species: 'PT', grade: 'No2' },
       position: { x: 0, y: 250, z: b.position.z },
       size: { x: 140, y: 500, z: 140 },
       rotation: { x: 0, y: 0, z: 0 },
@@ -427,7 +432,7 @@ describe('spanCheck — empty layout', () => {
     const orphanJoist: LayoutMember = {
       id: 'joist-orphan',
       kind: 'joist',
-      material: { nominal: '2x10', species: 'PT', grade: 'No2' },
+      material: { kind: 'lumber', nominal: '2x10', species: 'PT', grade: 'No2' },
       position: { x: 0, y: 700, z: 0 },
       size: { x: 38, y: 235, z: 3658 },
       rotation: { x: 0, y: 0, z: 0 },
@@ -461,7 +466,7 @@ describe('spanCheck — boundary (allowable ± 1 mm)', () => {
       id: 'joist-0',
       kind: 'joist',
       // 2x10 PT No.2 @ 406 mm o.c. — allowable = 14 ft = 4267.2 mm.
-      material: { nominal: '2x10', species: 'PT', grade: 'No2' },
+      material: { kind: 'lumber', nominal: '2x10', species: 'PT', grade: 'No2' },
       position: { x: 0, y: 700, z: 0 },
       size: { x: 38, y: 235, z: joistSpanMm + FOOTING_WIDTH_MM },
       rotation: { x: 0, y: 0, z: 0 },
@@ -469,7 +474,7 @@ describe('spanCheck — boundary (allowable ± 1 mm)', () => {
     const beamNear: LayoutMember = {
       id: 'beam-near',
       kind: 'beam',
-      material: { nominal: '2x10', species: 'PT', grade: 'No2' },
+      material: { kind: 'lumber', nominal: '2x10', species: 'PT', grade: 'No2' },
       position: { x: 0, y: 500, z: -halfSpan },
       size: { x: 2000, y: 235, z: 38 },
       rotation: { x: 0, y: 0, z: 0 },
@@ -477,7 +482,7 @@ describe('spanCheck — boundary (allowable ± 1 mm)', () => {
     const beamFar: LayoutMember = {
       id: 'beam-far',
       kind: 'beam',
-      material: { nominal: '2x10', species: 'PT', grade: 'No2' },
+      material: { kind: 'lumber', nominal: '2x10', species: 'PT', grade: 'No2' },
       position: { x: 0, y: 500, z: +halfSpan },
       size: { x: 2000, y: 235, z: 38 },
       rotation: { x: 0, y: 0, z: 0 },
@@ -501,7 +506,7 @@ describe('spanCheck — boundary (allowable ± 1 mm)', () => {
         {
           id: `post-${beam.id}-0`,
           kind: 'post',
-          material: { nominal: '6x6', species: 'PT', grade: 'No2' },
+          material: { kind: 'lumber', nominal: '6x6', species: 'PT', grade: 'No2' },
           position: { x: -250, y: 250, z: beam.position.z },
           size: { x: 140, y: 500, z: 140 },
           rotation: { x: 0, y: 0, z: 0 },
@@ -509,7 +514,7 @@ describe('spanCheck — boundary (allowable ± 1 mm)', () => {
         {
           id: `post-${beam.id}-1`,
           kind: 'post',
-          material: { nominal: '6x6', species: 'PT', grade: 'No2' },
+          material: { kind: 'lumber', nominal: '6x6', species: 'PT', grade: 'No2' },
           position: { x: +250, y: 250, z: beam.position.z },
           size: { x: 140, y: 500, z: 140 },
           rotation: { x: 0, y: 0, z: 0 },
@@ -569,7 +574,7 @@ describe('spanCheck — beam boundary (allowable ± 1 mm) (QA-G2)', () => {
     const JOIST_SPAN_MM = ftInToMm(8, 0);
     const halfSpan = JOIST_SPAN_MM / 2;
     const halfPost = beamPostSpanMm / 2;
-    const material = { nominal: '2x10', species: 'PT', grade: 'No2' } as const;
+    const material = { kind: 'lumber' as const, nominal: '2x10', species: 'PT', grade: 'No2' } as const;
     const joist: LayoutMember = {
       id: 'joist-0',
       kind: 'joist',
@@ -593,14 +598,14 @@ describe('spanCheck — beam boundary (allowable ± 1 mm) (QA-G2)', () => {
       posts.push(
         {
           id: `post-${beam.id}-0`, kind: 'post',
-          material: { nominal: '6x6', species: 'PT', grade: 'No2' },
+          material: { kind: 'lumber', nominal: '6x6', species: 'PT', grade: 'No2' },
           position: { x: -halfPost, y: 250, z: beam.position.z },
           size: { x: 140, y: 500, z: 140 },
           rotation: { x: 0, y: 0, z: 0 },
         },
         {
           id: `post-${beam.id}-1`, kind: 'post',
-          material: { nominal: '6x6', species: 'PT', grade: 'No2' },
+          material: { kind: 'lumber', nominal: '6x6', species: 'PT', grade: 'No2' },
           position: { x: +halfPost, y: 250, z: beam.position.z },
           size: { x: 140, y: 500, z: 140 },
           rotation: { x: 0, y: 0, z: 0 },
@@ -664,7 +669,7 @@ describe('spanCheck — real IRC beam over-span (QA-G4)', () => {
     const BEAM_POST_SPAN_MM = 3200;
     const halfJoist = JOIST_SPAN_MM / 2;
     const halfPost = BEAM_POST_SPAN_MM / 2;
-    const material = { nominal: '2x10', species: 'PT', grade: 'No2' } as const;
+    const material = { kind: 'lumber' as const, nominal: '2x10', species: 'PT', grade: 'No2' } as const;
     const joist: LayoutMember = {
       id: 'joist-0', kind: 'joist', material,
       position: { x: 0, y: 700, z: 0 },
@@ -684,14 +689,14 @@ describe('spanCheck — real IRC beam over-span (QA-G4)', () => {
       posts.push(
         {
           id: `post-${beam.id}-0`, kind: 'post',
-          material: { nominal: '6x6', species: 'PT', grade: 'No2' },
+          material: { kind: 'lumber', nominal: '6x6', species: 'PT', grade: 'No2' },
           position: { x: -halfPost, y: 250, z: beam.position.z },
           size: { x: 140, y: 500, z: 140 },
           rotation: { x: 0, y: 0, z: 0 },
         },
         {
           id: `post-${beam.id}-1`, kind: 'post',
-          material: { nominal: '6x6', species: 'PT', grade: 'No2' },
+          material: { kind: 'lumber', nominal: '6x6', species: 'PT', grade: 'No2' },
           position: { x: +halfPost, y: 250, z: beam.position.z },
           size: { x: 140, y: 500, z: 140 },
           rotation: { x: 0, y: 0, z: 0 },
@@ -732,7 +737,7 @@ describe('spanCheck — real IRC beam over-span (QA-G4)', () => {
 
 describe('spanCheck — beam with fewer than 2 posts is skipped without crashing (QA-G8)', () => {
   it('a beam with 1 post is skipped (no crash / no NaN warning)', () => {
-    const material = { nominal: '2x10', species: 'PT', grade: 'No2' } as const;
+    const material = { kind: 'lumber' as const, nominal: '2x10', species: 'PT', grade: 'No2' } as const;
     const joist: LayoutMember = {
       id: 'joist-0', kind: 'joist', material,
       position: { x: 0, y: 700, z: 0 },
@@ -751,7 +756,7 @@ describe('spanCheck — beam with fewer than 2 posts is skipped without crashing
     // rather than fabricate a span.
     const lonePost: LayoutMember = {
       id: 'post-only', kind: 'post',
-      material: { nominal: '6x6', species: 'PT', grade: 'No2' },
+      material: { kind: 'lumber', nominal: '6x6', species: 'PT', grade: 'No2' },
       position: { x: 0, y: 250, z: -1850 },
       size: { x: 140, y: 500, z: 140 },
       rotation: { x: 0, y: 0, z: 0 },
@@ -805,7 +810,7 @@ describe('spanCheck — beam-post z match uses TOLERANCE, not strict equality (C
     // POST_Z_TOLERANCE_MM (0.5 mm). Strict `===` would drop the post
     // and silently no-op the beam check. The tolerance-based match
     // must still recognize the post-beam association.
-    const material = { nominal: '2x10', species: 'PT', grade: 'No2' } as const;
+    const material = { kind: 'lumber' as const, nominal: '2x10', species: 'PT', grade: 'No2' } as const;
     const joist: LayoutMember = {
       id: 'joist-0', kind: 'joist', material,
       position: { x: 0, y: 700, z: 0 },
@@ -826,7 +831,7 @@ describe('spanCheck — beam-post z match uses TOLERANCE, not strict equality (C
     const eps = 0.0001;
     const mkPost = (id: string, x: number, zBase: number): LayoutMember => ({
       id, kind: 'post',
-      material: { nominal: '6x6', species: 'PT', grade: 'No2' },
+      material: { kind: 'lumber', nominal: '6x6', species: 'PT', grade: 'No2' },
       position: { x, y: 250, z: zBase + eps },
       size: { x: 140, y: 500, z: 140 },
       rotation: { x: 0, y: 0, z: 0 },
@@ -1043,5 +1048,122 @@ describe('spanCheck — dependency inversion (Code Review Guardian finding #4)',
     const importPattern =
       /(?:from|import|require)\s*\(?\s*['"]\.\/irc-2018-tables['"]/;
     expect(src).not.toMatch(importPattern);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX 4 (review gate) — non-lumber joist / beam is FAIL-LOUD, not silent
+// ---------------------------------------------------------------------------
+//
+// Pre-fix behavior: a joist/beam whose material.kind !== 'lumber' was
+// silently `continue`d — no warning, no error. That would mask a
+// future producer bug (block material on a structural member) AND
+// suppress span warnings for that member. FIX 4 replaces the silent
+// skip with a fail-safe warning (`allowableMm: 0`, message names the
+// unexpected kind + directs to a professional), matching the existing
+// "not covered / not rated" fail-safe pattern.
+
+describe('spanCheck — FIX 4 non-lumber joist/beam fails loud (fail-safe warning)', () => {
+  const FIXED_CLOCK = (): string => '2026-07-04T00:00:00.000Z';
+  const spacingMm = 406;
+  const joistSpanMm = 3000;
+  const halfSpan = joistSpanMm / 2;
+  // A block-kind LayoutMember (impossible-today, defensive-tomorrow).
+  const blockMaterial = { kind: 'block' as const, productId: 'oldcastle-11x11x7' } as const;
+  const lumberMaterial = {
+    kind: 'lumber' as const,
+    nominal: '2x10' as const,
+    species: 'PT' as const,
+    grade: 'No2' as const,
+  } as const;
+
+  function makeLayout(overrides: {
+    joistMaterial?: MemberMaterialRef;
+    beamMaterial?: MemberMaterialRef;
+  }): Layout {
+    const joistMat = overrides.joistMaterial ?? lumberMaterial;
+    const beamMat = overrides.beamMaterial ?? lumberMaterial;
+    const beamNear: LayoutMember = {
+      id: 'beam-near',
+      kind: 'beam',
+      material: beamMat,
+      position: { x: 0, y: 500, z: -halfSpan },
+      size: { x: 2000, y: 235, z: 38 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const beamFar: LayoutMember = {
+      ...beamNear,
+      id: 'beam-far',
+      position: { x: 0, y: 500, z: +halfSpan },
+    };
+    const joist0: LayoutMember = {
+      id: 'joist-0',
+      kind: 'joist',
+      material: joistMat,
+      position: { x: 0, y: 700, z: 0 },
+      size: { x: 38, y: 235, z: joistSpanMm + FOOTING_WIDTH_MM },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const joist1: LayoutMember = {
+      ...joist0,
+      id: 'joist-1',
+      position: { x: spacingMm, y: 700, z: 0 },
+    };
+    // Two posts per beam so `deriveBeamPostToPostSpanMm` returns a
+    // real span (fewer than 2 skips the beam). Positions are
+    // symmetric about the beam's z so the beam FIX-4 branch runs.
+    const posts: LayoutMember[] = [];
+    for (const b of [beamNear, beamFar]) {
+      for (const px of [0, 1500]) {
+        posts.push({
+          id: `post-${b.id}-${px}`,
+          kind: 'post',
+          material: {
+            kind: 'lumber',
+            nominal: '6x6',
+            species: 'PT',
+            grade: 'No2',
+          },
+          position: { x: px, y: 250, z: b.position.z },
+          size: { x: 140, y: 500, z: 140 },
+          rotation: { x: 0, y: 0, z: 0 },
+        });
+      }
+    }
+    return {
+      designId: '00000000-0000-4000-8000-000000000000',
+      computedAt: FIXED_CLOCK(),
+      bounds: { widthMm: 2000, lengthMm: joistSpanMm + FOOTING_WIDTH_MM, heightMm: 914 },
+      members: [beamNear, beamFar, joist0, joist1, ...posts],
+    };
+  }
+
+  it('a block-kind joist emits a fail-safe warning (allowableMm:0, names the kind)', () => {
+    const layout = makeLayout({ joistMaterial: blockMaterial });
+    const warnings = spanCheck(layout, new IrcSpanTable());
+    // Every joist (both of them) triggers a fail-safe warning.
+    const joistWarnings = warnings.filter((w) => w.memberId.startsWith('joist-'));
+    expect(joistWarnings.length).toBe(2);
+    for (const w of joistWarnings) {
+      expect(w.kind).toBe('over-span-joist');
+      expect(w.allowableMm).toBe(0);
+      expect(w.message).toMatch(/unexpected material kind/i);
+      expect(w.message).toMatch(/block/);
+      expect(w.message).toMatch(/consult/i);
+    }
+  });
+
+  it('a block-kind beam emits a fail-safe warning (allowableMm:0, names the kind)', () => {
+    const layout = makeLayout({ beamMaterial: blockMaterial });
+    const warnings = spanCheck(layout, new IrcSpanTable());
+    const beamWarnings = warnings.filter((w) => w.memberId.startsWith('beam-'));
+    expect(beamWarnings.length).toBe(2);
+    for (const w of beamWarnings) {
+      expect(w.kind).toBe('over-span-beam');
+      expect(w.allowableMm).toBe(0);
+      expect(w.message).toMatch(/unexpected material kind/i);
+      expect(w.message).toMatch(/block/);
+      expect(w.message).toMatch(/consult/i);
+    }
   });
 });

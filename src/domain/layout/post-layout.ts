@@ -74,19 +74,21 @@
  * y = −FOOTING_DEPTH_MM. Real footings key on frost-line data; MVP
  * uses a fixed cube for visualization.
  *
- * **MVP simplification — the footing member carries `design.post.material`
- * as its `material` field (which is a lumber ref like `6x6 PT No2`),
- * even though the physical member is CONCRETE, not lumber.** This is a
- * conscious placeholder so the S4 render contract stays uniform (every
- * `LayoutMember` has a `material: MaterialRef`) without S4 having to
- * invent a `Concrete` catalog entry.
+ * **MVP simplification — the footing member carries the post
+ * `MaterialRef` (read from `design.foundation.post`, the single
+ * source of truth per review-gate FIX 2) as its `material` field
+ * (which is a lumber ref like `6x6 PT No2`), even though the
+ * physical member is CONCRETE, not lumber.** This is a conscious
+ * placeholder so the S4 render contract stays uniform (every
+ * `LayoutMember` has a `material: MemberMaterialRef`) without S4
+ * having to invent a `Concrete` catalog entry.
  *
  * @todo S14/BOM: footings are concrete, not lumber. The bill-of-materials
  *       story MUST special-case `kind === 'footing'` and NOT count it as
  *       6×6 lumber — instead compute concrete volume from
  *       `FOOTING_WIDTH_MM × FOOTING_DEPTH_MM × FOOTING_WIDTH_MM` per
  *       footing and roll up to a "concrete piers" line item. See the
- *       inline comment where `design.post.material` is assigned to the
+ *       inline comment where `design.foundation.post` is assigned to the
  *       footing below.
  */
 
@@ -118,10 +120,28 @@ export function layoutPostsAndFootings(
   design: DeckDesign,
   beams: readonly LayoutMember[],
 ): PostAndFootingResult {
+  // Review-gate FIX 2 — `foundation.post` is the SINGLE source of
+  // truth for the post material (the pre-S17 top-level `design.post`
+  // field was removed to eliminate a dual-SoT drift bug — see
+  // `model.ts` FoundationSpec doc). `layoutPostsAndFootings` is
+  // invoked ONLY from the elevated + posts-on-footings dispatch
+  // branch in `layout-engine.ts`, so the discriminant MUST be
+  // 'posts-on-footings' here. A defensive throw naming the module
+  // catches a future call site that skipped the compat gate.
+  if (design.foundation.type !== 'posts-on-footings') {
+    throw new Error(
+      `layoutPostsAndFootings: expected foundation.type === 'posts-on-footings', ` +
+        `got '${design.foundation.type}'. This function is only valid for the ` +
+        `elevated / posts-on-footings dispatch branch of computeLayout. ` +
+        `See src/domain/layout/post-layout.ts, src/domain/layout/layout-engine.ts, ` +
+        `and Epic 2 / S19/S20.`,
+    );
+  }
+  const postMaterialRef = design.foundation.post;
   const postMat = lookupMaterial(
-    design.post.material.nominal,
-    design.post.material.species,
-    design.post.material.grade,
+    postMaterialRef.nominal,
+    postMaterialRef.species,
+    postMaterialRef.grade,
   );
   const postThicknessX = postMat.actual.widthMm; // 6×6 post: 140 mm on x
   const postThicknessZ = postMat.actual.heightMm; // 6×6 post: 140 mm on z (square posts)
@@ -150,7 +170,8 @@ export function layoutPostsAndFootings(
       posts.push({
         id: `post-${beamLabel}-${i}`,
         kind: 'post',
-        material: design.post.material,
+        // S17: stamp the lumber variant of the widened MemberMaterialRef.
+        material: { kind: 'lumber', ...postMaterialRef },
         position: { x, y: stack.postCenterY, z },
         size: { x: postThicknessX, y: stack.postHeightMm, z: postThicknessZ },
         rotation: { x: 0, y: 0, z: 0 },
@@ -159,11 +180,11 @@ export function layoutPostsAndFootings(
         id: `footing-${beamLabel}-${i}`,
         kind: 'footing',
         // MVP placeholder: footings are CONCRETE, but the LayoutMember
-        // schema requires a MaterialRef. We reuse the post lumber ref
+        // schema requires a material ref. We reuse the post lumber ref
         // here purely so the render contract stays uniform. The BOM
         // story (S14) MUST special-case kind==='footing' and NOT count
         // this as lumber — see the module header TODO(S14/BOM).
-        material: design.post.material,
+        material: { kind: 'lumber', ...postMaterialRef },
         position: { x, y: stack.footingCenterY, z },
         size: { x: FOOTING_WIDTH_MM, y: FOOTING_DEPTH_MM, z: FOOTING_WIDTH_MM },
         rotation: { x: 0, y: 0, z: 0 },

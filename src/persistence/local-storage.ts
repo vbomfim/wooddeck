@@ -37,7 +37,7 @@
 import type { DeckDesign } from '../domain/model';
 
 import { DeckFileError } from './deck-file/errors';
-import { deserialize, serialize } from './deck-file/schema-v1';
+import { deserialize, serialize } from './deck-file/schema-v2';
 
 /**
  * The single localStorage slot for the current in-progress design.
@@ -75,6 +75,18 @@ export function saveDesignToLocalStorage(design: DeckDesign): void {
 // ---------------------------------------------------------------------------
 
 /**
+ * Result of `loadDesignFromLocalStorage` — the parsed `DeckDesign`
+ * plus the `migrated` boolean discriminator introduced in S18. When
+ * `true`, the persisted slot held a v1 envelope that the loader
+ * upgraded to v2 in-flight. S23's migration-toast UI will read this
+ * seam; for now, callers may ignore the flag.
+ */
+export interface LoadFromLocalStorageResult {
+  readonly design: DeckDesign;
+  readonly migrated: boolean;
+}
+
+/**
  * Restore the last-saved design. Returns null when:
  *
  *   - the slot is absent (fresh install / cleared cache);
@@ -85,8 +97,12 @@ export function saveDesignToLocalStorage(design: DeckDesign): void {
  * Never throws — this is called during app boot before the error UI
  * is even mounted. The caller (S8 state store) treats null as "start
  * with a fresh default design"; a banner may inform the user (S12).
+ *
+ * The returned `migrated` flag lets callers surface an "upgraded from
+ * a previous version" hint. Consumers that don't care about migration
+ * status can destructure `{ design }` and drop `migrated`.
  */
-export function loadDesignFromLocalStorage(): DeckDesign | null {
+export function loadDesignFromLocalStorage(): LoadFromLocalStorageResult | null {
   let raw: string | null;
   try {
     const storage = getStorageOrNull();
@@ -99,11 +115,13 @@ export function loadDesignFromLocalStorage(): DeckDesign | null {
   }
   if (raw === null) return null;
   try {
-    return deserialize(raw).design;
+    const { design, migrated } = deserialize(raw);
+    return { design, migrated };
   } catch {
     // Any DeckFileError (invalid-json, schema-validation-failed,
-    // unknown-schema) is treated as "nothing usable stored" — the
-    // shell boots with a fresh design, not a partially-decoded one.
+    // unknown-schema, migration-failed) is treated as "nothing usable
+    // stored" — the shell boots with a fresh design, not a partially-
+    // decoded one.
     return null;
   }
 }

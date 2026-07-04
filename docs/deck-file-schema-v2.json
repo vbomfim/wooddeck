@@ -1,0 +1,190 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wooddeck.dev/schema/deck-file-v2.json",
+  "title": "wooddeck .deck file — envelope v2",
+  "description": "JSON Schema (Draft 2020-12) for the wooddeck .deck v2 file format. v2 adds Epic 2's foundation model: the design payload REQUIRES `structure` (elevated | floating) and `foundation` (discriminated union on `type`). The pre-S17 top-level `post` field was REMOVED in this schema (review-gate FIX 2) — `foundation.post` (inside the posts-on-footings variant) is now the SINGLE source of truth for the post material. `additionalProperties:false` on `DeckDesign` rejects a leftover top-level `post`, so a v1 file must go through migrateV1ToV2 before v2 validation. The envelope stays lenient at the root (no additionalProperties:false) so a future v3 producer may append additive metadata; the design payload is strict (additionalProperties:false at every level) so unknown fields are rejected, never silently dropped. Loader logic MUST switch on `schema` and refuse any value other than 2 (with v1 migration handled by a separate loader path).",
+  "type": "object",
+  "required": ["schema", "generator", "generatorVersion", "createdAt", "design"],
+  "properties": {
+    "schema": {
+      "description": "Envelope version. Frozen at 2 for the Epic 2 release; a new major format is a new schema number.",
+      "type": "integer",
+      "const": 2
+    },
+    "generator": {
+      "description": "Producing application identifier — always the literal string 'wooddeck'.",
+      "type": "string",
+      "const": "wooddeck"
+    },
+    "generatorVersion": {
+      "description": "SemVer version of the producing wooddeck build (from package.json at build time). Pattern accepts MAJOR.MINOR.PATCH with an optional -prerelease and/or +build suffix (both suffix segments are folded together in the pattern for simplicity).",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:[-+].+)?$"
+    },
+    "createdAt": {
+      "description": "ISO-8601 date-time at which the file was produced.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "design": { "$ref": "#/$defs/DeckDesign" }
+  },
+  "$defs": {
+    "DeckDesign": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "createdAt",
+        "footprint",
+        "structure",
+        "foundation",
+        "joist",
+        "beam",
+        "decking",
+        "layout"
+      ],
+      "properties": {
+        "id": {
+          "description": "RFC 4122 v4 UUID.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "footprint": { "$ref": "#/$defs/Dimensions3D" },
+        "structure": {
+          "description": "FR-027 structure enum — elevated (posts on grade) or floating (deck on grade).",
+          "type": "string",
+          "enum": ["elevated", "floating"]
+        },
+        "foundation": { "$ref": "#/$defs/FoundationSpec" },
+        "joist": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["material", "spacingMm"],
+          "properties": {
+            "material": { "$ref": "#/$defs/MaterialRef" },
+            "spacingMm": { "$ref": "#/$defs/Mm" }
+          }
+        },
+        "beam": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["material"],
+          "properties": { "material": { "$ref": "#/$defs/MaterialRef" } }
+        },
+        "decking": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["material", "orientation"],
+          "properties": {
+            "material": { "$ref": "#/$defs/MaterialRef" },
+            "orientation": {
+              "type": "string",
+              "enum": ["parallel-to-length", "parallel-to-width"]
+            }
+          }
+        },
+        "layout": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["bayRemainderStrategy"],
+          "properties": {
+            "bayRemainderStrategy": {
+              "type": "string",
+              "enum": ["extra-bay-at-end", "centered"]
+            }
+          }
+        }
+      }
+    },
+    "FoundationSpec": {
+      "description": "FR-026 foundation discriminated union. Discriminator: `type`. Each variant carries only the fields its type requires; additionalProperties:false at each variant defends against prototype pollution and typo drift.",
+      "oneOf": [
+        { "$ref": "#/$defs/FoundationSpecPostsOnFootings" },
+        { "$ref": "#/$defs/FoundationSpecDeckBlocks" },
+        { "$ref": "#/$defs/FoundationSpecTuffBlocks" }
+      ]
+    },
+    "FoundationSpecPostsOnFootings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "post", "footing"],
+      "properties": {
+        "type": { "type": "string", "const": "posts-on-footings" },
+        "post": { "$ref": "#/$defs/MaterialRef" },
+        "footing": { "$ref": "#/$defs/FootingSpec" }
+      }
+    },
+    "FoundationSpecDeckBlocks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "product"],
+      "properties": {
+        "type": { "type": "string", "const": "deck-blocks" },
+        "product": { "$ref": "#/$defs/FoundationBlockRef" }
+      }
+    },
+    "FoundationSpecTuffBlocks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "product"],
+      "properties": {
+        "type": { "type": "string", "const": "tuffblocks" },
+        "product": { "$ref": "#/$defs/FoundationBlockRef" }
+      }
+    },
+    "FootingSpec": {
+      "description": "Poured-concrete footing dimensions for posts-on-footings foundations. Values are typical residential-deck sizes (300 mm ≈ 12\" default).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["widthMm", "depthMm"],
+      "properties": {
+        "widthMm": { "$ref": "#/$defs/Mm" },
+        "depthMm": { "$ref": "#/$defs/Mm" }
+      }
+    },
+    "FoundationBlockRef": {
+      "description": "SKU reference into the S17 foundation catalog. `productId` enum is pinned to the persistence-side FOUNDATION_PRODUCT_IDS constant (schema-constants.ts) which is compile-time equated to FoundationProductId (AC8).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["productId"],
+      "properties": {
+        "productId": {
+          "type": "string",
+          "enum": ["oldcastle-11x11x7", "tuffblock-12x12x4"]
+        }
+      }
+    },
+    "Dimensions3D": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["widthMm", "lengthMm", "heightMm"],
+      "properties": {
+        "widthMm": { "$ref": "#/$defs/Mm" },
+        "lengthMm": { "$ref": "#/$defs/Mm" },
+        "heightMm": { "$ref": "#/$defs/Mm" }
+      }
+    },
+    "MaterialRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["nominal", "species", "grade"],
+      "properties": {
+        "nominal": {
+          "type": "string",
+          "enum": ["2x6", "2x8", "2x10", "2x12", "4x4", "6x6", "5/4x6"]
+        },
+        "species": { "type": "string", "enum": ["PT", "Cedar", "Composite"] },
+        "grade": { "type": "string", "enum": ["No1", "No2", "Select", "NA"] }
+      }
+    },
+    "Mm": {
+      "description": "Canonical millimeter length — finite non-negative number.",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1000000
+    }
+  }
+}

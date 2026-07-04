@@ -98,7 +98,8 @@ function layoutParallelToWidth(
   return rowDims.map<LayoutMember>((row, i) => ({
     id: `board-${i}`,
     kind: 'board',
-    material: design.decking.material,
+    // S17: stamp the lumber variant of the widened MemberMaterialRef.
+    material: { kind: 'lumber', ...design.decking.material },
     position: {
       x: 0,
       y: yCenter,
@@ -126,7 +127,8 @@ function layoutParallelToLength(
   return rowDims.map<LayoutMember>((row, i) => ({
     id: `board-${i}`,
     kind: 'board',
-    material: design.decking.material,
+    // S17: stamp the lumber variant of the widened MemberMaterialRef.
+    material: { kind: 'lumber', ...design.decking.material },
     position: {
       x: -spanMm / 2 + row.center,
       y: yCenter,

@@ -92,7 +92,9 @@ describe('applyParameters — AC4 partial merge + recompute', () => {
     // reference-equal — deep-merge produces a new tree).
     expect(bundle.design.joist).toEqual(FIXTURE.joist);
     expect(bundle.design.beam).toEqual(FIXTURE.beam);
-    expect(bundle.design.post).toEqual(FIXTURE.post);
+    // Post material lives in `foundation.post` (review-gate FIX 2 —
+    // removed the top-level `design.post` dual source of truth).
+    expect(bundle.design.foundation).toEqual(FIXTURE.foundation);
     expect(bundle.design.decking).toEqual(FIXTURE.decking);
     expect(bundle.design.layout).toEqual(FIXTURE.layout);
     expect(bundle.design.id).toBe(FIXTURE.id);
@@ -493,15 +495,16 @@ describe('applyParameters — editable-surface restriction (id, createdAt)', () 
 describe('applyParameters — structural sharing of untouched subtrees', () => {
   it('reference-shares an untouched top-level subtree with `current`', () => {
     // A patch that only touches `footprint` must NOT clone `beam`,
-    // `post`, `decking`, or `layout` — they should be `===` the
-    // originals. This is the standard immutable-update pattern and
-    // enables cheap structural equality checks (React memo, zundo
-    // snapshot diff) downstream. Safety comes from every field of
-    // DeckDesign being `readonly` at the type level — a mutation
-    // via a shared reference is a compile error.
+    // `foundation`, `decking`, or `layout` — they should be `===`
+    // the originals. This is the standard immutable-update pattern
+    // and enables cheap structural equality checks (React memo,
+    // zundo snapshot diff) downstream. Safety comes from every
+    // field of DeckDesign being `readonly` at the type level — a
+    // mutation via a shared reference is a compile error.
     const bundle = applyParameters(FIXTURE, { footprint: { widthMm: 4000 } }, table);
     expect(bundle.design.beam).toBe(FIXTURE.beam);
-    expect(bundle.design.post).toBe(FIXTURE.post);
+    // Review-gate FIX 2: post material lives in `foundation.post`.
+    expect(bundle.design.foundation).toBe(FIXTURE.foundation);
     expect(bundle.design.decking).toBe(FIXTURE.decking);
     expect(bundle.design.layout).toBe(FIXTURE.layout);
     // The touched subtree IS a fresh object — reference-inequal to

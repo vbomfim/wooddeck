@@ -29,9 +29,13 @@ import fc from 'fast-check';
 import { UUID_V4_PATTERN } from './id';
 import type {
   DeckDesign,
+  FoundationSpec,
   Layout,
   LayoutMember,
+  LumberMemberMaterial,
   MemberKind,
+  MemberMaterialRef,
+  StructureMode,
   Warning,
 } from './model';
 import { deckDesignArb } from './__testing__/deck-design-arb';
@@ -46,15 +50,19 @@ const GOLDEN_DECK_DESIGN: DeckDesign = {
   id: '018f4e7a-c1c5-4a3f-8f52-3a0f6c9d1e4b',
   createdAt: '2026-07-02T21:00:00.000Z',
   footprint: { widthMm: 3658, lengthMm: 4877, heightMm: 914 },
+  // S17 addition — the elevated + posts-on-footings default.
+  structure: 'elevated',
+  foundation: {
+    type: 'posts-on-footings',
+    post: { nominal: '6x6', species: 'PT', grade: 'No2' },
+    footing: { widthMm: 300, depthMm: 300 },
+  },
   joist: {
     material: { nominal: '2x8', species: 'PT', grade: 'No2' },
     spacingMm: 406,
   },
   beam: {
     material: { nominal: '2x10', species: 'PT', grade: 'No2' },
-  },
-  post: {
-    material: { nominal: '6x6', species: 'PT', grade: 'No2' },
   },
   decking: {
     material: { nominal: '5/4x6', species: 'Composite', grade: 'NA' },
@@ -115,14 +123,24 @@ describe('model — AC4 DeckDesign JSON round-trip (golden fixture)', () => {
     // during JSON.parse is broken — the second round should match the
     // first exactly. We assert against the actual expected byte string
     // so a property rename or reordered field is caught IMMEDIATELY.
+    //
+    // S17 update: the expected string now includes the `structure`
+    // and `foundation` fields (inserted after `footprint`). Field
+    // insertion order matches `DeckDesign` in `model.ts`.
+    // Review-gate FIX 2: the top-level `post` field was REMOVED —
+    // `foundation.post` is now the single source of truth for the
+    // elevated deck's post material.
     const expected =
       '{"id":"018f4e7a-c1c5-4a3f-8f52-3a0f6c9d1e4b",' +
       '"createdAt":"2026-07-02T21:00:00.000Z",' +
       '"footprint":{"widthMm":3658,"lengthMm":4877,"heightMm":914},' +
+      '"structure":"elevated",' +
+      '"foundation":{"type":"posts-on-footings",' +
+      '"post":{"nominal":"6x6","species":"PT","grade":"No2"},' +
+      '"footing":{"widthMm":300,"depthMm":300}},' +
       '"joist":{"material":{"nominal":"2x8","species":"PT","grade":"No2"},' +
       '"spacingMm":406},' +
       '"beam":{"material":{"nominal":"2x10","species":"PT","grade":"No2"}},' +
-      '"post":{"material":{"nominal":"6x6","species":"PT","grade":"No2"}},' +
       '"decking":{"material":{"nominal":"5/4x6","species":"Composite","grade":"NA"},' +
       '"orientation":"parallel-to-width"},' +
       '"layout":{"bayRemainderStrategy":"extra-bay-at-end"}}';
@@ -197,7 +215,10 @@ describe('model — anemic-data invariant', () => {
         {
           id: 'joist-0',
           kind: 'joist',
-          material: GOLDEN_DECK_DESIGN.joist.material,
+          // S17: LayoutMember.material is now the widened
+          // MemberMaterialRef discriminated union — stamp the lumber
+          // variant.
+          material: { kind: 'lumber', ...GOLDEN_DECK_DESIGN.joist.material },
           position: { x: 0, y: 0, z: 0 },
           size: { x: 3658, y: 38, z: 184 },
           rotation: { x: 0, y: 0, z: 0 },
@@ -216,16 +237,16 @@ describe('model — anemic-data invariant', () => {
 // the fixture object literal must satisfy the interface to compile.
 // ---------------------------------------------------------------------------
 describe('model — every type is exercised by a fixture', () => {
-  it('MemberKind covers joist/beam/post/footing/board', () => {
-    const kinds: MemberKind[] = ['joist', 'beam', 'post', 'footing', 'board'];
-    expect(new Set(kinds).size).toBe(5);
+  it('MemberKind covers joist/beam/post/footing/board/block/blocking', () => {
+    const kinds: MemberKind[] = ['joist', 'beam', 'post', 'footing', 'board', 'block', 'blocking'];
+    expect(new Set(kinds).size).toBe(7);
   });
 
   it('LayoutMember carries id, kind, material, position, size, rotation', () => {
     const member: LayoutMember = {
       id: 'beam-0',
       kind: 'beam',
-      material: { nominal: '2x10', species: 'PT', grade: 'No2' },
+      material: { kind: 'lumber', nominal: '2x10', species: 'PT', grade: 'No2' },
       position: { x: 1829, y: 0, z: 500 },
       size: { x: 3658, y: 38, z: 235 },
       rotation: { x: 0, y: 0, z: 0 },
@@ -253,5 +274,141 @@ describe('model — every type is exercised by a fixture', () => {
   it('Warning.kind is one of the two allowed literals', () => {
     const kinds: Warning['kind'][] = ['over-span-joist', 'over-span-beam'];
     expect(new Set(kinds).size).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC1 (issue #39) — FoundationSpec discriminated-union exhaustiveness
+//
+// The type-level assertion IS the test: if a new variant is added to
+// `FoundationSpec` without adding a `case` here, the `never` guard in
+// the `default` branch fails to compile.
+//
+// The runtime `describe` block also spot-checks each variant's shape.
+// ---------------------------------------------------------------------------
+describe('model — S17/AC1 FoundationSpec is a discriminated union', () => {
+  function labelFoundation(f: FoundationSpec): string {
+    switch (f.type) {
+      case 'posts-on-footings':
+        return `posts+footings ${f.post.nominal} ${f.footing.widthMm}×${f.footing.depthMm}`;
+      case 'deck-blocks':
+        return `deck-blocks ${f.product.productId}`;
+      case 'tuffblocks':
+        return `tuffblocks ${f.product.productId}`;
+      default: {
+        // Compile-time exhaustive check — a new variant fails here.
+        const _exhaustive: never = f;
+        return _exhaustive;
+      }
+    }
+  }
+
+  it('posts-on-footings variant carries post + footing', () => {
+    const f: FoundationSpec = {
+      type: 'posts-on-footings',
+      post: { nominal: '6x6', species: 'PT', grade: 'No2' },
+      footing: { widthMm: 300, depthMm: 300 },
+    };
+    expect(labelFoundation(f)).toBe('posts+footings 6x6 300×300');
+  });
+
+  it('deck-blocks variant carries a product ref', () => {
+    const f: FoundationSpec = {
+      type: 'deck-blocks',
+      product: { productId: 'oldcastle-11x11x7' },
+    };
+    expect(labelFoundation(f)).toBe('deck-blocks oldcastle-11x11x7');
+  });
+
+  it('tuffblocks variant carries a product ref', () => {
+    const f: FoundationSpec = {
+      type: 'tuffblocks',
+      product: { productId: 'tuffblock-12x12x4' },
+    };
+    expect(labelFoundation(f)).toBe('tuffblocks tuffblock-12x12x4');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC1 (issue #39) — StructureMode is a two-value enum
+// ---------------------------------------------------------------------------
+describe('model — S17/AC1 StructureMode enum', () => {
+  it('the union covers exactly two values: elevated + floating', () => {
+    const modes: StructureMode[] = ['elevated', 'floating'];
+    expect(new Set(modes).size).toBe(2);
+  });
+
+  it('exhaustive switch works with a never guard', () => {
+    function structureLabel(s: StructureMode): string {
+      switch (s) {
+        case 'elevated':
+          return 'E';
+        case 'floating':
+          return 'F';
+        default: {
+          const _exhaustive: never = s;
+          return _exhaustive;
+        }
+      }
+    }
+    expect(structureLabel('elevated')).toBe('E');
+    expect(structureLabel('floating')).toBe('F');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC1 (issue #39) — MemberMaterialRef is a discriminated union tagged on
+// `kind` (lumber / block). The AC6 grep audit relies on this being a real
+// runtime tag consumers can switch on.
+// ---------------------------------------------------------------------------
+describe('model — S17/AC1 MemberMaterialRef discriminated union', () => {
+  function labelMaterial(m: MemberMaterialRef): string {
+    switch (m.kind) {
+      case 'lumber':
+        return `lumber ${m.nominal}`;
+      case 'block':
+        return `block ${m.productId}`;
+      default: {
+        // Compile-time exhaustive check.
+        const _exhaustive: never = m;
+        return _exhaustive;
+      }
+    }
+  }
+
+  it('lumber variant carries nominal/species/grade', () => {
+    const m: LumberMemberMaterial = {
+      kind: 'lumber',
+      nominal: '2x8',
+      species: 'PT',
+      grade: 'No2',
+    };
+    expect(labelMaterial(m)).toBe('lumber 2x8');
+  });
+
+  it('block variant carries productId', () => {
+    const m: MemberMaterialRef = {
+      kind: 'block',
+      productId: 'oldcastle-11x11x7',
+    };
+    expect(labelMaterial(m)).toBe('block oldcastle-11x11x7');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC8 (issue #39) — model.ts contains no runtime code. The interface types
+// vanish at compile time; every entity is a plain object literal at
+// runtime. Verify by asserting the compiled module has no properties
+// besides Symbol.toStringTag and the like.
+// ---------------------------------------------------------------------------
+describe('model — S17/AC8 model.ts emits no runtime code', () => {
+  it('module has no named exports at runtime (types-only file)', async () => {
+    // Dynamic import so this test does not add a compile-time
+    // dependency on the module's runtime surface (there is none).
+    const mod = await import('./model');
+    // Only the default `Symbol.toStringTag` etc are present — no
+    // enumerable named exports. `Object.keys` returns an empty array
+    // for a pure `.ts` types-only module.
+    expect(Object.keys(mod)).toEqual([]);
   });
 });

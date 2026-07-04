@@ -30,7 +30,6 @@ import {
   saveDesignToLocalStorage,
 } from './local-storage';
 import { DeckFileError } from './deck-file/errors';
-import { serialize } from './deck-file/schema-v1';
 import { GOLDEN_DECK_DESIGN, SECOND_GOLDEN_DECK_DESIGN } from './deck-file/__fixtures__/deck-designs';
 
 // Isolate every test so a leaked storage entry from a prior run
@@ -63,26 +62,29 @@ describe('STORAGE_KEY', () => {
 // ---------------------------------------------------------------------------
 
 describe('saveDesignToLocalStorage / loadDesignFromLocalStorage — AC7', () => {
-  it('load returns a design deep-equal to the saved one', () => {
+  it('load returns { design, migrated:false } for a v2 save (S18)', () => {
     saveDesignToLocalStorage(GOLDEN_DECK_DESIGN);
     const loaded = loadDesignFromLocalStorage();
-    expect(loaded).toEqual(GOLDEN_DECK_DESIGN);
+    expect(loaded).not.toBeNull();
+    expect(loaded!.design).toEqual(GOLDEN_DECK_DESIGN);
+    expect(loaded!.migrated).toBe(false);
   });
 
   it('overwrites the slot on a second save (last-write wins)', () => {
     saveDesignToLocalStorage(GOLDEN_DECK_DESIGN);
     saveDesignToLocalStorage(SECOND_GOLDEN_DECK_DESIGN);
     const loaded = loadDesignFromLocalStorage();
-    expect(loaded).toEqual(SECOND_GOLDEN_DECK_DESIGN);
+    expect(loaded).not.toBeNull();
+    expect(loaded!.design).toEqual(SECOND_GOLDEN_DECK_DESIGN);
   });
 
-  it('writes to `STORAGE_KEY` (not some ad-hoc slot)', () => {
+  it('writes to `STORAGE_KEY` a v2-shaped envelope (S18 AC10 — save defaults to v2)', () => {
     saveDesignToLocalStorage(GOLDEN_DECK_DESIGN);
     // The stored value is the FULL serialized envelope, not the raw
     // design — that way `load` can validate before accepting.
     const raw = window.localStorage.getItem(STORAGE_KEY);
     expect(raw).not.toBeNull();
-    expect(raw?.startsWith('{"schema":1')).toBe(true);
+    expect(raw?.startsWith('{"schema":2')).toBe(true);
   });
 });
 
@@ -221,7 +223,16 @@ describe('loadDesignFromLocalStorage — resilience', () => {
   });
 
   it('returns null when the stored value has an unknown schema', () => {
-    const rogue = serialize(GOLDEN_DECK_DESIGN).replace('"schema":1', '"schema":999');
+    // Fabricate an envelope with a schema value outside KNOWN_SCHEMA_VERSIONS.
+    // Using schema=999 directly (not `.replace`) since the emitted
+    // envelope now has `schema:2`, not `schema:1`.
+    const rogue = JSON.stringify({
+      schema: 999,
+      generator: 'wooddeck',
+      generatorVersion: '9.9.9',
+      createdAt: '2026-07-04T00:00:00.000Z',
+      design: GOLDEN_DECK_DESIGN,
+    });
     window.localStorage.setItem(STORAGE_KEY, rogue);
     expect(loadDesignFromLocalStorage()).toBeNull();
   });

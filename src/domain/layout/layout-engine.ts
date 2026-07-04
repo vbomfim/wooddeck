@@ -64,6 +64,7 @@
 
 import type { DeckDesign, Layout, LayoutMember } from '../model';
 import { lookupMaterial } from '../materials-catalog';
+import { validateFoundationCombination } from '../compat-matrix';
 import { MM_PER_FOOT, type Mm } from '../units';
 
 import { layoutBeams } from './beam-layout';
@@ -175,10 +176,112 @@ export function computeMinStructuralHeightMm(design: DeckDesign): Mm {
  * module header for the coordinate frame, error contract, and
  * determinism guarantee.
  *
- * @throws {LayoutError} when the design is invalid or references an
- *   unknown material.
+ * ## Structure × foundation dispatch (Epic 2 review-gate FIX 1)
+ *
+ * Two gates run BEFORE the layout math:
+ *
+ *   1. **Compat matrix (FR-030)** — `validateFoundationCombination`
+ *      rejects the two illegal combos (`elevated`+`tuffblocks` and
+ *      `floating`+`posts-on-footings`) as a `LayoutError` carrying
+ *      the compat-matrix reason string. This is the single choke-
+ *      point every ingress (`readDeckFile`, `loadFromLocalStorage`,
+ *      `applyParameters`) inherits — none of those paths need to
+ *      call the matrix themselves.
+ *   2. **Support gate** — of the four compat-legal combos, only
+ *      `elevated`+`posts-on-footings` has an implementation in this
+ *      branch. The other three (`elevated`+`deck-blocks`,
+ *      `floating`+`deck-blocks`, `floating`+`tuffblocks`) throw
+ *      "not yet implemented (arrives in Epic 2 stories S19/S20)"
+ *      until those stories fill in the branches. Exhaustive
+ *      dispatch with a `never`-typed default catches any future
+ *      variant that lands without a branch here.
+ *
+ * @throws {LayoutError} when the design is invalid, when the
+ *   structure × foundation combo is FR-030-illegal, when the combo
+ *   is legal but not yet implemented, or when the design references
+ *   an unknown material.
  */
 export function computeLayout(
+  design: DeckDesign,
+  options?: ComputeLayoutOptions,
+): Layout {
+  // ---- Gate 1: FR-030 compat matrix ---------------------------------------
+  // Reject the two illegal combos with the compat-matrix reason string
+  // before any material lookup happens. A LayoutError here surfaces to
+  // the state layer as "keep the previous good layout + show a banner"
+  // (see the module header's error contract).
+  const compat = validateFoundationCombination({
+    structure: design.structure,
+    foundation: design.foundation,
+  });
+  if (!compat.ok) {
+    throw new LayoutError(compat.reason);
+  }
+
+  // ---- Gate 2: support-gate dispatch (only elevated+posts-on-footings) ---
+  // A `never`-typed default on both switches catches a future
+  // StructureMode or FoundationSpec.type variant without a branch
+  // here, so the layout engine fails-compile until S19/S20 fill in
+  // the missing paths.
+  switch (design.structure) {
+    case 'elevated':
+      switch (design.foundation.type) {
+        case 'posts-on-footings':
+          return computeElevatedPostsOnFootingsLayout(design, options);
+        case 'deck-blocks':
+          throw new LayoutError(
+            'Elevated construction on deck-blocks is valid but not yet ' +
+              'implemented (arrives in Epic 2 story S20).',
+          );
+        case 'tuffblocks':
+          // Unreachable — compat gate above already rejected this
+          // combo. Kept explicit so the exhaustive default doesn't
+          // widen `never` to include it if the compat matrix ever
+          // relaxes.
+          throw new LayoutError(
+            'Elevated + tuffblocks is not a supported combination (FR-030).',
+          );
+        default: {
+          const _exhaustive: never = design.foundation;
+          return _exhaustive;
+        }
+      }
+    case 'floating':
+      switch (design.foundation.type) {
+        case 'posts-on-footings':
+          // Unreachable per the compat gate — see note above.
+          throw new LayoutError(
+            'Floating + posts-on-footings is not a supported combination (FR-030).',
+          );
+        case 'deck-blocks':
+          throw new LayoutError(
+            'Floating construction on deck-blocks is valid but not yet ' +
+              'implemented (arrives in Epic 2 story S19).',
+          );
+        case 'tuffblocks':
+          throw new LayoutError(
+            'Floating construction on tuffblocks is valid but not yet ' +
+              'implemented (arrives in Epic 2 story S19).',
+          );
+        default: {
+          const _exhaustive: never = design.foundation;
+          return _exhaustive;
+        }
+      }
+    default: {
+      const _exhaustive: never = design.structure;
+      return _exhaustive;
+    }
+  }
+}
+
+/**
+ * Compute the layout for the ONLY supported combo in this branch —
+ * `structure === 'elevated'` + `foundation.type === 'posts-on-footings'`.
+ * This is the legacy S4 code path, unchanged aside from being
+ * extracted behind the S17 support-gate dispatch above.
+ */
+function computeElevatedPostsOnFootingsLayout(
   design: DeckDesign,
   options?: ComputeLayoutOptions,
 ): Layout {

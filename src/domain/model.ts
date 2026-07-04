@@ -148,6 +148,175 @@ export interface MaterialRef {
 }
 
 // ==========================================================
+// Foundation & structure model (Epic 2 / S17 / FR-026, FR-027)
+// ==========================================================
+//
+// The MVP deck supports THREE foundation TYPES (posts-on-footings —
+// the legacy S3/S4 model; precast concrete deck blocks; TuffBlock
+// polypropylene blocks) and TWO construction MODELS (elevated — the
+// legacy model; floating — new). The compatibility matrix that
+// pairs a `structure` with a `foundation.type` lives in
+// `compat-matrix.ts` (FR-030).
+//
+// `FoundationSpec` is a discriminated union tagged on `type` so
+// downstream consumers can `switch(design.foundation.type)` with an
+// exhaustive `default` that a `never` guard fail-compiles when a new
+// variant is added (`noFallthroughCasesInSwitch: true`).
+//
+// See specs/mvp-deck-designer/spec.md § 2026-07-04 Epic 2 amendment
+// for the full spec text.
+// ==========================================================
+
+/**
+ * The two construction MODELS the MVP supports.
+ *
+ *   - `'elevated'` — traditional post-supported deck. Posts sit in
+ *     poured footings or precast concrete blocks; joists rest on
+ *     beams that rest on posts. This is the legacy S3/S4 model.
+ *   - `'floating'` — ground-level deck resting directly on a grid of
+ *     precast blocks (Oldcastle) or polypropylene pucks (TuffBlock).
+ *     No posts; joists rest directly on the block grid. New in
+ *     Epic 2 (S19).
+ */
+export type StructureMode = 'elevated' | 'floating';
+
+/**
+ * Stable id union for every foundation block product the MVP catalog
+ * stocks. Kept in `model.ts` (not `foundation-catalog.ts`) so the
+ * domain types form an acyclic dependency graph — `foundation-catalog`
+ * IMPORTS this type, not the other way around.
+ *
+ * Adding a new product = add a literal here + a row to
+ * `MVP_PRODUCTS` in `foundation-catalog.ts`. Downstream consumers
+ * `switch(productId)` with an exhaustive `default: never` so an
+ * omitted branch fails-compile.
+ */
+export type FoundationProductId = 'oldcastle-11x11x7' | 'tuffblock-12x12x4';
+
+/**
+ * Dimensions of a poured or precast footing. Kept as a small
+ * standalone record rather than an inline object literal so a future
+ * feature (footing depth override, per-post custom sizing) can add
+ * fields without touching the `FoundationSpec` union. The MVP
+ * default is `{ widthMm: 300, depthMm: 300 }` — matches the legacy
+ * `FOOTING_WIDTH_MM` / `FOOTING_DEPTH_MM` constants in
+ * `layout/y-stack.ts` (source of truth for S4's footing math).
+ */
+export interface FootingSpec {
+  readonly widthMm: Mm;
+  readonly depthMm: Mm;
+}
+
+/**
+ * Reference to a catalog block product — mirrors the SKU-identity
+ * pattern used for lumber (FR-011). The `productId` is a stable enum
+ * literal; concrete dimensions are DERIVED via
+ * `foundation-catalog.lookupFoundationProduct(id)` at use-time. That
+ * way a catalog-side dimension revision propagates without a
+ * persisted-design migration.
+ */
+export interface FoundationBlockRef {
+  /** Stable id — key into the foundation catalog. */
+  readonly productId: FoundationProductId;
+}
+
+/**
+ * Discriminated union over the three foundation TYPES. The `type`
+ * tag is stable — a rewrite MAY change other fields inside a variant
+ * without touching the consumers as long as the tag stays.
+ *
+ *   - `'posts-on-footings'` — carries the post material and the
+ *     footing dimensions. **This is the SINGLE source of truth for
+ *     the elevated deck's post material.** The pre-S17 top-level
+ *     `design.post` field was REMOVED during review-gate FIX 2 to
+ *     eliminate a dual-SoT drift bug — every consumer that needs the
+ *     post material MUST read `design.foundation.post` guarded by
+ *     `design.foundation.type === 'posts-on-footings'`.
+ *   - `'deck-blocks'`      — precast concrete deck blocks (e.g.
+ *     Oldcastle). Carries a reference to the catalog product.
+ *   - `'tuffblocks'`       — polypropylene instant-foundation pucks.
+ *     Carries a reference to the catalog product. Only rated for
+ *     ground-level (floating) construction — enforced by
+ *     `compat-matrix.ts` (FR-030).
+ */
+export type FoundationSpec =
+  | { readonly type: 'posts-on-footings'; readonly post: MaterialRef; readonly footing: FootingSpec }
+  | { readonly type: 'deck-blocks'; readonly product: FoundationBlockRef }
+  | { readonly type: 'tuffblocks'; readonly product: FoundationBlockRef };
+
+// ==========================================================
+// LayoutMember material widening (Epic 2 / S17 / FR-026, FR-029)
+// ==========================================================
+//
+// Prior to S17 every `LayoutMember.material` was a `MaterialRef`
+// (lumber SKU triple). Epic 2 introduces block members (foundation
+// pucks/blocks) whose "material" is a catalog block product, not a
+// lumber triple. The widened `MemberMaterialRef` is a discriminated
+// union tagged on `kind`:
+//
+//   - `{kind:'lumber',  nominal, species, grade}` — the previous shape,
+//     wrapped in a tag. Every existing joist/beam/post/decking
+//     producer stamps this variant.
+//   - `{kind:'block',   productId}` — a foundation block (added in
+//     S19/S20 members). BOM + scene consumers switch on `.kind`
+//     before reading lumber-specific fields.
+//
+// Consumers reading `.material.nominal` on a `LayoutMember` MUST
+// guard with `if (member.material.kind === 'lumber')` (or use
+// `getLumberRef` below). The `.material.*` fields on `DeckDesign`
+// (design.joist.material, design.beam.material, etc.) remain the
+// narrower `MaterialRef` — only LAYOUT members are widened.
+// ==========================================================
+
+/**
+ * The lumber variant of `MemberMaterialRef` — same shape as the
+ * pre-S17 `MaterialRef`, tagged for the discriminated union.
+ */
+export interface LumberMemberMaterial {
+  readonly kind: 'lumber';
+  readonly nominal: LumberNominal;
+  readonly species: Species;
+  readonly grade: Grade;
+}
+
+/**
+ * The block variant of `MemberMaterialRef` — carries a product id
+ * that a consumer can pass through `lookupFoundationProduct` to
+ * derive dimensions or a display name.
+ */
+export interface BlockMemberMaterial {
+  readonly kind: 'block';
+  readonly productId: FoundationProductId;
+}
+
+/**
+ * The widened `LayoutMember.material` type. Discriminated on
+ * `.kind`. Adding a new variant is a spec change and must be paired
+ * with an exhaustive `default: never` update at every consumer's
+ * `switch` (compile-enforced via `noFallthroughCasesInSwitch`).
+ *
+ * ## Consumer pattern
+ *
+ * Consumers reading lumber-specific fields (nominal / species /
+ * grade) MUST guard with a discriminant check:
+ *
+ * ```ts
+ * if (member.material.kind === 'lumber') {
+ *   const size = lookupMaterial(
+ *     member.material.nominal,
+ *     member.material.species,
+ *     member.material.grade,
+ *   );
+ * }
+ * ```
+ *
+ * A convenience helper `getLumberRef(m)` is available in
+ * `member-material.ts` when the consumer wants a `LumberMemberMaterial
+ * | null` value rather than a `switch`.
+ */
+export type MemberMaterialRef = LumberMemberMaterial | BlockMemberMaterial;
+
+// ==========================================================
 // Shared geometry helpers
 // ==========================================================
 
@@ -189,12 +358,29 @@ export interface DeckDesign {
   readonly id: string; // RFC 4122 v4 UUID (see id.ts)
   readonly createdAt: string; // ISO-8601 timestamp
   readonly footprint: Dimensions3D;
+  /**
+   * Epic 2 / S17 addition (FR-027) — construction model. `'elevated'`
+   * matches the legacy S3/S4 post-supported model; `'floating'` is
+   * ground-level construction (S19). See `StructureMode` for the
+   * semantic meaning.
+   */
+  readonly structure: StructureMode;
+  /**
+   * Epic 2 / S17 addition (FR-026) — foundation TYPE + parameters.
+   * Discriminated on `.type` so an omitted branch in a downstream
+   * `switch` fails-compile. See `FoundationSpec`.
+   *
+   * The `structure`/`foundation.type` pair is validated by
+   * `compat-matrix.ts` (FR-030); illegal combinations (e.g.
+   * `floating` + `posts-on-footings`) are rejected at validation
+   * time with a user-legible reason.
+   */
+  readonly foundation: FoundationSpec;
   readonly joist: {
     readonly material: MaterialRef;
     readonly spacingMm: Mm; // e.g. 406 mm ≈ 16" o.c.
   };
   readonly beam: { readonly material: MaterialRef };
-  readonly post: { readonly material: MaterialRef };
   readonly decking: {
     readonly material: MaterialRef;
     readonly orientation: 'parallel-to-length' | 'parallel-to-width';
@@ -268,13 +454,20 @@ export interface DeckDesign {
 // ==========================================================
 
 /**
- * The five drawable primitives. Scene components render each `kind`
+ * The seven drawable primitives. Scene components render each `kind`
  * with its own material and, when applicable, warning overlay. The
  * literal set is exhaustive on purpose — pattern-matches (`switch`
  * with `noFallthroughCasesInSwitch: true` + `never` default) will
  * fail-compile if a new kind is added without updating the scene.
+ *
+ * Epic 2 / S17 widening (FR-026, FR-029):
+ *   - `'block'`    — a foundation block/puck (foundation pad in the
+ *     floating model or in the elevated + deck-blocks combination).
+ *     Rendered by S22 layers; produced by S19/S20 layout math.
+ *   - `'blocking'` — short lumber block installed between joists
+ *     for lateral bracing. Produced by S19's floating-layout math.
  */
-export type MemberKind = 'joist' | 'beam' | 'post' | 'footing' | 'board';
+export type MemberKind = 'joist' | 'beam' | 'post' | 'footing' | 'board' | 'block' | 'blocking';
 
 /**
  * A single drawable member with FULL 3D placement in millimeters.
@@ -302,7 +495,7 @@ export type MemberKind = 'joist' | 'beam' | 'post' | 'footing' | 'board';
 export interface LayoutMember {
   readonly id: string;
   readonly kind: MemberKind;
-  readonly material: MaterialRef;
+  readonly material: MemberMaterialRef;
   readonly position: { readonly x: Mm; readonly y: Mm; readonly z: Mm };
   readonly size: { readonly x: Mm; readonly y: Mm; readonly z: Mm };
   readonly rotation: { readonly x: number; readonly y: number; readonly z: number };

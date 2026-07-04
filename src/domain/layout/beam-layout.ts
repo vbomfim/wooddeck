@@ -96,7 +96,8 @@ export function layoutBeams(design: DeckDesign): LayoutMember[] {
     {
       id: BEAM_IDS.near,
       kind: 'beam',
-      material: design.beam.material,
+      // S17: stamp the lumber variant of the widened MemberMaterialRef.
+      material: { kind: 'lumber', ...design.beam.material },
       position: { x: 0, y, z: nearZ },
       size: { x: widthMm, y: depthMm, z: thicknessMm },
       rotation: { x: 0, y: 0, z: 0 },
@@ -104,7 +105,7 @@ export function layoutBeams(design: DeckDesign): LayoutMember[] {
     {
       id: BEAM_IDS.far,
       kind: 'beam',
-      material: design.beam.material,
+      material: { kind: 'lumber', ...design.beam.material },
       position: { x: 0, y, z: farZ },
       size: { x: widthMm, y: depthMm, z: thicknessMm },
       rotation: { x: 0, y: 0, z: 0 },

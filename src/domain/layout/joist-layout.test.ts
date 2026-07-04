@@ -35,12 +35,17 @@ function makeDesign(overrides: Partial<{
       lengthMm: overrides.lengthMm ?? 4880,
       heightMm: overrides.heightMm ?? 914,
     },
+    structure: 'elevated',
+    foundation: {
+      type: 'posts-on-footings',
+      post: { nominal: '6x6', species: 'PT', grade: 'No2' },
+      footing: { widthMm: 300, depthMm: 300 },
+    },
     joist: {
       material: { nominal: '2x10', species: 'PT', grade: 'No2' },
       spacingMm: overrides.spacingMm ?? 406,
     },
     beam: { material: { nominal: '2x10', species: 'PT', grade: 'No2' } },
-    post: { material: { nominal: '6x6', species: 'PT', grade: 'No2' } },
     decking: {
       material: { nominal: '5/4x6', species: 'PT', grade: 'No2' },
       orientation: 'parallel-to-width',
@@ -149,7 +154,12 @@ describe('layoutJoists — geometry', () => {
   it('every joist carries the joist material reference from the design', () => {
     const design = makeDesign();
     for (const j of layoutJoists(design)) {
-      expect(j.material).toEqual(design.joist.material);
+      // S17 MemberMaterialRef widening — the layout stamps
+      // `{kind:'lumber', ...design.joist.material}` (see
+      // joist-layout.ts). The assertion matches the wrapped
+      // shape; a caller reading `.nominal` / `.species` /
+      // `.grade` must first narrow with `kind === 'lumber'`.
+      expect(j.material).toEqual({ kind: 'lumber', ...design.joist.material });
     }
   });
 

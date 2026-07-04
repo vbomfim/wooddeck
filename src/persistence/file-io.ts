@@ -42,7 +42,7 @@
 import type { DeckDesign } from '../domain/model';
 
 import { DeckFileError } from './deck-file/errors';
-import { deserialize, serialize } from './deck-file/schema-v1';
+import { deserialize, serialize } from './deck-file/schema-v2';
 
 // ---------------------------------------------------------------------------
 // Constants — filename & size caps
@@ -137,8 +137,21 @@ export function downloadDeckFile(
 // ---------------------------------------------------------------------------
 
 /**
- * Parse + validate an uploaded `.deck` File. Resolves to the
- * `DeckDesign` payload on success; rejects with a `DeckFileError`
+ * Result of `readDeckFile` — the parsed `DeckDesign` plus the
+ * `migrated` boolean discriminator introduced in S18 (AC9). When
+ * `true`, the on-disk file was a v1 envelope that the loader
+ * upgraded to v2. S23's migration-toast UI will read this seam;
+ * for now, callers may destructure `{ design }` and ignore the
+ * flag.
+ */
+export interface ReadDeckFileResult {
+  readonly design: DeckDesign;
+  readonly migrated: boolean;
+}
+
+/**
+ * Parse + validate an uploaded `.deck` File. Resolves to
+ * `{ design, migrated }` on success; rejects with a `DeckFileError`
  * on any failure.
  *
  * Failure codes (see `DeckFileErrorCode`):
@@ -152,11 +165,15 @@ export function downloadDeckFile(
  * @throws DeckFileError code=`'invalid-json'` on JSON parse errors
  *         (surfaces from `deserialize`).
  * @throws DeckFileError code=`'schema-validation-failed'` when the
- *         payload's JSON structure does not match v1.
+ *         payload's JSON structure does not match its declared
+ *         schema (v1 or v2).
  * @throws DeckFileError code=`'unknown-schema'` when the envelope
  *         declares a version this build cannot understand.
+ * @throws DeckFileError code=`'migration-failed'` when a v1 envelope
+ *         parsed successfully but the v1→v2 migration could not
+ *         produce a valid v2 payload (S18 AC6).
  */
-export async function readDeckFile(file: File): Promise<DeckDesign> {
+export async function readDeckFile(file: File): Promise<ReadDeckFileResult> {
   if (file.size > MAX_UPLOAD_BYTES) {
     // Fail fast without reading a byte. `file-too-large` is the
     // dedicated code so the UI can render a truthful error message
@@ -168,7 +185,8 @@ export async function readDeckFile(file: File): Promise<DeckDesign> {
     );
   }
   const text = await readFileAsText(file);
-  return deserialize(text).design;
+  const { design, migrated } = deserialize(text);
+  return { design, migrated };
 }
 
 // ---------------------------------------------------------------------------

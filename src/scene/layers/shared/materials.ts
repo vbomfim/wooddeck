@@ -127,8 +127,26 @@ export function materialForSpecies(species: Species): MeshStandardMaterial {
  * its species-specific material from its `LayoutMember.material.species`
  * field. Delegates to {@link materialForSpecies}; keeps `BoxMember`
  * unaware of the cache implementation.
+ *
+ * ## S17 — MemberMaterialRef widening
+ *
+ * The layout engine now emits a discriminated union for
+ * `LayoutMember.material` (lumber | block). Only the `lumber`
+ * variant carries a `species` field. The MVP scene layers (S22 owns
+ * the block-layer surface) currently only render lumber members, so
+ * a `block` material triggers a defensive throw naming the module —
+ * that surfaces upstream misuse loudly rather than silently rendering
+ * with a wrong colour. S22's block layer will introduce its OWN
+ * material picker and never route through this helper.
  */
 export function materialForMember(member: LayoutMember): MeshStandardMaterial {
+  if (member.material.kind !== 'lumber') {
+    throw new Error(
+      `materialForMember: expected lumber material, got kind="${member.material.kind}". ` +
+        `Block-typed members must be rendered by a dedicated block layer (see Epic 2 / S22), ` +
+        `not routed through src/scene/layers/shared/materials.ts.`,
+    );
+  }
   return materialForSpecies(member.material.species);
 }
 

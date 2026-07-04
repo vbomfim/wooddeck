@@ -25,6 +25,7 @@
  * (persistence) sidesteps both.
  */
 import type { DeckDesign } from '../../../domain/model';
+import type { V1LegacyDesign } from '../envelope-types';
 
 // Re-export the shared generator so the persistence tests keep their
 // existing import path (`./__fixtures__/deck-designs`). The single
@@ -44,20 +45,26 @@ export {
  * Same value the S3 model tests use — kept byte-identical so a
  * regression in either the domain layer or the persistence layer
  * surfaces in the OTHER test suite too (belt + suspenders).
+ *
+ * S17 update: carries `structure` + `foundation` fields per the
+ * Epic 2 amendment. Reused across model / persistence tests.
  */
 export const GOLDEN_DECK_DESIGN: DeckDesign = {
   id: '018f4e7a-c1c5-4a3f-8f52-3a0f6c9d1e4b',
   createdAt: '2026-07-02T21:00:00.000Z',
   footprint: { widthMm: 3658, lengthMm: 4877, heightMm: 914 },
+  structure: 'elevated',
+  foundation: {
+    type: 'posts-on-footings',
+    post: { nominal: '6x6', species: 'PT', grade: 'No2' },
+    footing: { widthMm: 300, depthMm: 300 },
+  },
   joist: {
     material: { nominal: '2x8', species: 'PT', grade: 'No2' },
     spacingMm: 406,
   },
   beam: {
     material: { nominal: '2x10', species: 'PT', grade: 'No2' },
-  },
-  post: {
-    material: { nominal: '6x6', species: 'PT', grade: 'No2' },
   },
   decking: {
     material: { nominal: '5/4x6', species: 'Composite', grade: 'NA' },
@@ -71,21 +78,58 @@ export const GOLDEN_DECK_DESIGN: DeckDesign = {
  * to prove `save(A)` then `save(B)` then `load()` returns B (not A) and
  * `clear()` really wipes the slot. Keeping this outside the property
  * test's value space avoids accidental collisions.
+ *
+ * S17 update: carries the required `structure` + `foundation` fields.
+ * The variant is still `posts-on-footings` (Epic 2 does not add a
+ * floating fixture until S19); the post nominal (4x4 here) matches
+ * the `foundation.post` field.
  */
 export const SECOND_GOLDEN_DECK_DESIGN: DeckDesign = {
   id: '018f4e7a-c1c5-4a3f-8f52-3a0f6c9d1e4c',
   createdAt: '2026-07-03T09:15:30.000Z',
   footprint: { widthMm: 6100, lengthMm: 9144, heightMm: 1219 },
+  structure: 'elevated',
+  foundation: {
+    type: 'posts-on-footings',
+    post: { nominal: '4x4', species: 'PT', grade: 'No2' },
+    footing: { widthMm: 300, depthMm: 300 },
+  },
   joist: {
     material: { nominal: '2x10', species: 'Cedar', grade: 'No2' },
     spacingMm: 305,
   },
   beam: { material: { nominal: '2x12', species: 'Cedar', grade: 'No2' } },
-  post: { material: { nominal: '4x4', species: 'PT', grade: 'No2' } },
   decking: {
     material: { nominal: '2x6', species: 'Cedar', grade: 'No2' },
     orientation: 'parallel-to-length',
   },
   layout: { bayRemainderStrategy: 'centered' },
+};
+
+/**
+ * Review-gate FIX 5d — promoted legacy v1 design used by BOTH
+ * `validator.test.ts` (as a v1-shape design smuggled into a v2
+ * envelope to force a validation failure) AND `__fixtures__/
+ * v1-envelopes.ts` (as the base v1 design used by the migration
+ * corpus). Pre-fix each caller instantiated its own literal; the
+ * promotion collapses those into a single source so a v1-shape
+ * change lands in one place. Shape mirrors `V1LegacyDesign` in
+ * `../envelope-types.ts`.
+ */
+export const V1_LEGACY_DESIGN: V1LegacyDesign = {
+  id: '018f4e7a-c1c5-4a3f-8f52-3a0f6c9d1e4b',
+  createdAt: '2026-05-01T12:00:00.000Z',
+  footprint: { widthMm: 3658, lengthMm: 4877, heightMm: 914 },
+  joist: {
+    material: { nominal: '2x8', species: 'PT', grade: 'No2' },
+    spacingMm: 406,
+  },
+  beam: { material: { nominal: '2x10', species: 'PT', grade: 'No2' } },
+  post: { material: { nominal: '6x6', species: 'PT', grade: 'No2' } },
+  decking: {
+    material: { nominal: '5/4x6', species: 'Composite', grade: 'NA' },
+    orientation: 'parallel-to-width',
+  },
+  layout: { bayRemainderStrategy: 'extra-bay-at-end' },
 };
 

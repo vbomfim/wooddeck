@@ -233,6 +233,25 @@ export function ParameterPanel(): JSX.Element {
   const units = useUiUnits();
   const { status, lastError } = useDesignStatus();
 
+  // Review-gate FIX 2 (Epic 2): `foundation.post` (inside the
+  // posts-on-footings variant) is the SINGLE source of truth for
+  // the post material — the pre-S17 top-level `design.post` field
+  // was removed to eliminate a dual-SoT drift bug (see model.ts
+  // FoundationSpec doc). The MVP UI is elevated + posts-on-footings
+  // only (S23 owns the floating variants), so we throw a defensive
+  // error rather than render an invalid state when the discriminant
+  // is anything else. Every default and every v1-migrated design
+  // guarantees `foundation.type === 'posts-on-footings'`.
+  if (design.foundation.type !== 'posts-on-footings') {
+    throw new Error(
+      `ParameterPanel: expected foundation.type === 'posts-on-footings' ` +
+        `(got '${design.foundation.type}'). The MVP UI supports only the ` +
+        `elevated / posts-on-footings combo; floating / deck-block designs ` +
+        `are Epic 2 / S23 scope.`,
+    );
+  }
+  const postMaterialRef = design.foundation.post;
+
   // Catalog-filtered option lists. Each SelectField's options list
   // reflects that member's OWN species, not a shared "panel species"
   // — so if the user picks Composite (which broadcasts to joist +
@@ -246,7 +265,7 @@ export function ParameterPanel(): JSX.Element {
   // mutates.
   const joistSpecies = design.joist.material.species;
   const beamSpecies = design.beam.material.species;
-  const postSpecies = design.post.material.species;
+  const postSpecies = postMaterialRef.species;
   const deckingSpecies = design.decking.material.species;
 
   const joistSizeOptions = useMemo(
@@ -331,10 +350,13 @@ export function ParameterPanel(): JSX.Element {
     interface MutableMemberPatch {
       material?: { species?: Species; grade?: Grade };
     }
+    interface MutableFoundationPostPatch {
+      post?: { species?: Species; grade?: Grade };
+    }
     interface MutableFramingPatch {
       joist?: MutableMemberPatch;
       beam?: MutableMemberPatch;
-      post?: MutableMemberPatch;
+      foundation?: MutableFoundationPostPatch;
     }
     const draft: MutableFramingPatch = {};
     if (canStock(design.joist.material.nominal)) {
@@ -343,8 +365,11 @@ export function ParameterPanel(): JSX.Element {
     if (canStock(design.beam.material.nominal)) {
       draft.beam = { material: { species: nextSpecies, grade: nextGrade } };
     }
-    if (canStock(design.post.material.nominal)) {
-      draft.post = { material: { species: nextSpecies, grade: nextGrade } };
+    if (canStock(postMaterialRef.nominal)) {
+      // FIX 2 — post material lives at `foundation.post` (SoT).
+      // deep-merge preserves the discriminant `type` and the
+      // `nominal` / `footing` siblings.
+      draft.foundation = { post: { species: nextSpecies, grade: nextGrade } };
     }
     apply(draft);
   }
@@ -352,11 +377,12 @@ export function ParameterPanel(): JSX.Element {
   function onGradeChange(nextGrade: Grade): void {
     // Broadcast alongside the species change model — one grade
     // control for framing members. Decking grade is independent
-    // (mirrors species behaviour).
+    // (mirrors species behaviour). FIX 2 — post grade patch goes to
+    // `foundation.post`, not the removed top-level `post`.
     apply({
       joist: { material: { grade: nextGrade } },
       beam: { material: { grade: nextGrade } },
-      post: { material: { grade: nextGrade } },
+      foundation: { post: { grade: nextGrade } },
     });
   }
 
@@ -447,9 +473,10 @@ export function ParameterPanel(): JSX.Element {
         />
         <SelectField<LumberNominal>
           label="Post size"
-          value={design.post.material.nominal}
+          value={postMaterialRef.nominal}
           options={postSizeOptions}
-          onChange={(nominal): void => apply({ post: { material: { nominal } } })}
+          // FIX 2 — post nominal patch goes to `foundation.post` (SoT).
+          onChange={(nominal): void => apply({ foundation: { post: { nominal } } })}
         />
         <SelectField<LumberNominal>
           label="Decking board size"

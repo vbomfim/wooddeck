@@ -28,7 +28,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { downloadDeckFile, readDeckFile } from './file-io';
 import { DeckFileError } from './deck-file/errors';
-import { serialize } from './deck-file/schema-v1';
+import { serialize } from './deck-file/schema-v2';
 import { GOLDEN_DECK_DESIGN } from './deck-file/__fixtures__/deck-designs';
 
 /**
@@ -155,19 +155,21 @@ describe('downloadDeckFile — side effects', () => {
 // ---------------------------------------------------------------------------
 
 describe('readDeckFile — AC10 upload happy path', () => {
-  it('resolves to a DeckDesign deep-equal to the source', async () => {
+  it('resolves to a { design, migrated } shape with design deep-equal to source', async () => {
     const envelope = serialize(GOLDEN_DECK_DESIGN);
     const file = new File([envelope], 'wooddeck-20260702T210000.deck.json', {
       type: 'application/json',
     });
-    const design = await readDeckFile(file);
+    const { design, migrated } = await readDeckFile(file);
     expect(design).toEqual(GOLDEN_DECK_DESIGN);
+    // v2 native emission → migrated:false (S18 AC9).
+    expect(migrated).toBe(false);
   });
 
   it('accepts a File whose type is empty (some browsers do not set application/json)', async () => {
     const envelope = serialize(GOLDEN_DECK_DESIGN);
     const file = new File([envelope], 'anything.deck.json', { type: '' });
-    const design = await readDeckFile(file);
+    const { design } = await readDeckFile(file);
     expect(design).toEqual(GOLDEN_DECK_DESIGN);
   });
 });
@@ -300,7 +302,7 @@ describe('readDeckFile — G1 boundary: file.size === MAX_UPLOAD_BYTES resolves 
     });
     // The read must succeed — .text() ignores the fake size because
     // FileReader reads the actual byte content.
-    const design = await readDeckFile(file);
+    const { design } = await readDeckFile(file);
     expect(design).toEqual(GOLDEN_DECK_DESIGN);
   });
 
@@ -371,8 +373,12 @@ describe('readDeckFile — G4: envelope-ROOT __proto__ is accepted lenient AND d
     // is valid, (b) `Object.prototype` is not mutated afterwards.
     // The `we never merge the parsed value into another object`
     // discipline in `deserialize` is the primary defence.
+    //
+    // The envelope uses schema:2 (native) so the modern loader
+    // exercises the same defence — v1 would migrate first and reach
+    // the same code path via a different route.
     const payload = JSON.stringify({
-      schema: 1,
+      schema: 2,
       generator: 'wooddeck',
       generatorVersion: '1.0.0',
       createdAt: '2026-07-02T21:00:00.000Z',
@@ -382,7 +388,7 @@ describe('readDeckFile — G4: envelope-ROOT __proto__ is accepted lenient AND d
     const file = new File([payload], 'root-proto.deck.json', {
       type: 'application/json',
     });
-    const design = await readDeckFile(file);
+    const { design } = await readDeckFile(file);
     expect(design).toEqual(GOLDEN_DECK_DESIGN);
     // OBSERVABLE: no pollution on Object.prototype.
     expect(({} as Record<string, unknown>)['polluted']).toBeUndefined();
@@ -443,15 +449,15 @@ describe('deserialize — G6: whitespace-only inputs; BOM handling documented', 
     const file = new File([bomPayload], 'bom-valid.deck.json', {
       type: 'application/json',
     });
-    const design = await readDeckFile(file);
+    const { design } = await readDeckFile(file);
     expect(design).toEqual(GOLDEN_DECK_DESIGN);
   });
 
   it('classifies a BOM in the MIDDLE of the JSON as invalid-json (decoder only strips leading)', async () => {
     // Only the LEADING BOM is stripped; a stray U+FEFF anywhere else
     // survives and breaks JSON.parse — this is a genuinely hostile
-    // input worth pinning.
-    const payload = serialize(GOLDEN_DECK_DESIGN).replace('"schema":1,', '"schema":1,\uFEFF');
+    // input worth pinning. Use schema:2 to match the v2 default emit.
+    const payload = serialize(GOLDEN_DECK_DESIGN).replace('"schema":2,', '"schema":2,\uFEFF');
     const file = new File([payload], 'bom-mid.deck.json', {
       type: 'application/json',
     });

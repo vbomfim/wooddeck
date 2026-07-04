@@ -9,6 +9,19 @@
       "lengthMm": 6096,
       "heightMm": 609.6
     },
+    "structure": "elevated",
+    "foundation": {
+      "type": "posts-on-footings",
+      "post": {
+        "nominal": "6x6",
+        "species": "PT",
+        "grade": "No2"
+      },
+      "footing": {
+        "widthMm": 300,
+        "depthMm": 300
+      }
+    },
     "joist": {
       "material": {
         "nominal": "2x10",
@@ -56,6 +69,7 @@
         "id": "board-0",
         "kind": "board",
         "material": {
+          "kind": "lumber",
           "nominal": "5/4x6",
           "species": "PT",
           "grade": "No2"
@@ -80,6 +94,7 @@
         "id": "board-1",
         "kind": "board",
         "material": {
+          "kind": "lumber",
           "nominal": "5/4x6",
           "species": "PT",
           "grade": "No2"
@@ -104,6 +119,7 @@
         "id": "board-2",
         "kind": "board",
         "material": {
+          "kind": "lumber",
           "nominal": "5/4x6",
           "species": "PT",
           "grade": "No2"
@@ -128,6 +144,7 @@
         "id": "board-3",
         "kind": "board",
         "material": {
+          "kind": "lumber",
           "nominal": "5/4x6",
           "species": "PT",
           "grade": "No2"
@@ -152,6 +169,7 @@
         "id": "board-4",
         "kind": "board",
         "material": {
+          "kind": "lumber",
           "nominal": "5/4x6",
           "species": "PT",
           "grade": "No2"
@@ -176,6 +194,7 @@
         "id": "board-5",
         "kind": "board",
         "material": {
+          "kind": "lumber",
           "nominal": "5/4x6",
           "species": "PT",
           "grade": "No2"
@@ -200,6 +219,7 @@
         "id": "board-6",
         "kind": "board",
         "material": {
+          "kind": "lumber",
           "nominal": "5/4x6",
           "species": "PT",
           "grade": "No2"
@@ -224,6 +244,7 @@
         "id": "board-7",
         "kind": "board",
         "material": {
+          "kind": "lumber",
           "nominal": "5/4x6",
           "species": "PT",
           "grade": "No2"
@@ -248,6 +269,7 @@
         "id": "board-8",
         "kind": "board",
         "material": {
+          "kind": "lumber",
           "nominal": "5/4x6",
           "species": "PT",
           "grade": "No2"
@@ -272,6 +294,7 @@
         "id": "joist-0",
         "kind": "joist",
         "material": {
+          "kind": "lumber",
           "nominal": "2x10",
           "species": "PT",
           "grade": "No2"
@@ -296,6 +319,7 @@
         "id": "joist-1",
         "kind": "joist",
         "material": {
+          "kind": "lumber",
           "nominal": "2x10",
           "species": "PT",
           "grade": "No2"
@@ -320,6 +344,7 @@
         "id": "joist-2",
         "kind": "joist",
         "material": {
+          "kind": "lumber",
           "nominal": "2x10",
           "species": "PT",
           "grade": "No2"
@@ -344,6 +369,7 @@
         "id": "joist-3",
         "kind": "joist",
         "material": {
+          "kind": "lumber",
           "nominal": "2x10",
           "species": "PT",
           "grade": "No2"
@@ -368,6 +394,7 @@
         "id": "beam-near",
         "kind": "beam",
         "material": {
+          "kind": "lumber",
           "nominal": "2x10",
           "species": "PT",
           "grade": "No2"
@@ -392,6 +419,7 @@
         "id": "beam-far",
         "kind": "beam",
         "material": {
+          "kind": "lumber",
           "nominal": "2x10",
           "species": "PT",
           "grade": "No2"
@@ -416,6 +444,7 @@
         "id": "post-near-0",
         "kind": "post",
         "material": {
+          "kind": "lumber",
           "nominal": "6x6",
           "species": "PT",
           "grade": "No2"
@@ -440,6 +469,7 @@
         "id": "post-near-1",
         "kind": "post",
         "material": {
+          "kind": "lumber",
           "nominal": "6x6",
           "species": "PT",
           "grade": "No2"
@@ -464,6 +494,7 @@
         "id": "post-far-0",
         "kind": "post",
         "material": {
+          "kind": "lumber",
           "nominal": "6x6",
           "species": "PT",
           "grade": "No2"
@@ -488,6 +519,7 @@
         "id": "post-far-1",
         "kind": "post",
         "material": {
+          "kind": "lumber",
           "nominal": "6x6",
           "species": "PT",
           "grade": "No2"
@@ -512,6 +544,7 @@
         "id": "footing-near-0",
         "kind": "footing",
         "material": {
+          "kind": "lumber",
           "nominal": "6x6",
           "species": "PT",
           "grade": "No2"
@@ -536,6 +569,7 @@
         "id": "footing-near-1",
         "kind": "footing",
         "material": {
+          "kind": "lumber",
           "nominal": "6x6",
           "species": "PT",
           "grade": "No2"
@@ -560,6 +594,7 @@
         "id": "footing-far-0",
         "kind": "footing",
         "material": {
+          "kind": "lumber",
           "nominal": "6x6",
           "species": "PT",
           "grade": "No2"
@@ -584,6 +619,7 @@
         "id": "footing-far-1",
         "kind": "footing",
         "material": {
+          "kind": "lumber",
           "nominal": "6x6",
           "species": "PT",
           "grade": "No2"

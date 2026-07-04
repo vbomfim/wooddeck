@@ -62,6 +62,14 @@
  *     transparent PNG. Reuses the persistence-error surface so
  *     `ui`/`state` can pattern-match with the same `instanceof
  *     DeckFileError` idiom they use for storage/file failures.
+ *   - `'migration-failed'` — a v1 envelope was parsed successfully
+ *     but `migrateV1ToV2` could not produce a valid v2 payload (e.g.
+ *     the v1 payload referenced an unknown material SKU that S17's
+ *     catalog rejects). Distinguished from `schema-validation-failed`
+ *     so consumers can render a targeted UX ("we could not upgrade
+ *     this older .deck file — the file references a material this
+ *     build does not know") rather than the generic "corrupted"
+ *     banner. Added in S18 (issue #40 AC6).
  */
 export type DeckFileErrorCode =
   | 'invalid-json'
@@ -71,7 +79,8 @@ export type DeckFileErrorCode =
   | 'file-read-failed'
   | 'storage-full'
   | 'storage-blocked'
-  | 'canvas-empty';
+  | 'canvas-empty'
+  | 'migration-failed';
 
 /**
  * Typed error thrown by every public function in `src/persistence/**`.

@@ -43,7 +43,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type { Layout, LayoutMember, MaterialRef, MemberKind } from '../../domain/model';
+import type { Layout, LayoutMember, LumberMemberMaterial, MemberKind } from '../../domain/model';
 
 import { deriveBom, type BomLine } from './derive-bom';
 
@@ -51,10 +51,14 @@ import { deriveBom, type BomLine } from './derive-bom';
 // Fixture builders — kept tiny so the test file reads TOP-DOWN.
 // --------------------------------------------------------------------------
 
-const PT_2x8: MaterialRef = { nominal: '2x8', species: 'PT', grade: 'No2' };
-const PT_6x6: MaterialRef = { nominal: '6x6', species: 'PT', grade: 'No2' };
-const PT_5_4x6: MaterialRef = { nominal: '5/4x6', species: 'PT', grade: 'No2' };
-const CEDAR_2x8: MaterialRef = { nominal: '2x8', species: 'Cedar', grade: 'No2' };
+// S17 note: `LayoutMember.material` is now a `MemberMaterialRef`
+// discriminated union; deriveBom's grouping only emits lumber rows,
+// so the fixture materials are all `LumberMemberMaterial`
+// (`kind: 'lumber'`).
+const PT_2x8: LumberMemberMaterial = { kind: 'lumber', nominal: '2x8', species: 'PT', grade: 'No2' };
+const PT_6x6: LumberMemberMaterial = { kind: 'lumber', nominal: '6x6', species: 'PT', grade: 'No2' };
+const PT_5_4x6: LumberMemberMaterial = { kind: 'lumber', nominal: '5/4x6', species: 'PT', grade: 'No2' };
+const CEDAR_2x8: LumberMemberMaterial = { kind: 'lumber', nominal: '2x8', species: 'Cedar', grade: 'No2' };
 
 /**
  * Make a layout member with axis-aligned size + zero rotation. The
@@ -70,7 +74,7 @@ const CEDAR_2x8: MaterialRef = { nominal: '2x8', species: 'Cedar', grade: 'No2' 
 function makeMember(
   id: string,
   kind: MemberKind,
-  material: MaterialRef,
+  material: LumberMemberMaterial,
   lengthMm: number,
 ): LayoutMember {
   // Approximate cross-section per SKU. Not asserted; just for
@@ -417,5 +421,59 @@ describe('deriveBom + formatLength (AC7 unit-string round trip)', () => {
     const s = formatLength(3658, 'metric');
     expect(s).toMatch(/m/);
     expect(s.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// QA Gap S17-G2 — block-kind LayoutMember handled by derive-bom
+// ---------------------------------------------------------------------------
+//
+// Block producers arrive with S19/S20, but the S17 type widening
+// (`MemberMaterialRef = lumber | block`) means a `kind:'block'`
+// LayoutMember is already REPRESENTABLE. `deriveBom` handles this
+// by `continue`-ing on the block variant of the material discriminant
+// switch — the block is not counted in the LUMBER BOM (S24 will
+// finalise the BOM shape once floating layouts flow through). This
+// regression test locks in that behavior.
+
+describe('deriveBom — QA-Gap-S17-G2 block-kind members are skipped (not counted in lumber BOM)', () => {
+  it('a Layout mixing lumber and block members returns BOM lines only for the lumber members', () => {
+    const lumberJoist: LayoutMember = {
+      id: 'joist-0',
+      kind: 'joist',
+      material: {
+        kind: 'lumber',
+        nominal: '2x8',
+        species: 'PT',
+        grade: 'No2',
+      },
+      position: { x: 0, y: 700, z: 0 },
+      size: { x: 38, y: 235, z: 3000 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const blockFoundation: LayoutMember = {
+      id: 'block-0',
+      kind: 'block',
+      material: { kind: 'block', productId: 'oldcastle-11x11x7' },
+      position: { x: 500, y: 0, z: 0 },
+      size: { x: 279, y: 178, z: 279 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const layout: Layout = {
+      designId: '00000000-0000-4000-8000-000000000000',
+      computedAt: '2026-07-04T00:00:00.000Z',
+      bounds: { widthMm: 2000, lengthMm: 3000, heightMm: 914 },
+      members: [lumberJoist, blockFoundation],
+    };
+
+    const lines = deriveBom(layout);
+    // Only ONE line — the lumber joist. Block is not counted.
+    expect(lines.length).toBe(1);
+    expect(lines[0]!.kind).toBe('joist');
+    expect(lines[0]!.nominal).toBe('2x8');
+    // The block member id does not appear in any BOM line.
+    for (const line of lines) {
+      expect(line.kind).not.toBe('block');
+    }
   });
 });

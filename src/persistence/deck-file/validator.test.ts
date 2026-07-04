@@ -1,27 +1,43 @@
 /**
  * Unit tests for `src/persistence/deck-file/validator.ts` — the Ajv
- * Draft-2020-12 validator loaded from the checked-in JSON Schema at
- * `docs/deck-file-schema-v1.json`.
+ * Draft-2020-12 validators loaded from the checked-in JSON Schemas
+ * at `docs/deck-file-schema-v1.json` and `docs/deck-file-schema-v2.json`.
  *
- * ## Coverage map (issue #7 acceptance criteria)
+ * ## Coverage map (issue #7 + S18 issue #40 acceptance criteria)
  *
  *   - AC4 (schema-validation failure surfaces the offending field).
  *   - AC5 (`docs/deck-file-schema-v1.json` is a valid Draft-2020-12
  *     document AND the validator is instantiated from that file, not
- *     from a hand-coded TS mirror).
+ *     from a hand-coded TS mirror). Extended for v2 (S18).
  *   - Envelope strictness policy: LENIENT at the root (additive future
  *     metadata OK), STRICT inside `design` (unknown fields rejected).
  *   - `useDefaults: false` — the validator MUST NOT mutate the payload
  *     by injecting schema defaults (a subtle vector for prototype
  *     pollution when the schema references literal objects).
+ *
+ * ## v1 vs v2 test-shape correspondence
+ *
+ * S18 changed `GOLDEN_DECK_DESIGN` in `./__fixtures__/deck-designs.ts`
+ * to the post-Epic-2 shape (adds `structure` + `foundation`). The v1
+ * validator's schema still requires the OLD shape and rejects the new
+ * fields — so v1 tests here use `V1_LEGACY_DESIGN` (a v1-shape design
+ * imported from the same shared fixtures module, review-gate FIX 5d).
+ * v2 tests use `GOLDEN_DECK_DESIGN` unchanged.
  */
 import { describe, expect, it } from 'vitest';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import addFormats from 'ajv-formats';
 
-import { validateDeckFile } from './validator';
+import { validateDeckFile, validateDeckFileV2 } from './validator';
 import { DeckFileError } from './errors';
-import { GOLDEN_DECK_DESIGN } from './__fixtures__/deck-designs';
+import { GOLDEN_DECK_DESIGN, V1_LEGACY_DESIGN } from './__fixtures__/deck-designs';
+
+// Review-gate FIX 5d — V1_LEGACY_DESIGN (a v1-shape design) now
+// lives in `./__fixtures__/deck-designs.ts` so BOTH this file and
+// the migration corpus consume the SAME literal. The promoted
+// V1_LEGACY_DESIGN is used for the "v1 design inside a v2 envelope"
+// negative test below.
+const V1_DESIGN = V1_LEGACY_DESIGN;
 
 // ---------------------------------------------------------------------------
 // AC5 — schema file is a valid Draft-2020-12 document
@@ -68,7 +84,7 @@ describe('validateDeckFile — happy path', () => {
       generator: 'wooddeck',
       generatorVersion: '0.0.0-test',
       createdAt: '2026-07-02T21:00:00.000Z',
-      design: GOLDEN_DECK_DESIGN,
+      design: V1_DESIGN,
     };
     expect(() => validateDeckFile(envelope)).not.toThrow();
   });
@@ -81,7 +97,7 @@ describe('validateDeckFile — happy path', () => {
       generator: 'wooddeck',
       generatorVersion: '0.0.0-test',
       createdAt: '2026-07-02T21:00:00.000Z',
-      design: GOLDEN_DECK_DESIGN,
+      design: V1_DESIGN,
       futureMetadataField: { checksum: 'sha256:deadbeef' }, // NOT in schema
     };
     expect(() => validateDeckFile(envelope)).not.toThrow();
@@ -94,7 +110,7 @@ describe('validateDeckFile — happy path', () => {
 
 describe('validateDeckFile — AC4 failure identifies the offending field', () => {
   it('rejects a design missing `footprint` with a message naming the field', () => {
-    const badDesign = { ...GOLDEN_DECK_DESIGN } as Record<string, unknown>;
+    const badDesign = { ...V1_DESIGN } as Record<string, unknown>;
     delete badDesign['footprint'];
     const envelope = {
       schema: 1,
@@ -123,8 +139,8 @@ describe('validateDeckFile — AC4 failure identifies the offending field', () =
       generatorVersion: '0.0.0-test',
       createdAt: '2026-07-02T21:00:00.000Z',
       design: {
-        ...GOLDEN_DECK_DESIGN,
-        decking: { ...GOLDEN_DECK_DESIGN.decking, orientation: 'diagonal-45' },
+        ...V1_DESIGN,
+        decking: { ...V1_DESIGN.decking, orientation: 'diagonal-45' },
       },
     };
     try {
@@ -144,7 +160,7 @@ describe('validateDeckFile — AC4 failure identifies the offending field', () =
       generator: 'wooddeck',
       generatorVersion: '0.0.0-test',
       createdAt: '2026-07-02T21:00:00.000Z',
-      design: { ...GOLDEN_DECK_DESIGN, id: 'not-a-uuid' },
+      design: { ...V1_DESIGN, id: 'not-a-uuid' },
     };
     expect(() => validateDeckFile(envelope)).toThrowError(
       expect.objectContaining({ code: 'schema-validation-failed' }),
@@ -159,7 +175,7 @@ describe('validateDeckFile — AC4 failure identifies the offending field', () =
       generator: 'wooddeck',
       generatorVersion: '0.0.0-test',
       createdAt: '2026-07-02T21:00:00.000Z',
-      design: { ...GOLDEN_DECK_DESIGN, rogueField: 42 },
+      design: { ...V1_DESIGN, rogueField: 42 },
     };
     expect(() => validateDeckFile(envelope)).toThrowError(
       expect.objectContaining({ code: 'schema-validation-failed' }),
@@ -173,9 +189,9 @@ describe('validateDeckFile — AC4 failure identifies the offending field', () =
       generatorVersion: '0.0.0-test',
       createdAt: '2026-07-02T21:00:00.000Z',
       design: {
-        ...GOLDEN_DECK_DESIGN,
+        ...V1_DESIGN,
         joist: {
-          ...GOLDEN_DECK_DESIGN.joist,
+          ...V1_DESIGN.joist,
           extraFieldInsideJoist: 'nope',
         },
       },
@@ -191,7 +207,7 @@ describe('validateDeckFile — AC4 failure identifies the offending field', () =
       generator: 'wooddeck',
       generatorVersion: '0.0.0-test',
       createdAt: '2026-07-02T21:00:00.000Z',
-      design: GOLDEN_DECK_DESIGN,
+      design: V1_DESIGN,
     };
     // Envelope-level schema field is `const: 1`, so validator rejects
     // any other integer here BEFORE the switch(schema) runs. Loader
@@ -207,7 +223,7 @@ describe('validateDeckFile — AC4 failure identifies the offending field', () =
       schema: 1,
       generator: 'wooddeck',
       generatorVersion: '0.0.0-test',
-      design: GOLDEN_DECK_DESIGN,
+      design: V1_DESIGN,
     };
     expect(() => validateDeckFile(envelope)).toThrowError(
       expect.objectContaining({ code: 'schema-validation-failed' }),
@@ -220,7 +236,7 @@ describe('validateDeckFile — AC4 failure identifies the offending field', () =
       generator: 'wooddeck',
       generatorVersion: '0.0.0-test',
       createdAt: 'yesterday-ish',
-      design: GOLDEN_DECK_DESIGN,
+      design: V1_DESIGN,
     };
     expect(() => validateDeckFile(envelope)).toThrowError(
       expect.objectContaining({ code: 'schema-validation-failed' }),
@@ -242,7 +258,7 @@ describe('validateDeckFile — payload is not mutated', () => {
       generator: 'wooddeck',
       generatorVersion: '0.0.0-test',
       createdAt: '2026-07-02T21:00:00.000Z',
-      design: GOLDEN_DECK_DESIGN,
+      design: V1_DESIGN,
     });
     // If Ajv tried to mutate the frozen input, this would throw.
     expect(() => validateDeckFile(envelope)).not.toThrow();
@@ -267,7 +283,7 @@ describe('validateDeckFile — generatorVersion semver pattern (F)', () => {
       generator: 'wooddeck',
       generatorVersion: 'banana',
       createdAt: '2026-07-02T21:00:00.000Z',
-      design: GOLDEN_DECK_DESIGN,
+      design: V1_DESIGN,
     };
     try {
       validateDeckFile(envelope);
@@ -286,7 +302,7 @@ describe('validateDeckFile — generatorVersion semver pattern (F)', () => {
       generator: 'wooddeck',
       generatorVersion: '1.2',
       createdAt: '2026-07-02T21:00:00.000Z',
-      design: GOLDEN_DECK_DESIGN,
+      design: V1_DESIGN,
     };
     expect(() => validateDeckFile(envelope)).toThrowError(
       expect.objectContaining({ code: 'schema-validation-failed' }),
@@ -299,8 +315,231 @@ describe('validateDeckFile — generatorVersion semver pattern (F)', () => {
       generator: 'wooddeck',
       generatorVersion: '1.2.3-rc.4+abc.def',
       createdAt: '2026-07-02T21:00:00.000Z',
-      design: GOLDEN_DECK_DESIGN,
+      design: V1_DESIGN,
     };
     expect(() => validateDeckFile(envelope)).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S18 — validateDeckFileV2 (v2 schema)
+// ---------------------------------------------------------------------------
+
+describe('validateDeckFileV2 — S18 v2 schema', () => {
+  it('accepts a well-formed v2 envelope wrapping the (post-S17) golden design', () => {
+    const envelope = {
+      schema: 2,
+      generator: 'wooddeck',
+      generatorVersion: '0.0.0-test',
+      createdAt: '2026-07-04T00:00:00.000Z',
+      design: GOLDEN_DECK_DESIGN,
+    };
+    expect(() => validateDeckFileV2(envelope)).not.toThrow();
+  });
+
+  it('is TOLERANT of unknown TOP-LEVEL keys in a v2 envelope (additive metadata)', () => {
+    const envelope = {
+      schema: 2,
+      generator: 'wooddeck',
+      generatorVersion: '0.0.0-test',
+      createdAt: '2026-07-04T00:00:00.000Z',
+      design: GOLDEN_DECK_DESIGN,
+      futureMetadataField: { checksum: 'sha256:deadbeef' },
+    };
+    expect(() => validateDeckFileV2(envelope)).not.toThrow();
+  });
+
+  it('rejects a v2 design with an unknown structure value ("bouncy") — S18 AC4', () => {
+    const envelope = {
+      schema: 2,
+      generator: 'wooddeck',
+      generatorVersion: '0.0.0-test',
+      createdAt: '2026-07-04T00:00:00.000Z',
+      design: { ...GOLDEN_DECK_DESIGN, structure: 'bouncy' },
+    };
+    try {
+      validateDeckFileV2(envelope);
+      throw new Error('expected DeckFileError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DeckFileError);
+      const dfe = err as DeckFileError;
+      expect(dfe.code).toBe('schema-validation-failed');
+      // Message must NAME the offending field.
+      expect(dfe.message).toMatch(/structure|enum/i);
+    }
+  });
+
+  it('rejects a v2 design with an unknown foundation.productId — S18 AC4', () => {
+    const envelope = {
+      schema: 2,
+      generator: 'wooddeck',
+      generatorVersion: '0.0.0-test',
+      createdAt: '2026-07-04T00:00:00.000Z',
+      design: {
+        ...GOLDEN_DECK_DESIGN,
+        structure: 'floating' as const,
+        foundation: {
+          type: 'deck-blocks' as const,
+          product: { productId: 'made-up-sku-42' },
+        },
+      },
+    };
+    expect(() => validateDeckFileV2(envelope)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  it('rejects a v2 design carrying an EXTRA field inside `design` (strict inside)', () => {
+    const envelope = {
+      schema: 2,
+      generator: 'wooddeck',
+      generatorVersion: '0.0.0-test',
+      createdAt: '2026-07-04T00:00:00.000Z',
+      design: { ...GOLDEN_DECK_DESIGN, rogueField: 42 },
+    };
+    expect(() => validateDeckFileV2(envelope)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  it('rejects a v1-shape design (missing structure + foundation) in a v2 envelope', () => {
+    const envelope = {
+      schema: 2,
+      generator: 'wooddeck',
+      generatorVersion: '0.0.0-test',
+      createdAt: '2026-07-04T00:00:00.000Z',
+      design: V1_DESIGN,
+    };
+    try {
+      validateDeckFileV2(envelope);
+      throw new Error('expected DeckFileError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DeckFileError);
+      const dfe = err as DeckFileError;
+      expect(dfe.code).toBe('schema-validation-failed');
+      expect(dfe.message).toMatch(/structure|foundation/i);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX 3 (review gate) — discriminator-aware foundation error messages
+// ---------------------------------------------------------------------------
+//
+// Pre-fix bug: for a malformed `foundation`, Ajv walks every `oneOf`
+// branch and reports a `const` error from the WRONG variant. E.g.
+// `foundation: { type: 'deck-blocks' }` (missing `product`) surfaced
+// "foundation.type must equal 'posts-on-footings'", implying the
+// user's `type` value was wrong when it was actually correct. FIX 3
+// makes the ranker discriminator-aware:
+//
+//   - If `foundation.type` is a KNOWN variant, filter Ajv errors to
+//     just that branch (report the real missing / extra field).
+//   - If `foundation.type` is UNKNOWN, collapse the same-path
+//     per-variant `const` errors into ONE enum-style message.
+
+describe('validator — FIX 3 discriminator-aware foundation errors', () => {
+  const envBase = {
+    schema: 2,
+    generator: 'wooddeck',
+    generatorVersion: '0.0.0-test',
+    createdAt: '2026-07-04T00:00:00.000Z',
+  };
+
+  it('missing `product` on a deck-blocks foundation → names the missing field, NOT the wrong-variant const', () => {
+    const envelope = {
+      ...envBase,
+      design: {
+        ...GOLDEN_DECK_DESIGN,
+        structure: 'floating' as const,
+        // deck-blocks branch requires `product`; type is correct.
+        foundation: { type: 'deck-blocks' },
+      },
+    };
+    try {
+      validateDeckFileV2(envelope);
+      throw new Error('expected DeckFileError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DeckFileError);
+      const msg = (err as DeckFileError).message;
+      // MUST name the missing 'product' field.
+      expect(msg).toMatch(/product/);
+      // MUST NOT wrongly claim 'type' should equal 'posts-on-footings'.
+      expect(msg).not.toMatch(/posts-on-footings/);
+    }
+  });
+
+  it('missing `footing` on a posts-on-footings foundation → names the missing field, NOT a deck-blocks/tuffblocks const', () => {
+    const envelope = {
+      ...envBase,
+      design: {
+        ...GOLDEN_DECK_DESIGN,
+        structure: 'elevated' as const,
+        foundation: {
+          type: 'posts-on-footings' as const,
+          post: { nominal: '6x6' as const, species: 'PT' as const, grade: 'No2' as const },
+          // footing intentionally missing
+        },
+      },
+    };
+    try {
+      validateDeckFileV2(envelope);
+      throw new Error('expected DeckFileError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DeckFileError);
+      const msg = (err as DeckFileError).message;
+      expect(msg).toMatch(/footing/);
+      expect(msg).not.toMatch(/deck-blocks|tuffblocks/);
+    }
+  });
+
+  it('stray `post` on a deck-blocks foundation → names the additional field, NOT a const error from another variant', () => {
+    const envelope = {
+      ...envBase,
+      design: {
+        ...GOLDEN_DECK_DESIGN,
+        structure: 'floating' as const,
+        foundation: {
+          type: 'deck-blocks' as const,
+          product: { productId: 'oldcastle-11x11x7' as const },
+          // stray field — deck-blocks branch has additionalProperties:false
+          post: { nominal: '6x6', species: 'PT', grade: 'No2' },
+        },
+      },
+    };
+    try {
+      validateDeckFileV2(envelope);
+      throw new Error('expected DeckFileError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DeckFileError);
+      const msg = (err as DeckFileError).message;
+      // The 'unknown field' additionalProperties message names 'post'.
+      expect(msg).toMatch(/post/);
+      // And does NOT claim 'type' should equal 'posts-on-footings'.
+      expect(msg).not.toMatch(/must equal 'posts-on-footings'/);
+    }
+  });
+
+  it('bad discriminator value → enum-style message listing all valid types', () => {
+    const envelope = {
+      ...envBase,
+      design: {
+        ...GOLDEN_DECK_DESIGN,
+        structure: 'elevated' as const,
+        // 'bouncy' is not one of the three known variants.
+        foundation: { type: 'bouncy' },
+      },
+    };
+    try {
+      validateDeckFileV2(envelope);
+      throw new Error('expected DeckFileError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DeckFileError);
+      const msg = (err as DeckFileError).message;
+      // Enum-style: all three variants named in ONE message.
+      expect(msg).toMatch(/posts-on-footings/);
+      expect(msg).toMatch(/deck-blocks/);
+      expect(msg).toMatch(/tuffblocks/);
+    }
   });
 });

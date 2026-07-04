@@ -356,7 +356,13 @@ export const useDesignStore = create(
       async loadFromFile(file): Promise<void> {
         set({ status: 'loading', lastError: null });
         try {
-          const bundle = await appLoadDesignFromFile(file, spanTable);
+          // S18: the application loader now returns
+          // `{ bundle, migrated }` — `migrated: true` means the
+          // uploaded file was a v1 envelope that we upgraded to v2
+          // in-flight. S23 will surface a toast from this seam; for
+          // now we destructure and ignore the flag so the visible
+          // UX is unchanged from pre-S18.
+          const { bundle } = await appLoadDesignFromFile(file, spanTable);
           set({ bundle, status: 'idle', lastError: null });
           // Undo across a load-file boundary is a distinct workflow
           // (the user chose to REPLACE the design) — clear history
@@ -380,12 +386,16 @@ export const useDesignStore = create(
 
       loadFromLocalStorage(): void {
         try {
-          const bundle = appLoadDesignFromLocalStorage(spanTable);
-          if (bundle === null) {
+          // S18: same `{ bundle, migrated }` seam as loadFromFile.
+          // The migration boolean is stashed for S23; for now we
+          // destructure and drop it.
+          const loaded = appLoadDesignFromLocalStorage(spanTable);
+          if (loaded === null) {
             // No stored design — keep the current default. Do NOT
             // reset (that would clear undo history for no reason).
             return;
           }
+          const { bundle } = loaded;
           set({ bundle, status: 'idle', lastError: null });
           // Pair-fix Review MEDIUM (B): the successful storage-load
           // branch REPLACES the design, so any prior undo history
