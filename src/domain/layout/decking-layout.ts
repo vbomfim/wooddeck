@@ -65,6 +65,32 @@ import { computeYStack } from './y-stack';
 export const BOARD_GAP_MM: Mm = 3;
 
 export function layoutDecking(design: DeckDesign): LayoutMember[] {
+  return layoutDeckingWithYCenter(design, computeYStack(design).deckingCenterY);
+}
+
+/**
+ * S19 seam: build the decking layer with an EXPLICIT y-center
+ * (rather than deriving it from the elevated `computeYStack`).
+ *
+ * The elevated pipeline uses `layoutDecking(design)` (above), which
+ * delegates here with `computeYStack(design).deckingCenterY` —
+ * byte-identical to the pre-S19 behavior (AC2 fixture-goldens).
+ *
+ * The FLOATING pipeline (`src/domain/layout/floating/floating-decking.ts`)
+ * calls this helper directly with `computeYStackFloating(design).deckingCenterY`
+ * — the floating stack's decking center is `beamTop + deckingThickness/2`,
+ * NOT `heightMm - deckingThickness/2`, so the elevated helper cannot
+ * be reused as-is.
+ *
+ * Extracting this pure helper keeps ALL decking placement geometry
+ * (row-count, per-row width, gap enforcement, flush-at-both-ends
+ * contract) in ONE place — the two stacks differ ONLY in the
+ * y-anchor.
+ */
+export function layoutDeckingWithYCenter(
+  design: DeckDesign,
+  yCenter: number,
+): LayoutMember[] {
   const deckingMat = lookupMaterial(
     design.decking.material.nominal,
     design.decking.material.species,
@@ -73,7 +99,6 @@ export function layoutDecking(design: DeckDesign): LayoutMember[] {
   const faceWidthMm = deckingMat.actual.heightMm; // 140 mm for 5/4×6
   const thicknessMm = deckingMat.actual.widthMm; // 25 mm for 5/4×6
 
-  const yCenter = computeYStack(design).deckingCenterY;
   const orientation = design.decking.orientation;
 
   if (orientation === 'parallel-to-length') {

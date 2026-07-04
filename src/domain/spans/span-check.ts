@@ -192,6 +192,13 @@ export function spanCheck(layout: Layout, table: SpanTable): Warning[] {
   const joists = layout.members.filter((m): m is LayoutMember => m.kind === 'joist');
   const beams = layout.members.filter((m): m is LayoutMember => m.kind === 'beam');
   const posts = layout.members.filter((m): m is LayoutMember => m.kind === 'post');
+  // S19 AC8: block-supported floating beams. The block LayoutMember
+  // kind was widened by S17 (`MemberKind` includes 'block'); the
+  // beam-support derivation below tries POST supports first (the
+  // elevated layout) and falls back to BLOCK supports (the floating
+  // layout). NO IRC table logic touches this file — the added path
+  // reuses `table.lookupBeamMaxSpan(...)` unchanged.
+  const blocks = layout.members.filter((m): m is LayoutMember => m.kind === 'block');
 
   // ---- Joist checks ------------------------------------------------------
 
@@ -227,8 +234,8 @@ export function spanCheck(layout: Layout, table: SpanTable): Warning[] {
 
   if (joistSpanMm !== null) {
     for (const beam of beams) {
-      const beamPostSpanMm = deriveBeamPostToPostSpanMm(beam, posts);
-      if (beamPostSpanMm === null) continue; // beam with < 2 posts — skip
+      const beamPostSpanMm = deriveBeamSupportSpanMm(beam, posts, blocks);
+      if (beamPostSpanMm === null) continue; // beam with < 2 supports — skip
 
       // Same defensive narrowing as the joist loop above — beams
       // are always lumber, but a `kind='block'` beam surfaces as a
@@ -299,6 +306,29 @@ function deriveJoistSpacingMm(joists: readonly LayoutMember[]): Mm {
 }
 
 /**
+ * Max support-to-support distance under the given beam. Tries POST
+ * supports first (the elevated layout: posts share the beam's z,
+ * spaced along +x) and falls back to BLOCK supports (the floating
+ * layout: blocks share the beam's x, spaced along +z). The two
+ * paths are mutually exclusive by structure — an elevated layout
+ * has zero blocks and a floating layout has zero posts.
+ *
+ * Match uses a small tolerance (`POST_Z_TOLERANCE_MM`, reused for
+ * block-along-x matching under the same rationale) rather than
+ * strict `===`. Returns `null` if fewer than 2 supports are found
+ * under the beam.
+ */
+function deriveBeamSupportSpanMm(
+  beam: LayoutMember,
+  posts: readonly LayoutMember[],
+  blocks: readonly LayoutMember[],
+): Mm | null {
+  const postSpan = deriveBeamPostToPostSpanMm(beam, posts);
+  if (postSpan !== null) return postSpan;
+  return deriveBeamBlockToBlockSpanMm(beam, blocks);
+}
+
+/**
  * Max post-to-post distance under the given beam. Posts under a beam
  * are identified by shared `position.z` — matched with a small
  * tolerance (`POST_Z_TOLERANCE_MM`) rather than strict `===` so a
@@ -322,6 +352,36 @@ function deriveBeamPostToPostSpanMm(
   let maxGap = 0;
   for (let i = 1; i < xs.length; i++) {
     const gap = xs[i]! - xs[i - 1]!;
+    if (gap > maxGap) maxGap = gap;
+  }
+  return maxGap;
+}
+
+/**
+ * Max block-to-block distance under the given FLOATING beam. Blocks
+ * under a beam are identified by shared `position.x` — the mirror
+ * of the elevated "posts share beam.z" match. Same 0.5 mm tolerance
+ * for the same reason (`.deck` round-trip ε-drift must not silently
+ * drop all blocks and turn the beam check into a no-op).
+ *
+ * Returns `null` if fewer than 2 blocks are found under the beam.
+ * S19 AC8: "For each beam, the max distance between adjacent
+ * supporting blocks is looked up against the same beam-span table
+ * used for elevated designs."
+ */
+function deriveBeamBlockToBlockSpanMm(
+  beam: LayoutMember,
+  blocks: readonly LayoutMember[],
+): Mm | null {
+  const beamBlocks = blocks.filter(
+    (b) => Math.abs(b.position.x - beam.position.x) < POST_Z_TOLERANCE_MM,
+  );
+  if (beamBlocks.length < 2) return null;
+
+  const zs = beamBlocks.map((b) => b.position.z).sort((a, b) => a - b);
+  let maxGap = 0;
+  for (let i = 1; i < zs.length; i++) {
+    const gap = zs[i]! - zs[i - 1]!;
     if (gap > maxGap) maxGap = gap;
   }
   return maxGap;

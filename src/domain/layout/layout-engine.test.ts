@@ -424,26 +424,43 @@ describe('computeLayout — support-gate for not-yet-implemented combos (FIX 1)'
     expect(() => computeLayout(notImpl)).toThrowError(/S19|S20/);
   });
 
-  it('throws LayoutError "not yet implemented" for floating + deck-blocks (S19)', () => {
+  it('floating + deck-blocks dispatches to the S19 floating pipeline (produces a layout, no throw)', () => {
     const design = makeDesign();
-    const notImpl: DeckDesign = {
+    const impl: DeckDesign = {
       ...design,
       structure: 'floating',
       foundation: { type: 'deck-blocks', product: { productId: 'oldcastle-11x11x7' } },
     };
-    expect(() => computeLayout(notImpl)).toThrowError(LayoutError);
-    expect(() => computeLayout(notImpl)).toThrowError(/not yet implemented/i);
+    const layout = computeLayout(impl);
+    expect(layout.members.length).toBeGreaterThan(0);
+    const kinds = new Set(layout.members.map((m) => m.kind));
+    expect(kinds).toContain('block');
+    expect(kinds).toContain('beam');
+    expect(kinds).not.toContain('post');
+    expect(kinds).not.toContain('footing');
   });
 
-  it('throws LayoutError "not yet implemented" for floating + tuffblocks (S19)', () => {
+  it('floating + tuffblocks dispatches to the S19 floating pipeline (produces a layout, no throw)', () => {
     const design = makeDesign();
-    const notImpl: DeckDesign = {
+    const impl: DeckDesign = {
       ...design,
       structure: 'floating',
       foundation: { type: 'tuffblocks', product: { productId: 'tuffblock-12x12x4' } },
     };
-    expect(() => computeLayout(notImpl)).toThrowError(LayoutError);
-    expect(() => computeLayout(notImpl)).toThrowError(/not yet implemented/i);
+    const layout = computeLayout(impl);
+    expect(layout.members.length).toBeGreaterThan(0);
+    const kinds = new Set(layout.members.map((m) => m.kind));
+    expect(kinds).toContain('block');
+    expect(kinds).toContain('beam');
+    expect(kinds).not.toContain('post');
+    expect(kinds).not.toContain('footing');
+    // TuffBlock's productId is stamped on every block member.
+    const blocks = layout.members.filter((m) => m.kind === 'block');
+    for (const b of blocks) {
+      if (b.material.kind === 'block') {
+        expect(b.material.productId).toBe('tuffblock-12x12x4');
+      }
+    }
   });
 
   it('elevated + posts-on-footings still produces a valid layout (the only supported combo)', () => {

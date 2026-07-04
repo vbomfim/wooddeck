@@ -69,34 +69,29 @@ import { MM_PER_FOOT, type Mm } from '../units';
 
 import { layoutBeams } from './beam-layout';
 import { layoutDecking } from './decking-layout';
+import { computeFloatingLayout } from './floating/floating-layout';
 import { layoutJoists } from './joist-layout';
 import { layoutPostsAndFootings } from './post-layout';
+import {
+  LayoutError,
+  MIN_DECK_DIMENSION_MM,
+} from './layout-shared';
 import { MIN_POST_HEIGHT_MM } from './y-stack';
 
-/**
- * Minimum viable deck dimension (both width and length must be ≥ this).
- * Exactly 4 ft in mm — kept UNROUNDED so foot-multiple designs from the
- * UI (which multiplies user-facing feet × `MM_PER_FOOT`) pass validation
- * on their nose without a 0.2 mm rounding trap.
- * Smaller than 4 ft is unbuildable in practice (a single 4×4 post
- * already spans a meaningful fraction of the footprint) and the layout
- * math (2 joists minimum, 2 posts per beam minimum) starts producing
- * degenerate boxes.
- */
-export const MIN_DECK_DIMENSION_MM: Mm = 4 * MM_PER_FOOT;
+// Re-export the shared symbols so the pre-S19 public API surface
+// (`import { LayoutError, MIN_DECK_DIMENSION_MM } from './layout-engine'`)
+// remains unchanged for existing callers. See `layout-shared.ts`
+// module header for the cycle-break rationale.
+export { LayoutError, MIN_DECK_DIMENSION_MM };
 
-/**
- * `LayoutError` — thrown when a `DeckDesign` fails validation OR when
- * a downstream catalog lookup fails. Distinct from generic `Error` so
- * consumers can `catch (err) { if (err instanceof LayoutError) …}`
- * without a string-matching hack.
- */
-export class LayoutError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = 'LayoutError';
-  }
-}
+// -----------------------------------------------------------------
+// `MIN_DECK_DIMENSION_MM` and `LayoutError` were extracted to
+// `layout-shared.ts` in S19 to break the cycle
+// `layout-engine.ts → floating/floating-layout.ts → layout-engine.ts`
+// (`dependency-cruiser`'s `no-circular` rule fired otherwise). Both
+// symbols are re-exported at the top of this file so the public API
+// is byte-identical to the pre-S19 signature.
+// -----------------------------------------------------------------
 
 /**
  * Options for `computeLayout`. `now` is INJECTED so tests can lock in
@@ -254,15 +249,9 @@ export function computeLayout(
             'Floating + posts-on-footings is not a supported combination (FR-030).',
           );
         case 'deck-blocks':
-          throw new LayoutError(
-            'Floating construction on deck-blocks is valid but not yet ' +
-              'implemented (arrives in Epic 2 story S19).',
-          );
+          return computeFloatingLayout(design, options);
         case 'tuffblocks':
-          throw new LayoutError(
-            'Floating construction on tuffblocks is valid but not yet ' +
-              'implemented (arrives in Epic 2 story S19).',
-          );
+          return computeFloatingLayout(design, options);
         default: {
           const _exhaustive: never = design.foundation;
           return _exhaustive;

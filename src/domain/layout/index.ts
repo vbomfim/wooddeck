@@ -25,5 +25,27 @@ export { layoutJoists } from './joist-layout';
 export { layoutBeams } from './beam-layout';
 export { MAX_BEAM_SPAN_MM, layoutPostsAndFootings } from './post-layout';
 export type { PostAndFootingResult } from './post-layout';
-export { BOARD_GAP_MM, layoutDecking } from './decking-layout';
+export { BOARD_GAP_MM, layoutDecking, layoutDeckingWithYCenter } from './decking-layout';
 export { FOOTING_DEPTH_MM, FOOTING_WIDTH_MM } from './y-stack';
+
+// -----------------------------------------------------------------
+// S19 — floating layout engine (Epic 2)
+// -----------------------------------------------------------------
+export {
+  BEAM_TO_BEAM_MAX_SPACING_MM,
+  BLOCK_ROW_MAX_SPACING_MM,
+  MAX_BLOCKING_SPACING_MM,
+  computeFloatingLayout,
+} from './floating/floating-layout';
+export type { ComputeFloatingLayoutOptions } from './floating/floating-layout';
+export { computeBlockGrid } from './floating/block-grid';
+export type { BlockGridInput } from './floating/block-grid';
+export { computeFloatingBeams } from './floating/floating-beam-layout';
+export { computeBlocking } from './floating/blocking-layout';
+export type { BlockingInput } from './floating/blocking-layout';
+export { layoutFloatingDecking } from './floating/floating-decking';
+export {
+  computeMinFloatingHeightMm,
+  computeYStackFloating,
+} from './floating/y-stack-floating';
+export type { FloatingYStack } from './floating/y-stack-floating';
