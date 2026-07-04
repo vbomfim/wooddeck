@@ -211,4 +211,36 @@ describe('computeBlocksUnderPosts — LayoutMember shape', () => {
     const again = computeBlocksUnderPosts({ posts, product: OLDCASTLE });
     expect(again).toEqual(blocks);
   });
+
+  it('trust-boundary guard: rejects a non-post member with a specific, contextful error', () => {
+    // A caller that accidentally passes a mixed-kind member array
+    // (e.g. forgot to `.filter(m => m.kind === "post")`) MUST get a
+    // loud, typed error — never a silent "block emitted over the
+    // wrong member". Per the S20 Trust-Boundaries rule the defensive
+    // branch is not dead code; this test proves it fires.
+    const posts = [makePost('post-near-0', 0, 0), makePost('post-near-1', 500, 0)];
+    const mixed = [
+      ...posts,
+      {
+        id: 'joist-far-0',
+        kind: 'joist' as const,
+        material: {
+          kind: 'lumber' as const,
+          nominal: '2x10' as const,
+          species: 'PT' as const,
+          grade: 'No2' as const,
+        },
+        position: { x: 0, y: 100, z: 0 },
+        size: { x: 38, y: 235, z: 4000 },
+        rotation: { x: 0, y: 0, z: 0 },
+      },
+    ];
+    expect(() =>
+      computeBlocksUnderPosts({ posts: mixed, product: OLDCASTLE }),
+    ).toThrow(/every input member must have kind === 'post'/);
+    // Contextful error — mentions the actual offending kind and id.
+    expect(() =>
+      computeBlocksUnderPosts({ posts: mixed, product: OLDCASTLE }),
+    ).toThrow(/joist.*joist-far-0/);
+  });
 });
