@@ -30,6 +30,7 @@ import {
   useLayerVisibility,
   useLayout,
   useLayoutBounds,
+  useRemediationsForWarning,
   useStorageBanner,
   useUiUnits,
   useWarnings,
@@ -239,5 +240,68 @@ describe('granularity — cross-store isolation', () => {
     });
 
     expect(renderCount).toBe(baseline);
+  });
+});
+
+// ---- S16 issue #38 — useRemediationsForWarning -----------------------------
+
+describe('useRemediationsForWarning() (S16 issue #38)', () => {
+  // A synthetic warning that mirrors the S13 warnings shape.
+  // The `memberId` drives the memo key — re-using this exact object
+  // between renders is what lets us assert reference stability.
+  const warning: import('../domain/model').Warning = {
+    kind: 'over-span-joist',
+    memberId: 'joist-0',
+    message: 'Joist over span',
+    tableReference: 'IRC-2018 Table R502.3.1(1) — PT No2 2x8 @ 406 mm',
+    actualMm: 4577,
+    allowableMm: 3607,
+  };
+
+  it('returns an array of RemediationOption on first render', () => {
+    // Force a joist over-span by widening the deck via the store.
+    act(() => {
+      useDesignStore.getState().applyParameters({
+        footprint: { lengthMm: 4877 }, // 16 ft joists over PT 2×8
+      });
+    });
+    const { result } = renderHook(() => useRemediationsForWarning(warning));
+    expect(Array.isArray(result.current)).toBe(true);
+    // At minimum the compute returns some options (may be
+    // disabled — but never silently omitted).
+    expect(result.current.length).toBeGreaterThan(0);
+    // Every entry has the expected shape.
+    for (const opt of result.current) {
+      expect(typeof opt.kind).toBe('string');
+      expect(opt.memberId).toBe('joist-0');
+      expect(typeof opt.summary).toBe('string');
+      expect(typeof opt.wouldClear).toBe('boolean');
+      expect(typeof opt.disabled).toBe('boolean');
+    }
+  });
+
+  it('AC11 — returns REFERENTIALLY-EQUAL array across renders when design is unchanged', () => {
+    const { result, rerender } = renderHook(() =>
+      useRemediationsForWarning(warning),
+    );
+    const first = result.current;
+    // A rerender with no store mutation MUST return the exact same
+    // reference — otherwise a downstream `useEffect([options])` in
+    // `<RemediationControls>` would fire on every render.
+    rerender();
+    expect(result.current).toBe(first);
+  });
+
+  it('recomputes when the design changes', () => {
+    const { result } = renderHook(() => useRemediationsForWarning(warning));
+    const first = result.current;
+    act(() => {
+      useDesignStore.getState().applyParameters({
+        joist: { spacingMm: 305 }, // narrower spacing changes allowable
+      });
+    });
+    // The design reference changed — the memo re-runs, and the
+    // returned array is a NEW reference.
+    expect(result.current).not.toBe(first);
   });
 });

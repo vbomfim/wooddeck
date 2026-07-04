@@ -740,6 +740,132 @@ describe('useDesignStore — reset()', () => {
 });
 
 // ---------------------------------------------------------------------------
+// S16 issue #38 — applyRemediation action
+// ---------------------------------------------------------------------------
+
+describe('useDesignStore — applyRemediation action (S16 issue #38)', () => {
+  // Local helper: build a RemediationOption suitable for whitebox
+  // testing the store action. Semantics of the option itself are
+  // exercised in `domain/spans/remediations.test.ts` — here we only
+  // care that the store WIRES the delegator correctly.
+  const spacingOption: import('../domain/spans').RemediationOption = {
+    kind: 'reduce-joist-spacing',
+    memberId: 'joist-0',
+    patch: { kind: 'reduce-joist-spacing', newSpacingMm: 305 },
+    summary: 'Reduce joist spacing to 12 in',
+    currentAllowableMm: 3607,
+    newAllowableMm: 5029,
+    actualSpanMm: 4577,
+    wouldClear: true,
+    disabled: false,
+    disabledReason: null,
+  };
+
+  it('AC9 — single applyRemediation call → EXACTLY ONE pastStates entry', () => {
+    // Seed a non-default design so the option's target spacing (305)
+    // differs from the current spacing (default 406) and the
+    // resulting patch actually mutates state.
+    resetDesignStoreForTests({ id: FIXED_ID, createdAt: FIXED_CREATED_AT });
+    const historyBefore = useDesignStore.temporal.getState().pastStates.length;
+
+    useDesignStore.getState().applyRemediation(spacingOption);
+
+    const historyAfter = useDesignStore.temporal.getState().pastStates.length;
+    // Exactly one new entry. If the action set(...)-ed twice
+    // (e.g. once for status:'loading' then once for the bundle),
+    // zundo would track BOTH — undoing would take two clicks
+    // for one user action, which is the AC9 hazard.
+    expect(historyAfter - historyBefore).toBe(1);
+  });
+
+  it('success → status:"idle", bundle mutated, lastError:null, schedules autosave', () => {
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
+    const before = useDesignStore.getState().bundle;
+
+    useDesignStore.getState().applyRemediation(spacingOption);
+
+    const after = useDesignStore.getState();
+    // Bundle updated — different reference AND spacing reflects patch.
+    expect(after.bundle).not.toBe(before);
+    expect(after.bundle.design.joist.spacingMm).toBe(305);
+    // Status clean.
+    expect(after.status).toBe('idle');
+    expect(after.lastError).toBeNull();
+    // Autosave scheduled (fires after debounce window).
+    vi.advanceTimersByTime(AUTOSAVE_DEBOUNCE_MS + 1);
+    expect(setItemSpy).toHaveBeenCalled();
+  });
+
+  it('AC10 — failure branch: bundle preserved, status:"error", lastError set', () => {
+    const before = useDesignStore.getState().bundle;
+    // Craft a synthetic option with an unsupported species — the
+    // application-layer applyRemediation delegates to applyParameters
+    // which will fail-lookup in the materials-catalog. The store's
+    // catch MUST preserve `before.bundle` reference.
+    const badOption: import('../domain/spans').RemediationOption = {
+      kind: 'change-joist-species',
+      memberId: 'joist-0',
+      patch: {
+        kind: 'change-joist-species',
+        newSpecies: 'Ipe' as unknown as 'PT',
+      },
+      summary: 'Change joist species to Ipe (invalid)',
+      currentAllowableMm: 3607,
+      newAllowableMm: 0,
+      actualSpanMm: 4577,
+      wouldClear: false,
+      disabled: false,
+      disabledReason: null,
+    };
+
+    useDesignStore.getState().applyRemediation(badOption);
+
+    const after = useDesignStore.getState();
+    expect(after.status).toBe('error');
+    expect(after.lastError).toBeInstanceOf(Error);
+    // Bundle reference-equal to the pre-call bundle — no partial
+    // corruption.
+    expect(after.bundle).toBe(before);
+  });
+
+  it('non-Error thrown from apply use-case → wrapped Error, bundle intact', () => {
+    // Same defensive branch we test in applyParameters — an
+    // application-layer applyRemediation that throws a primitive
+    // must be wrapped in an Error subclass so `lastError` is always
+    // a real Error (S13 UI code destructures `.message`).
+    const before = useDesignStore.getState().bundle;
+    const spy = vi.spyOn(appApi, 'applyRemediation').mockImplementation(() => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      throw 'boom';
+    });
+
+    useDesignStore.getState().applyRemediation(spacingOption);
+
+    const after = useDesignStore.getState();
+    expect(after.status).toBe('error');
+    expect(after.lastError).toBeInstanceOf(Error);
+    expect(after.lastError?.message).toContain('non-Error thrown');
+    expect(after.lastError?.message).toContain('boom');
+    expect(after.bundle).toBe(before);
+
+    spy.mockRestore();
+  });
+
+  it('AC19 — ui-store (units, camera, layer visibility) UNCHANGED across apply', () => {
+    const uiBefore = useUiStore.getState();
+    useDesignStore.getState().applyRemediation(spacingOption);
+    const uiAfter = useUiStore.getState();
+    // Same reference identity — the design action MUST NOT touch
+    // the ui-store. (Store separation is the S9 architectural
+    // invariant; this is the pass-through assertion at the S16
+    // seam.)
+    expect(uiAfter.units).toBe(uiBefore.units);
+    expect(uiAfter.cameraPreset).toBe(uiBefore.cameraPreset);
+    expect(uiAfter.layerVisibility).toBe(uiBefore.layerVisibility);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Pair-fix Review E — autosave feedback-loop regression
 // ---------------------------------------------------------------------------
 

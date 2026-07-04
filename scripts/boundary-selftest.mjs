@@ -333,6 +333,33 @@ export const stubLayout = 'stub';
     mustNameFile: true,
   },
   {
+    // S16 issue #38 boundary rule: ui/ MUST NOT import from
+    // domain/spans/**. Remediation compute is reached through the
+    // state hook `useRemediationsForWarning`, and the option TYPES
+    // are re-exported by the state barrel. Any ui module reaching
+    // directly into domain/spans (e.g. calling `computeRemediations`
+    // straight, or importing `IrcSpanTable`) bypasses the store's
+    // spanTable singleton and defeats the "state owns the compute
+    // seam" invariant.
+    label: 'BLOCK-2w: ui reaches into src/domain/spans (remediation compute leak)',
+    path: 'src/ui/__selftest__/no-domain-spans.ts',
+    contents: `// self-test fixture — MUST fail lint:boundaries (ui-no-domain-spans)
+import { stubSpans } from '../../domain/spans/__selftest__/ui-target';
+export const _ = stubSpans;
+`,
+    targets: [
+      {
+        path: 'src/domain/spans/__selftest__/ui-target.ts',
+        contents: `// self-test target for BLOCK-2w — resolves the offending import
+export const stubSpans = 'stub';
+`,
+      },
+    ],
+    tool: 'depcruise',
+    expectedRule: 'ui-no-domain-spans',
+    mustNameFile: true,
+  },
+  {
     // S12 issue #13 boundary rule: ui/ MUST NOT import from
     // application/. Use-cases are invoked via state store actions
     // (the store is the sole caller of the application layer); a

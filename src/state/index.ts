@@ -54,11 +54,27 @@ export {
   useLayerVisibility,
   useLayout,
   useLayoutBounds,
+  useRemediationsForWarning,
   useStorageBanner,
   useUiUnits,
   useWarnings,
   useWebglContextLost,
 } from './hooks';
+
+// ---- S16 issue #38 — remediation option types ------------------------------
+//
+// UI consumes these types via the state barrel so `ui-no-domain-spans`
+// (in `.dependency-cruiser.cjs`) can forbid direct imports from
+// `domain/spans/*` without cutting off type access. `RemediationOption`
+// / `RemediationKind` / `RemediationPatch` originate in
+// `domain/spans/remediations.ts`; state re-exports the value-free
+// type shapes. The `applyRemediation` action reads a concrete
+// `RemediationOption` — see `DesignStoreActions` above.
+export type {
+  RemediationKind,
+  RemediationOption,
+  RemediationPatch,
+} from '../domain/spans';
 
 // ---- default-design factory ------------------------------------------------
 export { DEFAULT_DESIGN_PARAMS, makeDefaultDesign } from './default-design';
