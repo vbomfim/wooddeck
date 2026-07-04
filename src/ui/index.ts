@@ -73,3 +73,22 @@ export { APP_VERSION_FALLBACK, getAppVersion } from './version';
 // not break external callers.
 export { ParameterPanel } from './ParameterPanel';
 export { UnitSwitcher } from './UnitSwitcher';
+
+// ---- S14 issue #15 — Right-panel composition ---------------------------
+//
+// Four panels + one wrapper. The wrapper composes all four for the
+// AppShell rightPanel slot; individual panels are exported for
+// integration tests that mount them in isolation.
+export { LayerTogglePanel } from './LayerTogglePanel';
+export { LAYER_ITEMS, PRESET_ITEMS } from './layer-toggle-items';
+export { WarningsPanel, NO_WARNINGS_TEXT } from './WarningsPanel';
+export { BomPanel, EMPTY_LAYOUT_TEXT } from './BomPanel';
+export { ExportMenu, PNG_UNAVAILABLE_MESSAGE } from './ExportMenu';
+export type { ExportMenuProps } from './ExportMenu';
+export {
+  buildPngFilename,
+  CANVAS_MISSING_MESSAGE,
+  CANVAS_SELECTOR,
+  RESET_CONFIRM_TEXT,
+} from './export-menu-helpers';
+export { SidePanels } from './SidePanels';

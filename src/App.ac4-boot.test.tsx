@@ -75,7 +75,11 @@ describe('<App /> — AC4 boot end-to-end (Fix H — Opus#8 + QA gap)', () => {
       /couldn['’]t reopen your saved design — starting from a default/i,
     );
     expect(banner).toBeInTheDocument();
-    const resetButton = screen.getByRole('button', { name: /reset to default/i });
+    // Disambiguate: the StorageBanner button reads "Reset to default"
+    // (singular); the S14 ExportMenu adds a "Reset to defaults"
+    // (plural) button in the rightPanel. Anchor to the exact
+    // singular form so both are visible without conflict.
+    const resetButton = screen.getByRole('button', { name: 'Reset to default' });
     expect(resetButton).toBeInTheDocument();
 
     // The design store also flipped to status='error' with a

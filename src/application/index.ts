@@ -50,6 +50,8 @@ export {
   saveDesignToLocalStorage,
 } from './save-design';
 
+export { exportCanvasScreenshot } from './screenshot';
+
 export {
   ApplyParametersError,
   applyParameters,

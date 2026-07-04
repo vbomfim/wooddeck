@@ -160,6 +160,7 @@ describe('useDesignStore — AC1 disjoint state', () => {
     expect(typeof state.loadFromLocalStorage).toBe('function');
     expect(typeof state.applyParameters).toBe('function');
     expect(typeof state.downloadDeckFile).toBe('function');
+    expect(typeof state.exportScreenshot).toBe('function');
     expect(typeof state.reset).toBe('function');
   });
 });
@@ -789,5 +790,191 @@ describe('useDesignStore — pair-fix Review E: autosave has no feedback loop', 
       const forbidden = /\.subscribe\s*\(/.test(src);
       expect(forbidden, `${file} uses .subscribe(...) — autosave feedback loop hazard`).toBe(false);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S14 issue #15 — exportScreenshot(canvas, filename)
+// ---------------------------------------------------------------------------
+
+describe('useDesignStore — exportScreenshot (S14 AC10)', () => {
+  it('happy path: calls persistence to trigger an anchor click and stays status:idle', () => {
+    // Route: exportScreenshot → application → persistence
+    // (downloadCanvasScreenshot). We spy on document.createElement
+    // to observe the anchor click that persistence makes.
+    const clickSpy = vi.fn();
+    const realCreate = document.createElement.bind(document);
+    const createSpy = vi
+      .spyOn(document, 'createElement')
+      .mockImplementation((tag: string) => {
+        const el = realCreate(tag);
+        if (tag === 'a') {
+          (el as HTMLAnchorElement).click = clickSpy;
+        }
+        return el;
+      });
+
+    const canvas = {
+      width: 800,
+      height: 600,
+      toDataURL: vi.fn().mockReturnValue('data:image/png;base64,fake'),
+    } as unknown as HTMLCanvasElement;
+
+    useDesignStore.getState().exportScreenshot(canvas, 'wooddeck-test.png');
+
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+    const state = useDesignStore.getState();
+    expect(state.status).toBe('idle');
+    expect(state.lastError).toBeNull();
+
+    createSpy.mockRestore();
+  });
+
+  it('zero-size canvas: sets status=error + lastError to a DeckFileError code=canvas-empty', () => {
+    const canvas = {
+      width: 0,
+      height: 0,
+      toDataURL: vi.fn(),
+    } as unknown as HTMLCanvasElement;
+
+    useDesignStore.getState().exportScreenshot(canvas, 'wooddeck-empty.png');
+
+    const state = useDesignStore.getState();
+    expect(state.status).toBe('error');
+    expect(state.lastError).not.toBeNull();
+    // Import lazily to avoid circular test dep on the persistence
+    // barrel; a `.name === 'DeckFileError'` check is enough.
+    expect(state.lastError?.name).toBe('DeckFileError');
+  });
+
+  it('clears a stale error on a subsequent successful export', () => {
+    // First call fails.
+    const bad = {
+      width: 0,
+      height: 0,
+      toDataURL: vi.fn(),
+    } as unknown as HTMLCanvasElement;
+    useDesignStore.getState().exportScreenshot(bad, 'bad.png');
+    expect(useDesignStore.getState().status).toBe('error');
+
+    // Second call succeeds — status/lastError must reset.
+    const clickSpy = vi.fn();
+    const realCreate = document.createElement.bind(document);
+    const createSpy = vi
+      .spyOn(document, 'createElement')
+      .mockImplementation((tag: string) => {
+        const el = realCreate(tag);
+        if (tag === 'a') {
+          (el as HTMLAnchorElement).click = clickSpy;
+        }
+        return el;
+      });
+
+    const good = {
+      width: 800,
+      height: 600,
+      toDataURL: vi.fn().mockReturnValue('data:image/png;base64,fake'),
+    } as unknown as HTMLCanvasElement;
+    useDesignStore.getState().exportScreenshot(good, 'good.png');
+
+    const state = useDesignStore.getState();
+    expect(state.status).toBe('idle');
+    expect(state.lastError).toBeNull();
+
+    createSpy.mockRestore();
+  });
+
+  it('does NOT touch the bundle on error (screenshot is read-only)', () => {
+    const before = useDesignStore.getState().bundle;
+    const bad = {
+      width: 0,
+      height: 0,
+      toDataURL: vi.fn(),
+    } as unknown as HTMLCanvasElement;
+    useDesignStore.getState().exportScreenshot(bad, 'x.png');
+    expect(useDesignStore.getState().bundle).toBe(before);
+  });
+});
+
+describe('design-store.downloadDeckFile — S14 UAT pair-fix FIX D', () => {
+  // Before the pair-fix, downloadDeckFile was a naked
+  // appDownloadDesign(...) call — any throw escaped to the caller
+  // and the ui had no way to render the failure. Now the action
+  // mirrors loadFromFile/exportScreenshot: on error → status
+  // 'error' + lastError. Bundle is never mutated (read-only side
+  // effect).
+
+  it('when the download plumbing throws, status becomes "error" with a lastError', () => {
+    // Force document.body.appendChild to throw when the anchor
+    // is inserted — this is the last step before `.click()` in
+    // persistence/file-io.ts, so it reliably simulates a real-
+    // world failure (browser refuses to trigger download).
+    const before = useDesignStore.getState().bundle;
+    const realAppend = document.body.appendChild.bind(document.body);
+    const appendSpy = vi
+      .spyOn(document.body, 'appendChild')
+      .mockImplementation((node) => {
+        if (
+          node instanceof HTMLAnchorElement &&
+          node.download.endsWith('.deck.json')
+        ) {
+          throw new Error('simulated appendChild failure');
+        }
+        return realAppend(node);
+      });
+
+    useDesignStore.getState().downloadDeckFile();
+
+    const state = useDesignStore.getState();
+    expect(state.status).toBe('error');
+    expect(state.lastError).not.toBeNull();
+    expect(state.lastError?.message).toContain('simulated');
+    // Bundle unchanged — downloads MUST NOT mutate state.
+    expect(state.bundle).toBe(before);
+
+    appendSpy.mockRestore();
+  });
+
+  it('after a download error, a subsequent successful download clears status to idle', () => {
+    // First: force an error.
+    const realAppend = document.body.appendChild.bind(document.body);
+    const appendSpy = vi
+      .spyOn(document.body, 'appendChild')
+      .mockImplementationOnce((node) => {
+        if (
+          node instanceof HTMLAnchorElement &&
+          node.download.endsWith('.deck.json')
+        ) {
+          throw new Error('simulated appendChild failure');
+        }
+        return realAppend(node);
+      });
+
+    useDesignStore.getState().downloadDeckFile();
+    expect(useDesignStore.getState().status).toBe('error');
+
+    // Second: succeed. mockImplementationOnce reverts after one
+    // call, so appendChild is real again. Stub anchor.click so we
+    // don't actually navigate.
+    const clickSpy = vi.fn();
+    const realCreate = document.createElement.bind(document);
+    const createSpy = vi
+      .spyOn(document, 'createElement')
+      .mockImplementation((tag: string) => {
+        const el = realCreate(tag);
+        if (tag === 'a') {
+          (el as HTMLAnchorElement).click = clickSpy;
+        }
+        return el;
+      });
+
+    useDesignStore.getState().downloadDeckFile();
+
+    const state = useDesignStore.getState();
+    expect(state.status).toBe('idle');
+    expect(state.lastError).toBeNull();
+
+    createSpy.mockRestore();
+    appendSpy.mockRestore();
   });
 });
