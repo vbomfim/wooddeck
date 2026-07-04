@@ -283,8 +283,19 @@ describe('loadDesignFromFile — FIX 1 compat/support gate propagates', () => {
     await expect(loadDesignFromFile(file, table)).rejects.toThrow(/TuffBlock/i);
   });
 
-  it('propagates LayoutError "not yet implemented" for elevated + deck-blocks (S20)', async () => {
-    const notImpl = {
+  it('S20 — successfully loads and lays out elevated + deck-blocks (was "not yet implemented" pre-S20)', async () => {
+    // Pre-S20 this test expected a "not yet implemented" LayoutError.
+    // With S20 (issue #42) the elevated + deck-blocks combination is
+    // fully implemented — the loader now returns a laid-out design
+    // with block foundation members instead of throwing. The rest of
+    // the FIX 1 loader / compat propagation surface stays covered by
+    // the surrounding tuffblocks / posts-on-footings tests.
+    //
+    // The loaded design has a heightMm well above the block-adjusted
+    // minimum (see `computeMinStructuralHeightMm` — adds product
+    // heightMm on the elevated + deck-blocks branch), so the loader
+    // succeeds end-to-end.
+    const design = {
       ...FIXTURE.design,
       structure: 'elevated' as const,
       foundation: {
@@ -292,9 +303,16 @@ describe('loadDesignFromFile — FIX 1 compat/support gate propagates', () => {
         product: { productId: 'oldcastle-11x11x7' as const },
       },
     };
-    const file = makeDeckFile(serialize(notImpl));
-    await expect(loadDesignFromFile(file, table)).rejects.toBeInstanceOf(LayoutError);
-    await expect(loadDesignFromFile(file, table)).rejects.toThrow(/not yet implemented/i);
+    const file = makeDeckFile(serialize(design));
+    const result = await loadDesignFromFile(file, table);
+    // Loader returns a laid-out design ready to hydrate the state.
+    expect(result.bundle.design.foundation.type).toBe('deck-blocks');
+    expect(
+      result.bundle.layout.members.some((m) => m.kind === 'block'),
+    ).toBe(true);
+    expect(
+      result.bundle.layout.members.some((m) => m.kind === 'footing'),
+    ).toBe(false);
   });
 });
 

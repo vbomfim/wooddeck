@@ -295,6 +295,34 @@ export function lookupMaterial(nominal: LumberNominal, species: Species, grade: 
 }
 
 /**
+ * Non-throwing predicate companion to `lookupMaterial`. Returns
+ * `true` iff the (nominal, species, grade) triple is stocked in the
+ * MVP catalog.
+ *
+ * ## Why a boolean predicate exists alongside the throwing lookup
+ *
+ * Some callers (e.g. `post-layout.ts` `deriveStockedPostMaterial` —
+ * S20 review-gate FIX 1) need to CHOOSE a stocked material at run
+ * time — a stocked triple should be used, an unstocked one should
+ * trigger a fallback. Using `try { lookupMaterial } catch` for that
+ * flow abuses exceptions for control flow (Clean Code / Google Eng
+ * Practices — "don't throw for the expected happy path"). This
+ * predicate keeps the fallback branch expression-level.
+ *
+ * @param nominal — lumber nominal size (e.g. `'2x10'`)
+ * @param species — species enum (`'PT'` / `'Cedar'` / `'Composite'`)
+ * @param grade   — grade enum (`'No2'` / `'NA'`)
+ * @returns `true` iff the triple appears in `MVP_SPECS`.
+ */
+export function hasMaterial(
+  nominal: LumberNominal,
+  species: Species,
+  grade: Grade,
+): boolean {
+  return CATALOG.has(keyFor(nominal, species, grade));
+}
+
+/**
  * Return every material in the catalog, in the insertion order of
  * `MVP_SPECS`. The returned array is FROZEN — mutating it (or its
  * elements) at runtime is a bug and will throw.

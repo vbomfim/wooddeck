@@ -411,4 +411,44 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       layout: { bayRemainderStrategy: 'extra-bay-at-end' },
     },
   },
+  // -----------------------------------------------------------------
+  // S20 — elevated + deck-blocks golden (Epic 2, FR-030 amendment).
+  //
+  // AC1 / AC3 / AC4 / AC5: one Oldcastle 11x11x7 block per post,
+  //   centered under it (position.x/z from post, position.y =
+  //   heightMm/2 so block sits on grade y=0), post re-anchored to
+  //   rest on the block top (post.position.y =
+  //   product.heightMm + post.size.y/2), no footings emitted.
+  // AC2: pre-existing elevated + posts-on-footings fixtures must stay
+  //   byte-identical. Only a NEW fixture is added here; the existing
+  //   ones are untouched. Regeneration only writes NEW files with
+  //   different member counts / positions.
+  //
+  // 12 ft × 12 ft × 3 ft deck lands 6 posts (3 per beam × 2 beams —
+  // widthMm 3657.6 / MAX_BEAM_SPAN_MM 2438.4 = 1.5 → ceil = 2 → +1 =
+  // 3 posts per beam; one beam per near/far edge). Beam material is
+  // 2×10 PT No2 → the derived post is 4×4 PT No2 from
+  // `product.acceptsPost[0]` + FIX-1 stocked fallback (autonomous
+  // decision, S20). heightMm is 914 mm (3 ft), comfortably above the
+  // block-adjusted min of 178 (block) + 25 (min post) + 235 (beam)
+  // + 235 (joist) + 25 (decking) = 698 mm.
+  // -----------------------------------------------------------------
+  {
+    name: 'elevated-12x12-oldcastle',
+    design: {
+      id: '55555555-5555-4555-8555-000000000020',
+      createdAt: '2026-07-04T00:00:20.000Z',
+      footprint: {
+        widthMm: 12 * MM_PER_FOOT,
+        lengthMm: 12 * MM_PER_FOOT,
+        heightMm: 3 * MM_PER_FOOT,
+      },
+      structure: 'elevated',
+      foundation: FIXTURE_OLDCASTLE_FOUNDATION,
+      joist: { material: PT_2X10, spacingMm: 406 },
+      beam: { material: PT_2X10 },
+      decking: { material: PT_54, orientation: 'parallel-to-width' },
+      layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+    },
+  },
 ];
