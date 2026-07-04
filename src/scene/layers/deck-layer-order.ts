@@ -1,6 +1,6 @@
 /**
  * `src/scene/layers/deck-layer-order.ts` — the frozen composition
- * order for the six deck layers.
+ * order for the eight deck layers.
  *
  * ## Why this constant lives in its own file
  *
@@ -15,13 +15,36 @@
  *
  *   1. environment  — ground plane at y = 0
  *   2. footings     — concrete piers, extend into -y
- *   3. posts        — vertical members from footing to beam
- *   4. beams        — horizontal supports carrying joists
- *   5. joists       — floor joists carrying decking
- *   6. decking      — top boards, the visually top-most primitives
+ *   3. blocks       — foundation blocks (S22)
+ *   4. posts        — vertical members from footing to beam
+ *   5. beams        — horizontal supports carrying joists
+ *   6. blocking     — short lumber between beams (S22)
+ *   7. joists       — floor joists carrying decking
+ *   8. decking      — top boards, the visually top-most primitives
  *
  * A raycast from the ISO camera hits `decking` FIRST because
  * decking is highest in y — the order matches the physical stack.
+ *
+ * ## S22 addition (Epic 2 / FR-029)
+ *
+ * `blocks` sits BETWEEN footings and posts:
+ *
+ *   - Elevated + deck-blocks: the block replaces the footing as the
+ *     post's base (block on top of the ground plane, post on top of
+ *     the block). Rendering blocks BEFORE posts lets a top-down
+ *     raycast hit the post first (posts are taller and cover the
+ *     block).
+ *   - Floating: no posts exist; the block sits below the beam plane
+ *     (y is negative). Rendering blocks BEFORE beams keeps the
+ *     stack order intuitive (block THEN what sits on it).
+ *
+ * `blocking` sits BETWEEN beams and joists:
+ *
+ *   - Short lumber pieces between beams for lateral bracing. Same
+ *     vertical range as beams (they share the beam y-center), so
+ *     the raycast-tiebreak order doesn't matter much — but placing
+ *     blocking AFTER beams matches the mental model ("block
+ *     between the beams").
  *
  * ## Type-safety AND runtime immutability
  *
@@ -45,8 +68,10 @@ import type { LayerVisibility } from '../../state';
 export const DECK_LAYER_ORDER = Object.freeze([
   'environment',
   'footings',
+  'blocks',
   'posts',
   'beams',
+  'blocking',
   'joists',
   'decking',
 ] as const satisfies readonly (keyof LayerVisibility)[]);

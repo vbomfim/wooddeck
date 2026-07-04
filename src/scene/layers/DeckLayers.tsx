@@ -1,6 +1,6 @@
 /**
  * `src/scene/layers/DeckLayers.tsx` — the convenience bundle that
- * mounts all six layer components in a fixed, spec-pinned order.
+ * mounts all EIGHT layer components in a fixed, spec-pinned order.
  *
  * ## Composition shape for S12
  *
@@ -11,22 +11,24 @@
  *     </DeckScene>
  *
  * S12 does NOT need to import the individual layer components —
- * this bundle owns the ordering and the six mounts. If a future
- * story adds a seventh layer (e.g. warning halo overlay in S11),
- * update `DECK_LAYER_ORDER` + this component in the same commit
- * and every downstream consumer picks it up transparently.
+ * this bundle owns the ordering and the eight mounts. If a future
+ * story adds a ninth layer (e.g. warning halo overlay), update
+ * `DECK_LAYER_ORDER` + this component in the same commit and every
+ * downstream consumer picks it up transparently.
  *
  * ## Fixed layer order — AC8 raycast picking hygiene
  *
- * The six layers mount in this order (bottom of the physical
+ * The eight layers mount in this order (bottom of the physical
  * stack first, top last):
  *
  *   1. environment  — ground plane at y = 0
  *   2. footings     — concrete piers, extend into -y
- *   3. posts        — vertical members from footing to beam
- *   4. beams        — horizontal supports carrying joists
- *   5. joists       — floor joists carrying decking
- *   6. decking      — top boards, the visually top-most primitives
+ *   3. blocks       — foundation blocks (S22 — Epic 2 / FR-029)
+ *   4. posts        — vertical members from footing to beam
+ *   5. beams        — horizontal supports carrying joists
+ *   6. blocking     — short lumber between beams (S22)
+ *   7. joists       — floor joists carrying decking
+ *   8. decking      — top boards, the visually top-most primitives
  *
  * ## Rationale for THIS order (not alphabetical, not domain-kind
  * enum order)
@@ -47,6 +49,19 @@
  *     component is a functional component with no state, so this
  *     reordering is a no-op reconciliation — safe.
  *
+ * ## S22 addition — where blocks/blocking slot into the stack
+ *
+ *   - `blocks` between footings and posts: works for BOTH layouts.
+ *     Elevated + deck-blocks (S20) puts the block at post-base
+ *     (positive y). Floating (S19) puts the block below the beam
+ *     plane (negative y). Either way, blocks paint before the
+ *     structural framing so a top-down raycast hits the framing
+ *     first when both stack up.
+ *   - `blocking` between beams and joists: blocking pieces sit at
+ *     beam-y (interior between beams in x/z). Painting after beams
+ *     matches the mental model ("blocking between beams") and
+ *     doesn't affect the raycast tiebreak (they don't overlap).
+ *
  * ## Why NO transparency handling
  *
  * MVP does not use transparent materials (see `shared/materials.ts`
@@ -60,6 +75,8 @@
 import type { JSX } from 'react';
 
 import { BeamsLayer } from './BeamsLayer';
+import { BlockingLayer } from './BlockingLayer';
+import { BlocksLayer } from './BlocksLayer';
 import { DeckingLayer } from './DeckingLayer';
 import { EnvironmentLayer } from './EnvironmentLayer';
 import { FootingsLayer } from './FootingsLayer';
@@ -71,8 +88,10 @@ export function DeckLayers(): JSX.Element {
     <>
       <EnvironmentLayer />
       <FootingsLayer />
+      <BlocksLayer />
       <PostsLayer />
       <BeamsLayer />
+      <BlockingLayer />
       <JoistsLayer />
       <DeckingLayer />
     </>

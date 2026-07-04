@@ -66,11 +66,22 @@ import { create } from 'zustand';
 export type CameraPreset = 'orbit' | 'top' | 'front' | 'side' | 'iso';
 
 /**
- * The six visual LAYERS a user can toggle. Names match the domain
- * `MemberKind` set (`joist` / `beam` / `post` / `footing` / `board`)
- * plus `environment` (ground plane + shadows). `board` is renamed to
- * `decking` here to match user-facing vocabulary. Layer maps to
- * scene-graph visibility toggles in S9/S10.
+ * The eight visual LAYERS a user can toggle. Names match the domain
+ * `MemberKind` set (`joist` / `beam` / `post` / `footing` / `board` /
+ * `block` / `blocking`) plus `environment` (ground plane + shadows).
+ * `board` is renamed to `decking` here to match user-facing
+ * vocabulary; `block` is pluralized to `blocks` for the same reason.
+ * Layer maps to scene-graph visibility toggles in S9/S10/S22.
+ *
+ * ## S22 additions (Epic 2 / FR-029)
+ *
+ *   - `blocks`   — foundation blocks (Oldcastle precast concrete or
+ *     TuffBlock polypropylene). Rendered by the new S22 `BlocksLayer`.
+ *   - `blocking` — short lumber blocks between beams for lateral
+ *     bracing. Rendered by the new S22 `BlockingLayer`.
+ *
+ * S26 will add the LayerTogglePanel checkbox rows for both flags.
+ * The state + visibility wiring lives here (this story S22).
  */
 export interface LayerVisibility {
   readonly environment: boolean;
@@ -79,6 +90,8 @@ export interface LayerVisibility {
   readonly beams: boolean;
   readonly posts: boolean;
   readonly footings: boolean;
+  readonly blocks: boolean;
+  readonly blocking: boolean;
 }
 
 /**
@@ -155,9 +168,11 @@ export interface UiStoreActions {
 }
 
 /**
- * All six layers on — the boot-time default. Extracted so both the
+ * All eight layers on — the boot-time default. Extracted so both the
  * store initializer and `showAllLayers()` can share the same value
  * (DRY — a new layer added to the union means updating ONE place).
+ *
+ * S22 addition — `blocks` and `blocking` join the six S10 layers.
  */
 const ALL_LAYERS_VISIBLE: LayerVisibility = Object.freeze({
   environment: true,
@@ -166,10 +181,12 @@ const ALL_LAYERS_VISIBLE: LayerVisibility = Object.freeze({
   beams: true,
   posts: true,
   footings: true,
+  blocks: true,
+  blocking: true,
 });
 
 /**
- * All six layers off — utility for `hideAllLayers()`. Kept as a
+ * All eight layers off — utility for `hideAllLayers()`. Kept as a
  * module-scope frozen literal so every `hideAllLayers()` invocation
  * returns the same reference; consumers that key on referential
  * equality see a stable value.
@@ -181,6 +198,8 @@ const ALL_LAYERS_HIDDEN: LayerVisibility = Object.freeze({
   beams: false,
   posts: false,
   footings: false,
+  blocks: false,
+  blocking: false,
 });
 
 export const useUiStore = create<UiStoreState & UiStoreActions>((set) => ({

@@ -62,7 +62,7 @@ describe('useUiStore — initial state', () => {
     expect(useUiStore.getState().cameraPreset).toBe('orbit');
   });
 
-  it('starts with all six layers visible', () => {
+  it('starts with all eight layers visible (six original + S22 blocks + blocking)', () => {
     const lv = useUiStore.getState().layerVisibility;
     expect(lv).toEqual({
       environment: true,
@@ -71,6 +71,8 @@ describe('useUiStore — initial state', () => {
       beams: true,
       posts: true,
       footings: true,
+      blocks: true,
+      blocking: true,
     });
   });
 
@@ -131,6 +133,29 @@ describe('useUiStore — layer visibility', () => {
     expect(after.beams).toBe(before.beams);
     expect(after.posts).toBe(before.posts);
     expect(after.footings).toBe(before.footings);
+    expect(after.blocks).toBe(before.blocks);
+    expect(after.blocking).toBe(before.blocking);
+  });
+
+  it('toggleLayer supports the S22 blocks + blocking keys', () => {
+    // S22 (Epic 2 / FR-029) — two new layers wired to the same
+    // `LayerVisibility` map. The toggle path is the same as every
+    // other layer; this test proves the wiring picks up the new
+    // keys without a special case.
+    const before = useUiStore.getState().layerVisibility;
+    act(() => {
+      useUiStore.getState().toggleLayer('blocks');
+    });
+    const after1 = useUiStore.getState().layerVisibility;
+    expect(after1.blocks).toBe(!before.blocks);
+    expect(after1.blocking).toBe(before.blocking);
+    act(() => {
+      useUiStore.getState().toggleLayer('blocking');
+    });
+    const after2 = useUiStore.getState().layerVisibility;
+    expect(after2.blocking).toBe(!before.blocking);
+    // First toggle preserved.
+    expect(after2.blocks).toBe(!before.blocks);
   });
 
   it('toggleLayer is its own inverse (call twice → identity)', () => {
