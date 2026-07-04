@@ -63,6 +63,7 @@
  */
 
 import type { DeckDesign, Layout, LayoutMember } from '../model';
+import { lookupFoundationProduct } from '../foundation-catalog';
 import { lookupMaterial } from '../materials-catalog';
 import { validateFoundationCombination } from '../compat-matrix';
 import { MM_PER_FOOT, type Mm } from '../units';
@@ -71,7 +72,7 @@ import { layoutBeams } from './beam-layout';
 import { layoutDecking } from './decking-layout';
 import { computeFloatingLayout } from './floating/floating-layout';
 import { layoutJoists } from './joist-layout';
-import { layoutPostsAndFootings } from './post-layout';
+import { layoutPostsAndBlocks, layoutPostsAndFootings } from './post-layout';
 import {
   LayoutError,
   MIN_DECK_DIMENSION_MM,
@@ -119,20 +120,39 @@ export { MIN_POST_HEIGHT_MM } from './y-stack';
  * Derivation (bottom-up along the y-stack — see `y-stack.ts`):
  *
  *     y = 0                        ← ground plane
+ *      ↑ blockHeightMm             ← ONLY for elevated + deck-blocks (S20);
+ *                                    zero-effect on posts-on-footings
  *      ↑ MIN_POST_HEIGHT_MM        ← minimum positive post extent
  *      ↑ beamDepthMm                ← full beam depth (drop-beam)
  *      ↑ joistDepthMm               ← full joist depth (sits on beam)
  *      ↑ deckingThicknessMm         ← decking board thickness
  *     y = heightMm                 ← walking surface
  *
- * MIN = deckingThicknessMm + joistDepthMm + beamDepthMm + MIN_POST_HEIGHT_MM
+ * For `foundation.type === 'posts-on-footings'`:
+ *
+ *   MIN = deckingThicknessMm + joistDepthMm + beamDepthMm
+ *       + MIN_POST_HEIGHT_MM
+ *
+ * For `foundation.type === 'deck-blocks'` (S20 — AC6):
+ *
+ *   MIN = deckingThicknessMm + joistDepthMm + beamDepthMm
+ *       + MIN_POST_HEIGHT_MM + product.actual.heightMm
+ *
+ * The deck-blocks branch adds exactly the block's actual height — the
+ * block sits ON grade and lifts the whole framing stack by its own
+ * height. `tuffblocks` under elevated is rejected earlier by the
+ * FR-030 compat matrix, so it never reaches this function on the
+ * elevated dispatch path (floating designs go through
+ * `computeMinFloatingHeightMm`).
  *
  * Depends on the design's material triple (thicker joist ⇒ higher
  * minimum). Exported so S13's height input can call it directly to
  * decide its slider/spinner minimum.
  *
  * @throws {LayoutError} if any of the decking / joist / beam material
- *   triples are not in the catalog (wrapped from `lookupMaterial`).
+ *   triples are not in the catalog (wrapped from `lookupMaterial`);
+ *   also thrown for an unknown foundation product id (wrapped from
+ *   `lookupFoundationProduct`).
  */
 export function computeMinStructuralHeightMm(design: DeckDesign): Mm {
   let decking, joist, beam;
@@ -158,12 +178,29 @@ export function computeMinStructuralHeightMm(design: DeckDesign): Mm {
       { cause: err },
     );
   }
-  return (
+  const framingStackMm =
     decking.actual.widthMm +
     joist.actual.heightMm +
     beam.actual.heightMm +
-    MIN_POST_HEIGHT_MM
-  );
+    MIN_POST_HEIGHT_MM;
+
+  // S20 — elevated + deck-blocks lifts the framing stack by the
+  // block's actual height. Other foundation types (posts-on-footings,
+  // floating variants) have no block-height contribution here — the
+  // floating pipeline has its own `computeMinFloatingHeightMm`.
+  if (design.foundation.type === 'deck-blocks' && design.structure === 'elevated') {
+    let product;
+    try {
+      product = lookupFoundationProduct(design.foundation.product.productId);
+    } catch (err) {
+      throw new LayoutError(
+        `computeMinStructuralHeightMm failed: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
+      );
+    }
+    return framingStackMm + product.actual.heightMm;
+  }
+  return framingStackMm;
 }
 
 /**
@@ -171,7 +208,7 @@ export function computeMinStructuralHeightMm(design: DeckDesign): Mm {
  * module header for the coordinate frame, error contract, and
  * determinism guarantee.
  *
- * ## Structure × foundation dispatch (Epic 2 S19 pair-fix)
+ * ## Structure × foundation dispatch (Epic 2 S20)
  *
  * Two gates run BEFORE the layout math:
  *
@@ -182,20 +219,17 @@ export function computeMinStructuralHeightMm(design: DeckDesign): Mm {
  *      point every ingress (`readDeckFile`, `loadFromLocalStorage`,
  *      `applyParameters`) inherits — none of those paths need to
  *      call the matrix themselves.
- *   2. **Support gate** — of the four compat-legal combos, three
- *      have implementations here: `elevated`+`posts-on-footings`
- *      (S17), `floating`+`deck-blocks` (S19), and
- *      `floating`+`tuffblocks` (S19). The remaining
- *      `elevated`+`deck-blocks` combo throws
- *      "not yet implemented (arrives in Epic 2 story S20)" until
- *      that story fills in the branch. Exhaustive dispatch with a
+ *   2. **Support gate** — all four compat-legal combos are
+ *      implemented as of S20: `elevated`+`posts-on-footings` (S17),
+ *      `elevated`+`deck-blocks` (S20 — this ticket),
+ *      `floating`+`deck-blocks` (S19), and
+ *      `floating`+`tuffblocks` (S19). Exhaustive dispatch with a
  *      `never`-typed default catches any future variant that lands
  *      without a branch here.
  *
  * @throws {LayoutError} when the design is invalid, when the
- *   structure × foundation combo is FR-030-illegal, when the combo
- *   is legal but not yet implemented, or when the design references
- *   an unknown material.
+ *   structure × foundation combo is FR-030-illegal, or when the
+ *   design references an unknown material.
  */
 export function computeLayout(
   design: DeckDesign,
@@ -214,21 +248,18 @@ export function computeLayout(
     throw new LayoutError(compat.reason);
   }
 
-  // ---- Gate 2: support-gate dispatch (only elevated+posts-on-footings) ---
-  // A `never`-typed default on both switches catches a future
-  // StructureMode or FoundationSpec.type variant without a branch
-  // here, so the layout engine fails-compile until S19/S20 fill in
-  // the missing paths.
+  // ---- Gate 2: support-gate dispatch --------------------------------------
+  // Every compat-legal combo has a branch. A `never`-typed default on
+  // both switches catches a future StructureMode or FoundationSpec.type
+  // variant without a branch here, so the layout engine fails-compile
+  // until the missing path is filled in.
   switch (design.structure) {
     case 'elevated':
       switch (design.foundation.type) {
         case 'posts-on-footings':
           return computeElevatedPostsOnFootingsLayout(design, options);
         case 'deck-blocks':
-          throw new LayoutError(
-            'Elevated construction on deck-blocks is valid but not yet ' +
-              'implemented (arrives in Epic 2 story S20).',
-          );
+          return computeElevatedDeckBlocksLayout(design, options);
         case 'tuffblocks':
           // Unreachable — compat gate above already rejected this
           // combo. Kept explicit so the exhaustive default doesn't
@@ -321,6 +352,74 @@ function computeElevatedPostsOnFootingsLayout(
 
 function defaultNow(): string {
   return new Date().toISOString();
+}
+
+/**
+ * Compute the layout for `structure === 'elevated'` + `foundation.type
+ * === 'deck-blocks'` (S20). Mirrors the shape of
+ * `computeElevatedPostsOnFootingsLayout` — same validation, same
+ * decking/joist/beam pipeline, same top-to-bottom member order —
+ * with two differences:
+ *
+ *   1. `layoutPostsAndBlocks(design, beams)` replaces
+ *      `layoutPostsAndFootings(design, beams)`. Posts are re-anchored
+ *      to sit ON TOP of the block (see `post-layout.ts` `layoutPostsAndBlocks`
+ *      module doc); the emitted foundation members are `block`s
+ *      carrying a real `{kind:'block', productId}` material, NOT the
+ *      concrete-lumber-placeholder `footing`s.
+ *   2. `members` order is `[boards, joists, beams, posts, blocks]`
+ *      (blocks in the trailing foundation slot, mirroring the
+ *      posts-on-footings `[..., posts, footings]` order — matches the
+ *      y-stack top-to-bottom convention).
+ *
+ * `Layout.bounds` still equals `design.footprint` — blocks sit on
+ * grade (y ∈ [0, blockHeightMm]) and stay inside the horizontal
+ * footprint (the Oldcastle 279 mm block is narrower than the 300 mm
+ * FOOTING_WIDTH_MM anchor that insets posts from the deck edges), so
+ * no true-AABB math is required. S19's `computeFloatingBoundsFromMembers`
+ * only applies to floating layouts where blocks overhang the
+ * footprint on x/z. If a future block product exceeds
+ * FOOTING_WIDTH_MM on any horizontal axis, the bounds contract here
+ * must be revisited.
+ */
+function computeElevatedDeckBlocksLayout(
+  design: DeckDesign,
+  options?: ComputeLayoutOptions,
+): Layout {
+  validateDesign(design);
+  const now = options?.now ?? defaultNow;
+
+  try {
+    const joists = layoutJoists(design);
+    const beams = layoutBeams(design);
+    const { posts, blocks } = layoutPostsAndBlocks(design, beams);
+    const boards = layoutDecking(design);
+
+    const members: LayoutMember[] = [
+      ...boards,
+      ...joists,
+      ...beams,
+      ...posts,
+      ...blocks,
+    ];
+
+    return {
+      designId: design.id,
+      computedAt: now(),
+      bounds: {
+        widthMm: design.footprint.widthMm,
+        lengthMm: design.footprint.lengthMm,
+        heightMm: design.footprint.heightMm,
+      },
+      members,
+    };
+  } catch (err) {
+    if (err instanceof LayoutError) throw err;
+    throw new LayoutError(
+      `computeLayout failed: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
 }
 
 /**

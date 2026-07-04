@@ -93,10 +93,12 @@
  */
 
 import { MM_PER_FOOT, type Mm } from '../units';
+import { lookupFoundationProduct } from '../foundation-catalog';
 import { lookupMaterial } from '../materials-catalog';
 import type { DeckDesign, LayoutMember } from '../model';
 
 import { BEAM_IDS, beamLabelForId, type BeamLabel } from './beam-layout';
+import { computeBlocksUnderPosts } from './foundation/blocks-under-posts';
 import { FOOTING_DEPTH_MM, FOOTING_WIDTH_MM, computeYStack } from './y-stack';
 
 // Re-export so callers (and tests) have one canonical import path.
@@ -193,6 +195,174 @@ export function layoutPostsAndFootings(
   }
 
   return { posts, footings };
+}
+
+// ---------------------------------------------------------------------------
+// S20 — elevated + deck-blocks variant
+// ---------------------------------------------------------------------------
+
+/**
+ * Return shape for the elevated + deck-blocks post-layout entry
+ * point. Same posts-first-then-foundation-members shape as
+ * `PostAndFootingResult`, but the foundation members are `block`s
+ * (concrete deck-block products from `foundation-catalog.ts`)
+ * instead of the pre-Epic-2 `footing`s.
+ *
+ * The type is DIFFERENT — an `.blocks` field, not `.footings` —
+ * because a mistaken caller that expected `footings` would
+ * fail-compile against this result rather than silently receive an
+ * empty array.
+ */
+export interface PostAndBlockResult {
+  readonly posts: LayoutMember[];
+  readonly blocks: LayoutMember[];
+}
+
+/**
+ * Emit the posts + foundation blocks for an ELEVATED deck resting
+ * on precast deck-blocks (S20 — AC1, AC3, AC4, AC5).
+ *
+ * ## Contract vs. `layoutPostsAndFootings`
+ *
+ * Same beam-iteration + x-anchor logic as the posts-on-footings
+ * path (see `computePostsPerBeam` / `computePostXCenters` module
+ * header). The two differences:
+ *
+ *   1. Post `position.y` is re-anchored so the post BOTTOM sits on
+ *      the block TOP (`post.position.y = blockHeightMm + postHeight
+ *      / 2`), and post `size.y` shrinks by exactly `blockHeightMm`
+ *      — the space the block now occupies used to be part of the
+ *      post (AC5).
+ *   2. The foundation members are `block`s carrying a real
+ *      `{kind: 'block', productId}` material (via
+ *      `computeBlocksUnderPosts`) — NOT the lumber-placeholder
+ *      stamp used by the historical footing path.
+ *
+ * `layoutPostsAndFootings` is invoked from a different dispatch
+ * branch and must stay byte-identical (AC2 — SC-004 golden). This
+ * function is invoked ONLY from the elevated + deck-blocks branch
+ * of `computeLayout`.
+ *
+ * @throws {Error} when `design.foundation.type !== 'deck-blocks'`.
+ *   Defensive caller-contract check — mirrors the guard on
+ *   `layoutPostsAndFootings`.
+ * @throws {Error} when the foundation product id is not in the
+ *   catalog (re-thrown from `lookupFoundationProduct`).
+ */
+export function layoutPostsAndBlocks(
+  design: DeckDesign,
+  beams: readonly LayoutMember[],
+): PostAndBlockResult {
+  if (design.foundation.type !== 'deck-blocks') {
+    throw new Error(
+      `layoutPostsAndBlocks: expected foundation.type === 'deck-blocks', ` +
+        `got '${design.foundation.type}'. This function is only valid for the ` +
+        `elevated / deck-blocks dispatch branch of computeLayout. ` +
+        `See src/domain/layout/post-layout.ts, src/domain/layout/layout-engine.ts, ` +
+        `and Epic 2 / S20.`,
+    );
+  }
+
+  // Look up the foundation block product FIRST — every downstream
+  // step (post material derivation via `acceptsPost`, y-anchor
+  // adjustment via `heightMm`, block emission) depends on it.
+  const product = lookupFoundationProduct(design.foundation.product.productId);
+  const blockHeightMm = product.actual.heightMm;
+
+  // ---- Post material derivation (S20 autonomous decision) --------------
+  //
+  // The `deck-blocks` variant of `FoundationSpec` does NOT carry a
+  // `post` field — that field only exists on the `posts-on-footings`
+  // variant (see `model.ts` FoundationSpec doc, S17 review-gate FIX 2
+  // dual-SoT decision). For the elevated + deck-blocks combination
+  // we still need a post material to stamp on the emitted post
+  // members. Two constraints frame the choice:
+  //
+  //   1. Nominal — MUST fit the block's center pocket. The catalog
+  //      product declares `acceptsPost: readonly LumberNominal[] |
+  //      null`; for Oldcastle it is `['4x4']` (see
+  //      `foundation-catalog.ts` MVP_PRODUCTS). We pick the FIRST
+  //      accepted nominal so the emitted post is guaranteed to fit
+  //      the block's pocket. A block with `acceptsPost === null`
+  //      would fall under elevated + tuffblocks — rejected earlier
+  //      by the FR-030 compat matrix. Defensive throw here anyway
+  //      catches a future block product that slips through.
+  //   2. Species / grade — no per-post-in-blocks field exists in
+  //      the domain model yet, so we borrow the beam material's
+  //      species + grade. In the MVP catalog both PT-No2 and Cedar-
+  //      No2 are available for 4×4; this covers every realistic
+  //      combination without inventing a new design field.
+  //
+  // Reversible when a follow-up ticket surfaces a per-design post
+  // material for the deck-blocks foundation variant (spec change +
+  // S18 persistence migration). Documented in the handoff table.
+  const acceptsPost = product.acceptsPost;
+  if (acceptsPost === null || acceptsPost.length === 0) {
+    throw new Error(
+      `layoutPostsAndBlocks: foundation product '${product.productId}' has no ` +
+        `acceptsPost pocket (elevated + deck-blocks requires a block with a ` +
+        `post pocket). The FR-030 compat matrix should have rejected this ` +
+        `pairing earlier; see src/domain/compat-matrix.ts.`,
+    );
+  }
+  const postMaterialRef = {
+    nominal: acceptsPost[0]!,
+    species: design.beam.material.species,
+    grade: design.beam.material.grade,
+  };
+  const postMat = lookupMaterial(
+    postMaterialRef.nominal,
+    postMaterialRef.species,
+    postMaterialRef.grade,
+  );
+  const postThicknessX = postMat.actual.widthMm; // e.g. 4×4 post: 89 mm on x
+  const postThicknessZ = postMat.actual.heightMm; // e.g. 4×4 post: 89 mm on z (square posts)
+
+  // Beam-bottom y = same as posts-on-footings (foundation type does
+  // NOT change the height of decking / joist / beam — only where
+  // the post starts). `computeYStack` treats `postCenterY /
+  // postHeightMm` as if the post rested on grade; we override those
+  // fields locally for the block-adjusted post.
+  const stack = computeYStack(design);
+  const postBottomY = blockHeightMm; // post rests on block TOP
+  const postTopY = stack.beamBottomY;
+  const postHeightMm = postTopY - postBottomY;
+  const postCenterY = postBottomY + postHeightMm / 2;
+
+  const postsPerBeam = computePostsPerBeam(design.footprint.widthMm);
+  const xCenters = computePostXCenters(design.footprint.widthMm, postsPerBeam);
+
+  const posts: LayoutMember[] = [];
+
+  for (const beam of beams) {
+    const beamLabel = beamLabelForId(beam.id);
+    if (beamLabel === null) {
+      throw new Error(
+        `layoutPostsAndBlocks: unrecognized beam id ${JSON.stringify(beam.id)} — ` +
+          `expected one of ${JSON.stringify(Object.values(BEAM_IDS))}.`,
+      );
+    }
+    for (let i = 0; i < postsPerBeam; i++) {
+      const x = xCenters[i]!;
+      const z = beam.position.z;
+      posts.push({
+        id: `post-${beamLabel}-${i}`,
+        kind: 'post',
+        material: { kind: 'lumber', ...postMaterialRef },
+        position: { x, y: postCenterY, z },
+        size: { x: postThicknessX, y: postHeightMm, z: postThicknessZ },
+        rotation: { x: 0, y: 0, z: 0 },
+      });
+    }
+  }
+
+  // Delegate block emission to the pure foundation helper — one
+  // block per post, centered under. Coupling stays low (this
+  // function only produces `posts`; `computeBlocksUnderPosts` does
+  // block geometry) and the block-id derivation stays in one place.
+  const blocks = [...computeBlocksUnderPosts({ posts, product })];
+
+  return { posts, blocks };
 }
 
 function computePostsPerBeam(widthMm: Mm): number {

@@ -23,10 +23,20 @@ export { LayoutError, MIN_DECK_DIMENSION_MM, computeLayout } from './layout-engi
 export type { ComputeLayoutOptions } from './layout-engine';
 export { layoutJoists } from './joist-layout';
 export { layoutBeams } from './beam-layout';
-export { MAX_BEAM_SPAN_MM, layoutPostsAndFootings } from './post-layout';
-export type { PostAndFootingResult } from './post-layout';
+export {
+  MAX_BEAM_SPAN_MM,
+  layoutPostsAndBlocks,
+  layoutPostsAndFootings,
+} from './post-layout';
+export type { PostAndBlockResult, PostAndFootingResult } from './post-layout';
 export { BOARD_GAP_MM, layoutDecking, layoutDeckingWithYCenter } from './decking-layout';
 export { FOOTING_DEPTH_MM, FOOTING_WIDTH_MM } from './y-stack';
+
+// -----------------------------------------------------------------
+// S20 — elevated + deck-blocks foundation (Epic 2)
+// -----------------------------------------------------------------
+export { computeBlocksUnderPosts } from './foundation/blocks-under-posts';
+export type { BlocksUnderPostsInput } from './foundation/blocks-under-posts';
 
 // -----------------------------------------------------------------
 // S19 — floating layout engine (Epic 2)

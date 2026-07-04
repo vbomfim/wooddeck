@@ -13,9 +13,10 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { lookupFoundationProduct } from '../foundation-catalog';
 import { MM_PER_FOOT } from '../units';
 import { lookupMaterial } from '../materials-catalog';
-import type { DeckDesign, LayoutMember } from '../model';
+import type { DeckDesign, FoundationSpec, LayoutMember } from '../model';
 
 import { layoutBeams } from './beam-layout';
 import { MIN_POST_HEIGHT_MM } from './y-stack';
@@ -24,6 +25,7 @@ import {
   FOOTING_DEPTH_MM,
   FOOTING_WIDTH_MM,
   MAX_BEAM_SPAN_MM,
+  layoutPostsAndBlocks,
   layoutPostsAndFootings,
 } from './post-layout';
 
@@ -252,5 +254,271 @@ describe('post-layout — height boundary (Fix B / QA-Gap#5)', () => {
     const a = layoutPostsAndFootings(design, beams);
     const b = layoutPostsAndFootings(design, beams);
     expect(a).toEqual(b);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S20 — layoutPostsAndBlocks (elevated + deck-blocks)
+// ---------------------------------------------------------------------------
+//
+// The second post-emitting entry point in this module. It differs from
+// `layoutPostsAndFootings` in exactly three places:
+//
+//   1. It emits `block` members (via
+//      `foundation/blocks-under-posts.computeBlocksUnderPosts`)
+//      instead of `footing` members.
+//   2. Post `position.y` is re-anchored so the post BOTTOM sits on
+//      the block TOP (`post.position.y = blockHeightMm +
+//      post.size.y / 2`). Under `layoutPostsAndFootings` the post
+//      BOTTOM sits at y=0 (grade).
+//   3. Post `size.y` (length) shrinks by exactly `blockHeightMm` —
+//      the space the block now occupies used to be part of the post.
+
+const OLDCASTLE_FOUNDATION: FoundationSpec = {
+  type: 'deck-blocks',
+  product: { productId: 'oldcastle-11x11x7' },
+};
+
+function makeDeckBlocksDesign(overrides: Partial<{
+  widthMm: number;
+  lengthMm: number;
+  heightMm: number;
+}> = {}): DeckDesign {
+  // Height chosen so that after re-anchoring the post over an
+  // Oldcastle 178 mm block, the post still has ≥ MIN_POST_HEIGHT_MM
+  // y-extent. Default 1200 mm ≈ 4′ — comfortably above the block-
+  // adjusted structural minimum (~700 mm for the reference 2×10
+  // stack).
+  return {
+    id: '00000000-0000-4000-8000-000000000020',
+    createdAt: '2026-07-04T00:00:00.000Z',
+    footprint: {
+      widthMm: overrides.widthMm ?? 3660,
+      lengthMm: overrides.lengthMm ?? 4880,
+      heightMm: overrides.heightMm ?? 1200,
+    },
+    structure: 'elevated',
+    foundation: OLDCASTLE_FOUNDATION,
+    joist: {
+      material: { nominal: '2x10', species: 'PT', grade: 'No2' },
+      spacingMm: 406,
+    },
+    beam: { material: { nominal: '2x10', species: 'PT', grade: 'No2' } },
+    decking: {
+      material: { nominal: '5/4x6', species: 'PT', grade: 'No2' },
+      orientation: 'parallel-to-width',
+    },
+    layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+  };
+}
+
+describe('layoutPostsAndBlocks — AC1 posts + blocks emission', () => {
+  it('emits exactly one block per post (same array length)', () => {
+    const design = makeDeckBlocksDesign();
+    const beams = layoutBeams(design);
+    const { posts, blocks } = layoutPostsAndBlocks(design, beams);
+    expect(blocks).toHaveLength(posts.length);
+  });
+
+  it('post count follows the same ceil(widthMm/MAX_BEAM_SPAN_MM)+1 formula (20 ft → 8 posts)', () => {
+    const design = makeDeckBlocksDesign({
+      widthMm: 20 * MM_PER_FOOT,
+      lengthMm: 30 * MM_PER_FOOT,
+    });
+    const beams = layoutBeams(design);
+    const { posts } = layoutPostsAndBlocks(design, beams);
+    // 6096 / 2438.4 = 2.5 → ceil=3 → +1 = 4 posts per beam × 2 beams.
+    expect(posts).toHaveLength(8);
+  });
+
+  it('does NOT emit any footing members (block-only foundation)', () => {
+    const design = makeDeckBlocksDesign();
+    const beams = layoutBeams(design);
+    // The return type has NO `footings` field — the shape difference
+    // itself enforces the AC1 zero-footings invariant. This test
+    // confirms every emitted member is either a post or a block.
+    const { posts, blocks } = layoutPostsAndBlocks(design, beams);
+    for (const p of posts) expect(p.kind).toBe('post');
+    for (const b of blocks) expect(b.kind).toBe('block');
+  });
+});
+
+describe('layoutPostsAndBlocks — AC3 block dimensions from catalog', () => {
+  it('every block has the Oldcastle actual dims (279 × 178 × 279)', () => {
+    const design = makeDeckBlocksDesign();
+    const beams = layoutBeams(design);
+    const product = lookupFoundationProduct('oldcastle-11x11x7');
+    const { blocks } = layoutPostsAndBlocks(design, beams);
+    for (const b of blocks) {
+      expect(b.size.x).toBe(product.actual.widthMm);
+      expect(b.size.y).toBe(product.actual.heightMm);
+      expect(b.size.z).toBe(product.actual.depthMm);
+    }
+  });
+
+  it('every block carries a {kind:"block", productId} material', () => {
+    const design = makeDeckBlocksDesign();
+    const beams = layoutBeams(design);
+    const { blocks } = layoutPostsAndBlocks(design, beams);
+    for (const b of blocks) {
+      expect(b.material.kind).toBe('block');
+      if (b.material.kind === 'block') {
+        expect(b.material.productId).toBe('oldcastle-11x11x7');
+      }
+    }
+  });
+});
+
+describe('layoutPostsAndBlocks — AC4 block centered under post, on grade', () => {
+  it('each block position.x and position.z match its parent post', () => {
+    const design = makeDeckBlocksDesign();
+    const beams = layoutBeams(design);
+    const { posts, blocks } = layoutPostsAndBlocks(design, beams);
+    for (let i = 0; i < posts.length; i++) {
+      expect(blocks[i]!.position.x).toBeCloseTo(posts[i]!.position.x, 6);
+      expect(blocks[i]!.position.z).toBeCloseTo(posts[i]!.position.z, 6);
+    }
+  });
+
+  it('every block position.y equals product.actual.heightMm / 2 (on grade at y=0)', () => {
+    const design = makeDeckBlocksDesign();
+    const beams = layoutBeams(design);
+    const product = lookupFoundationProduct('oldcastle-11x11x7');
+    const { blocks } = layoutPostsAndBlocks(design, beams);
+    for (const b of blocks) {
+      expect(b.position.y).toBe(product.actual.heightMm / 2);
+    }
+  });
+});
+
+describe('layoutPostsAndBlocks — AC5 post rests on block top', () => {
+  it('post position.y == blockHeightMm + post.size.y / 2 (bottom on block top)', () => {
+    const design = makeDeckBlocksDesign();
+    const beams = layoutBeams(design);
+    const product = lookupFoundationProduct('oldcastle-11x11x7');
+    const blockHeightMm = product.actual.heightMm; // 178
+    const { posts } = layoutPostsAndBlocks(design, beams);
+    for (const p of posts) {
+      expect(p.position.y).toBeCloseTo(blockHeightMm + p.size.y / 2, 6);
+    }
+  });
+
+  it('post size.y == beamBottomY - blockHeightMm (block occupies what used to be post span)', () => {
+    // Reference 2×10 stack: deckingThickness 25 + joistDepth 235 +
+    // beamDepth 235 = 495 mm above the beam bottom. Design height
+    // 1200 → beamBottomY = 705 mm. Block height 178 → post size.y
+    // = 705 − 178 = 527 mm.
+    const design = makeDeckBlocksDesign({ heightMm: 1200 });
+    const beams = layoutBeams(design);
+    const deckingMat = lookupMaterial('5/4x6', 'PT', 'No2');
+    const joistMat = lookupMaterial('2x10', 'PT', 'No2');
+    const beamMat = lookupMaterial('2x10', 'PT', 'No2');
+    const product = lookupFoundationProduct('oldcastle-11x11x7');
+    const beamBottomY =
+      1200 -
+      deckingMat.actual.widthMm -
+      joistMat.actual.heightMm -
+      beamMat.actual.heightMm;
+    const expectedPostHeight = beamBottomY - product.actual.heightMm;
+    const { posts } = layoutPostsAndBlocks(design, beams);
+    for (const p of posts) {
+      expect(p.size.y).toBeCloseTo(expectedPostHeight, 6);
+    }
+  });
+
+  it('post top y (position.y + size.y/2) equals beamBottomY (post supports the beam)', () => {
+    const design = makeDeckBlocksDesign();
+    const beams = layoutBeams(design);
+    const deckingMat = lookupMaterial('5/4x6', 'PT', 'No2');
+    const joistMat = lookupMaterial('2x10', 'PT', 'No2');
+    const beamMat = lookupMaterial('2x10', 'PT', 'No2');
+    const beamBottomY =
+      design.footprint.heightMm -
+      deckingMat.actual.widthMm -
+      joistMat.actual.heightMm -
+      beamMat.actual.heightMm;
+    const { posts } = layoutPostsAndBlocks(design, beams);
+    for (const p of posts) {
+      expect(p.position.y + p.size.y / 2).toBeCloseTo(beamBottomY, 6);
+    }
+  });
+
+  it('post bottom y (position.y − size.y/2) equals blockHeightMm (post BOTTOM on block TOP)', () => {
+    const design = makeDeckBlocksDesign();
+    const beams = layoutBeams(design);
+    const product = lookupFoundationProduct('oldcastle-11x11x7');
+    const { posts } = layoutPostsAndBlocks(design, beams);
+    for (const p of posts) {
+      expect(p.position.y - p.size.y / 2).toBeCloseTo(product.actual.heightMm, 6);
+    }
+  });
+});
+
+describe('layoutPostsAndBlocks — ids, determinism, caller-contract guard', () => {
+  it('post ids follow the same post-<beam>-<index> pattern as posts-on-footings', () => {
+    const design = makeDeckBlocksDesign();
+    const beams = layoutBeams(design);
+    const { posts } = layoutPostsAndBlocks(design, beams);
+    for (const p of posts) expect(p.id).toMatch(/^post-(near|far)-\d+$/);
+  });
+
+  it('block ids mirror the post ids (block-<beam>-<index>)', () => {
+    const design = makeDeckBlocksDesign();
+    const beams = layoutBeams(design);
+    const { blocks } = layoutPostsAndBlocks(design, beams);
+    for (const b of blocks) expect(b.id).toMatch(/^block-(near|far)-\d+$/);
+  });
+
+  it('is deterministic — same design + same beams yields deeply-equal arrays', () => {
+    const design = makeDeckBlocksDesign();
+    const beams = layoutBeams(design);
+    const a = layoutPostsAndBlocks(design, beams);
+    const b = layoutPostsAndBlocks(design, beams);
+    expect(a).toEqual(b);
+  });
+
+  it('throws when called with a non-deck-blocks foundation (caller-contract guard)', () => {
+    // Mirrors the defensive throw in `layoutPostsAndFootings`. The
+    // layout-engine dispatcher never routes a posts-on-footings
+    // design here, but a future direct caller that skips the
+    // dispatcher must fail loudly rather than silently produce
+    // nonsense.
+    const design: DeckDesign = {
+      ...makeDeckBlocksDesign(),
+      foundation: {
+        type: 'posts-on-footings',
+        post: { nominal: '6x6', species: 'PT', grade: 'No2' },
+        footing: { widthMm: 300, depthMm: 300 },
+      },
+    };
+    const beams = layoutBeams(design);
+    expect(() => layoutPostsAndBlocks(design, beams)).toThrow(
+      /deck-blocks|foundation/i,
+    );
+  });
+});
+
+describe('layoutPostsAndBlocks — height boundary (block-adjusted MIN)', () => {
+  it('at heightMm just above the block-adjusted MIN, post.size.y ≥ MIN_POST_HEIGHT_MM', () => {
+    // block-adjusted MIN = existing MIN (520 for 2×10 stack) + block
+    // heightMm (178) = 698 mm. At heightMm = 700, post.size.y ≈ 27
+    // mm (just above the 25 mm floor).
+    const design = makeDeckBlocksDesign({ heightMm: 700 });
+    const beams = layoutBeams(design);
+    const { posts } = layoutPostsAndBlocks(design, beams);
+    for (const p of posts) {
+      expect(p.size.y).toBeGreaterThanOrEqual(MIN_POST_HEIGHT_MM);
+    }
+  });
+
+  it('at heightMm = computeMinStructuralHeightMm (deck-blocks branch), post.size.y ≈ MIN_POST_HEIGHT_MM', () => {
+    const proto = makeDeckBlocksDesign();
+    const minHeight = computeMinStructuralHeightMm(proto);
+    const design = makeDeckBlocksDesign({ heightMm: minHeight });
+    const beams = layoutBeams(design);
+    const { posts } = layoutPostsAndBlocks(design, beams);
+    for (const p of posts) {
+      expect(p.size.y).toBeCloseTo(MIN_POST_HEIGHT_MM, 6);
+    }
   });
 });
