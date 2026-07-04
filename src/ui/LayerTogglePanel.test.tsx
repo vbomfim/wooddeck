@@ -37,6 +37,8 @@ beforeEach(() => {
         beams: true,
         posts: true,
         footings: true,
+        blocks: true,
+        blocking: true,
       },
     });
   });
@@ -71,6 +73,8 @@ describe('<LayerTogglePanel /> — heading + checkboxes (AC1)', () => {
           beams: true,
           posts: true,
           footings: true,
+          blocks: true,
+          blocking: true,
         },
       });
     });

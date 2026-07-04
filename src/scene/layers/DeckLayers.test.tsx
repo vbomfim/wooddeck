@@ -1,13 +1,14 @@
 /**
  * Unit tests for `src/scene/layers/DeckLayers.tsx`.
  *
- * ## Coverage map (S10 issue #11)
+ * ## Coverage map (S10 issue #11 + S22 issue #44)
  *
- *   AC1  All six layers mount.
+ *   AC1  All eight layers mount (six from S10 + blocks + blocking
+ *        from S22).
  *   AC8  Layer order — the composition order is
- *        environment → footings → posts → beams → joists → decking
- *        so that a raycast from above hits decking FIRST, then
- *        joists, etc.
+ *        environment → footings → blocks → posts → beams → blocking
+ *        → joists → decking so that a raycast from above hits
+ *        decking FIRST, then joists, etc.
  *
  *        This test walks the ACTUAL scene-graph traversal order
  *        by reading each layer group's `userData[LAYER_USER_DATA_KEY]`
@@ -55,27 +56,30 @@ function resetLayerVisibility(): void {
       beams: true,
       posts: true,
       footings: true,
+      blocks: true,
+      blocking: true,
     },
   });
 }
 
-describe('<DeckLayers /> — AC1 all six layers mount', () => {
+describe('<DeckLayers /> — AC1 all eight layers mount', () => {
   beforeEach(() => {
     resetLayerVisibility();
     resetDesignStoreForTests();
     // Seed an empty layout so no member meshes are created — this
-    // test focuses on the six layer groups themselves.
+    // test focuses on the eight layer groups themselves (six from
+    // S10 + two from S22: blocks and blocking).
     const cur = useDesignStore.getState().bundle;
     useDesignStore.setState({ bundle: { ...cur, layout: makeLayout([]) } });
   });
 
-  it('mounts SIX groups — one per layer', async () => {
+  it('mounts EIGHT groups — one per layer (six original + blocks + blocking)', async () => {
     const renderer = await ReactThreeTestRenderer.create(<DeckLayers />);
     const groups = renderer.scene.findAllByType('Group');
-    // Six layer groups. There may be additional nested groups from
-    // internal r3f wrapping, but the top-level count MUST include
-    // the six.
-    expect(groups.length).toBeGreaterThanOrEqual(6);
+    // Eight layer groups (S22 adds `blocks` + `blocking`). There
+    // may be additional nested groups from internal r3f wrapping,
+    // but the top-level count MUST include the eight.
+    expect(groups.length).toBeGreaterThanOrEqual(8);
     await renderer.unmount();
   });
 });
@@ -88,16 +92,20 @@ describe('<DeckLayers /> — AC8 composition order (raycast picking hygiene)', (
     useDesignStore.setState({ bundle: { ...cur, layout: makeLayout([]) } });
   });
 
-  it('DECK_LAYER_ORDER is the fixed six-entry sequence: env → footings → posts → beams → joists → decking', () => {
-    // Frozen order — anyone reading this in code review sees the
-    // intent explicitly. The comment in DeckLayers.tsx explains
-    // WHY this order (bottom-of-stack first so decking is visually
-    // on top and hit first by a top-down raycast).
+  it('DECK_LAYER_ORDER is the fixed eight-entry sequence: env → footings → blocks → posts → beams → blocking → joists → decking', () => {
+    // Frozen order — see DeckLayers.tsx module header for the
+    // physical-stack rationale. The S22 additions:
+    //   - blocks   sit between footings and posts (below beams for
+    //              floating; below posts for elevated + deck-blocks)
+    //   - blocking sits between beams and joists (same y as beams;
+    //              interior between them in x/z)
     expect(DECK_LAYER_ORDER).toEqual([
       'environment',
       'footings',
+      'blocks',
       'posts',
       'beams',
+      'blocking',
       'joists',
       'decking',
     ]);
@@ -158,9 +166,10 @@ describe('<DeckLayers /> — AC3 default visibility (all on)', () => {
     // after mount. If a future layer defaults to hidden, this test
     // fires and forces a doc update.
     const groups = renderer.scene.findAllByType('Group').map((n) => n.instance as Group);
-    // At least six visible groups (the six layer roots).
+    // At least eight visible groups (the eight layer roots — S22
+    // adds blocks + blocking).
     const visibleCount = groups.filter((g) => g.visible).length;
-    expect(visibleCount).toBeGreaterThanOrEqual(6);
+    expect(visibleCount).toBeGreaterThanOrEqual(8);
     await renderer.unmount();
   });
 });

@@ -13,12 +13,20 @@
  * contract) and asserts that every kind layer renders an EMPTY
  * group with NO meshes and NO thrown errors.
  *
- * ## Why not test each layer separately
+ * ## Why not test each layer separately (KindLayer scope)
  *
- * All five kind layers delegate to `<KindLayer>`, which is the
- * one place with the `?.members ?? []` guard. Testing one is
- * equivalent to testing all five. The G6 shared-suite test
- * (added below) covers per-layer behaviour.
+ * All five KindLayer-based kind layers (Joists, Beams, Posts,
+ * Footings, Decking) delegate to `<KindLayer>`, which is the ONE
+ * place with the `?.members ?? []` guard — testing one is
+ * equivalent to testing all five.
+ *
+ * ## S22 addition — BlocksLayer parallel coverage
+ *
+ * `BlocksLayer` is NOT a KindLayer delegate — it has its own
+ * per-instance `?.members ?? EMPTY_MEMBERS` guard (see
+ * BlocksLayer.tsx). So it needs its own null-layout smoke test.
+ * `BlockingLayer` IS a KindLayer delegate (blocking members carry
+ * lumber material) and is covered by the JoistsLayer case below.
  */
 import { describe, expect, it, beforeEach } from 'vitest';
 import ReactThreeTestRenderer from '@react-three/test-renderer';
@@ -27,6 +35,7 @@ import type { Group } from 'three';
 import { useDesignStore, useUiStore } from '../../../state';
 import { resetDesignStoreForTests } from '../../../state/design-store';
 
+import { BlocksLayer } from '../BlocksLayer';
 import { JoistsLayer } from '../JoistsLayer';
 
 function resetLayerVisibility(): void {
@@ -38,6 +47,8 @@ function resetLayerVisibility(): void {
       beams: true,
       posts: true,
       footings: true,
+      blocks: true,
+      blocking: true,
     },
   });
 }
@@ -95,6 +106,25 @@ describe('<KindLayer> — null-layout defensive access (Fix E)', () => {
     const renderer = await ReactThreeTestRenderer.create(<JoistsLayer />);
     const meshes = renderer.scene.findAllByType('Mesh');
     expect(meshes).toHaveLength(0);
+    await renderer.unmount();
+  });
+
+  // S22 pair-fix iter 2 — parallel coverage for the CUSTOM
+  // BlocksLayer, which has its own `?.members ?? EMPTY_MEMBERS`
+  // guard (not KindLayer's). See BlocksLayer.tsx for the guard
+  // and BlocksLayer.test.tsx for the identity-preserving version.
+  it('BlocksLayer renders an empty group when bundle.layout is null (S22)', async () => {
+    const cur = useDesignStore.getState().bundle;
+    useDesignStore.setState({
+      bundle: { ...cur, layout: null } as unknown as typeof cur,
+    });
+    const renderer = await ReactThreeTestRenderer.create(<BlocksLayer />);
+    const groups = renderer.scene.findAllByType('Group');
+    expect(groups.length).toBeGreaterThanOrEqual(1);
+    const meshes = renderer.scene.findAllByType('Mesh');
+    expect(meshes).toHaveLength(0);
+    const group = groups[0]!.instance as Group;
+    expect(group.visible).toBe(true);
     await renderer.unmount();
   });
 });

@@ -11,10 +11,19 @@
 import type { CameraPreset, LayerVisibility } from '../state';
 
 /**
- * The six layer keys + their user-facing labels. Order matches
- * the ticket §2 field listing (environment → decking → framing →
- * footings). Extracted as a module constant so tests can walk
- * the list without duplicating the copy.
+ * The six MVP layer keys with wired UI toggles — plus their
+ * user-facing labels. Order matches the ticket §2 field listing
+ * (environment → decking → framing → footings). Extracted as a
+ * module constant so tests can walk the list without duplicating
+ * the copy.
+ *
+ * ## S22 note — `blocks` + `blocking` NOT included yet
+ *
+ * S22 (Epic 2 / FR-029) added `blocks` and `blocking` to the
+ * `LayerVisibility` union and wired their VISIBILITY at the scene
+ * layer, but their toggle CHECKBOXES land in S26 (LayerTogglePanel
+ * UI). Once S26 lands, add two more rows here — the panel iterates
+ * `LAYER_ITEMS` to render one row per key.
  */
 export const LAYER_ITEMS: readonly {
   key: keyof LayerVisibility;

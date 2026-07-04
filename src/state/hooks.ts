@@ -20,7 +20,7 @@
  *   - `useDesignStatus()`   → the `{ status, lastError }` tuple.
  *   - `useUiUnits()`        → the unit-display preference.
  *   - `useCameraPreset()`   → the current camera preset.
- *   - `useLayerVisibility()`→ the full six-key layer map.
+ *   - `useLayerVisibility()`→ the full eight-key layer map.
  *   - `useStorageBanner()`  → the AC6/AC9 banner code (or null).
  *
  * The `useDesign*` / `useUi*` prefix mirrors the two-store split so

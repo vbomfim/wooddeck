@@ -47,7 +47,14 @@
  * (`domain/model.ts` "LAYOUT COORDINATE FRAME").
  */
 
-import type { Layout, LayoutMember, LumberMemberMaterial, MemberKind, Warning } from '../../../domain/model';
+import type {
+  BlockMemberMaterial,
+  Layout,
+  LayoutMember,
+  LumberMemberMaterial,
+  MemberKind,
+  Warning,
+} from '../../../domain/model';
 
 /**
  * Default material — used when a fixture caller does not care about
@@ -78,6 +85,22 @@ export const FIXTURE_MATERIAL_COMPOSITE: LumberMemberMaterial = Object.freeze({
   nominal: '5/4x6',
   species: 'Composite',
   grade: 'NA',
+});
+
+/**
+ * S22 — block-member material fixtures. Blocks carry a `kind:'block'`
+ * material tag with a `productId` (see `MemberMaterialRef` in
+ * `domain/model.ts`). Two ids ship in the MVP catalog; both are
+ * frozen for reuse across `BlocksLayer` tests.
+ */
+export const FIXTURE_MATERIAL_OLDCASTLE: BlockMemberMaterial = Object.freeze({
+  kind: 'block',
+  productId: 'oldcastle-11x11x7',
+});
+
+export const FIXTURE_MATERIAL_TUFFBLOCK: BlockMemberMaterial = Object.freeze({
+  kind: 'block',
+  productId: 'tuffblock-12x12x4',
 });
 
 /**
