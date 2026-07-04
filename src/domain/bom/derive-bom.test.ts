@@ -159,10 +159,11 @@ function makeLayout(members: LayoutMember[]): Layout {
 // ---------------------------------------------------------------------------
 
 describe('deriveBom — return shape', () => {
-  it('returns { lumber: [], foundation: [], generatedAt: string } for empty layout', () => {
+  it('returns { lumber: [], foundation: [], footings: [], generatedAt: string } for empty layout', () => {
     const result = deriveBom(makeLayout([]), {});
     expect(result.lumber).toEqual([]);
     expect(result.foundation).toEqual([]);
+    expect(result.footings).toEqual([]);
     expect(typeof result.generatedAt).toBe('string');
     // ISO-8601 formatted.
     expect(result.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
@@ -360,45 +361,90 @@ describe('deriveBom — mixed lumber + block layout', () => {
 // NEITHER the lumber nor the foundation section).
 // ---------------------------------------------------------------------------
 
-describe('deriveBom — footing-kind members are skipped', () => {
-  it('footing members do not appear in lumber pack (documented MVP quirk)', () => {
-    // The elevated-deck layout engine (`post-layout.ts` ~line 175)
-    // stamps footings with `material.kind='lumber'` as a placeholder
-    // because `LayoutMember.material` is required. Footings are
-    // actually concrete — S21's BomResult has no "footing" section,
-    // so a footing member must be SKIPPED. If a future refactor
-    // drops the skip, the lumber pack would incorrectly count
-    // footings AND `getMemberLengthMm` would throw at runtime.
+// ---------------------------------------------------------------------------
+// Footing-kind members are COUNTED into a dedicated `footings` section
+// on `BomResult` (FIX 2 review-gate). Elevated decks would otherwise
+// silently drop the concrete-pier count → shopping list is incomplete.
+// Footings are NOT lumber (do NOT pack into the cut-list) and NOT
+// catalog blocks (no `FoundationProductId`) — they get a dimension-
+// derived synthetic displayName like "Concrete footing 300 × 300 mm".
+// ---------------------------------------------------------------------------
+
+describe('deriveBom — footing-kind members are counted (FIX 2)', () => {
+  it('folds footing members into result.footings (grouped by dimensions)', () => {
     const members: LayoutMember[] = [
       makeMember('joist-0', 'joist', PT_2x8, 3000),
-      // Footing with lumber material (MVP producer quirk):
+      // Two footings at the standard 300×300×300 mm MVP dims:
       makeMember('footing-0', 'footing', PT_2x8, 0),
       makeMember('footing-1', 'footing', PT_2x8, 0),
     ];
     const result = deriveBom(makeLayout(members), {});
-    // Only the joist is packed — footings are absent from the pack.
+    // Joist packs as lumber (unchanged).
     expect(result.lumber).toHaveLength(1);
-    const packedIds = result.lumber[0]!.pack.stockBoards.flatMap((b) =>
-      b.cuts.map((c) => c.memberId),
-    );
-    expect(packedIds).toEqual(['joist-0']);
-    // Footings are ALSO absent from the foundation section (that
-    // section is for `material.kind='block'` products only).
+    // Foundation section is EMPTY (that section is for catalog-
+    // block products only — no `productId` on footings).
     expect(result.foundation).toEqual([]);
+    // Footings COUNTED into result.footings.
+    expect(result.footings).toHaveLength(1);
+    const [only] = result.footings;
+    expect(only!.count).toBe(2);
+    expect(only!.widthMm).toBe(400);
+    expect(only!.depthMm).toBe(300);
+    // Display name carries the dimensions and the material hint —
+    // safe to render as-is in the BOM UI.
+    expect(only!.displayName).toMatch(/concrete/i);
+    expect(only!.displayName).toContain('400');
+    expect(only!.displayName).toContain('300');
   });
 
-  it('a layout of only footings yields an empty BomResult', () => {
-    // The default test deck has posts + footings; if footings were
-    // counted as lumber, a footing-only fixture would yield a
-    // lumber section — this test locks in the empty-result
-    // contract.
+  it('groups footings with DIFFERENT dimensions into separate entries', () => {
+    // makeMember with kind='footing' sets 400×300×400 by default.
+    // We synthesize a differently-sized footing directly to exercise
+    // the grouping. Locks in that the (widthMm, depthMm) tuple is
+    // the group key.
+    const stdFooting = makeMember('footing-std-0', 'footing', PT_2x8, 0);
+    const bigFooting: LayoutMember = {
+      id: 'footing-big-0',
+      kind: 'footing',
+      material: { kind: 'lumber', nominal: '2x8', species: 'PT', grade: 'No2' },
+      position: { x: 0, y: 0, z: 0 },
+      // Bigger footprint, shallower — a hypothetical alt spec.
+      size: { x: 600, y: 200, z: 600 },
+      rotation: { x: 0, y: 0, z: 0 },
+    };
+    const result = deriveBom(makeLayout([stdFooting, bigFooting]), {});
+    expect(result.footings).toHaveLength(2);
+    // Deterministic sort by (widthMm asc, depthMm asc).
+    expect(result.footings[0]!.widthMm).toBe(400);
+    expect(result.footings[1]!.widthMm).toBe(600);
+  });
+
+  it('a layout of only footings yields ONLY a footings section', () => {
+    // Regression: footings alone must NOT create a phantom lumber
+    // section, and MUST populate the footings section (not the
+    // foundation section, which is catalog-block-only).
     const members: LayoutMember[] = [
       makeMember('footing-0', 'footing', PT_2x8, 0),
       makeMember('footing-1', 'footing', PT_2x8, 0),
+      makeMember('footing-2', 'footing', PT_2x8, 0),
     ];
     const result = deriveBom(makeLayout(members), {});
     expect(result.lumber).toEqual([]);
     expect(result.foundation).toEqual([]);
+    expect(result.footings).toHaveLength(1);
+    expect(result.footings[0]!.count).toBe(3);
+  });
+
+  it('a floating-blocks layout keeps foundation and yields NO footings', () => {
+    // Contra-positive check: block members go to `foundation`; the
+    // `footings` section stays empty for floating designs.
+    const members: LayoutMember[] = [
+      makeMember('block-0', 'block', TUFFBLOCK, 0),
+      makeMember('block-1', 'block', TUFFBLOCK, 0),
+    ];
+    const result = deriveBom(makeLayout(members), {});
+    expect(result.foundation).toHaveLength(1);
+    expect(result.footings).toEqual([]);
   });
 });
 
@@ -436,6 +482,70 @@ describe('deriveBom — kerfMm option', () => {
     const noKerf = deriveBom(layout, { kerfMm: 0 });
     expect(noKerf.lumber[0]!.pack.totalStockBoards).toBe(1);
     expect(noKerf.lumber[0]!.pack.stockBoards[0]!.stockLengthMm).toBe(ftMm(8));
+  });
+
+  // ---------- FIX 1 (review-gate) — kerf validation propagates -----------
+
+  it('propagates the packer error when kerfMm = NaN', () => {
+    const members = [makeMember('m-0', 'joist', PT_2x8, 3000)];
+    expect(() => deriveBom(makeLayout(members), { kerfMm: Number.NaN })).toThrow(
+      /kerf/i,
+    );
+  });
+
+  it('propagates the packer error when kerfMm = -1', () => {
+    const members = [makeMember('m-0', 'joist', PT_2x8, 3000)];
+    expect(() => deriveBom(makeLayout(members), { kerfMm: -1 })).toThrow(/kerf/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX 6 (review-gate) — oversize cut throw + cross-kind SKU merge
+// ---------------------------------------------------------------------------
+
+describe('deriveBom — oversize cut throws (QA #6)', () => {
+  it('a 25 ft beam on a SKU whose max stock is 20 ft throws /exceeds/', () => {
+    // 2×8 PT No.2 tops out at 20 ft (see materials-catalog).
+    // A 25 ft cut cannot fit on ANY stock in the SKU → the packer's
+    // AC5 check rejects it. deriveBom must NOT swallow this — it
+    // must propagate so the UI can surface an actionable "cut too
+    // long" hint. Regression: a silently-passing oversize cut would
+    // yield a phantom "0 boards" pack.
+    const members = [makeMember('big-beam', 'beam', PT_2x8, ftMm(25))];
+    expect(() => deriveBom(makeLayout(members), {})).toThrow(/exceeds/i);
+  });
+});
+
+describe('deriveBom — cross-kind SKU merge (QA #7)', () => {
+  it('decking + blocking sharing one SKU (5/4×6 PT) fold into ONE lumber pack', () => {
+    // Both member kinds carry `material.kind='lumber'` with the
+    // same (nominal, species, grade) → same SKU key → same
+    // lumber section → cuts pooled into ONE packer call. Locks
+    // in the behavior that grouping is by SKU, NOT by member
+    // kind. Regression: if grouping ever accidentally splits on
+    // kind, we'd emit two separate 5/4×6 rows and over-count
+    // stock boards.
+    const members = [
+      makeMember('board-0', 'board', PT_5_4x6, ftMm(12)),
+      makeMember('board-1', 'board', PT_5_4x6, ftMm(12)),
+      // Blocking pieces of the SAME SKU — used for edge nailers
+      // under decking joints.
+      makeMember('blk-0', 'blocking', PT_5_4x6, inMm(14)),
+      makeMember('blk-1', 'blocking', PT_5_4x6, inMm(14)),
+    ];
+    const result = deriveBom(makeLayout(members), {});
+    // ONE lumber section (both kinds share the SKU).
+    expect(result.lumber).toHaveLength(1);
+    const [section] = result.lumber;
+    expect(section!.sku).toContain('5/4x6');
+    // The pack sees all 4 cuts.
+    const allCuts = section!.pack.stockBoards.flatMap((b) => b.cuts);
+    expect(allCuts).toHaveLength(4);
+    // Cross-kind pooling: at least one board carries both a
+    // long board cut AND a short blocking cut.
+    const memberIds = new Set(allCuts.map((c) => c.memberId));
+    expect(memberIds.has('board-0')).toBe(true);
+    expect(memberIds.has('blk-0')).toBe(true);
   });
 });
 

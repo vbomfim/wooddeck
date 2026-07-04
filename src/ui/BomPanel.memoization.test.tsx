@@ -28,7 +28,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render } from '@testing-library/react';
 
 // Wrap the real function with a spy so BomPanel still gets a
-// correct BomLine[] AND we can count how many times it was
+// correct BomResult AND we can count how many times it was
 // called. `vi.hoisted` is not needed here — `vi.mock` factory
 // runs before the import.
 vi.mock('../domain/bom/derive-bom', async () => {

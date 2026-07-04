@@ -233,11 +233,9 @@ function keyFor(nominal: LumberNominal, species: Species, grade: Grade): string 
 function buildMaterial(spec: CatalogSpec): Material {
   const dressed = DRESSED_INCHES[spec.nominal];
   const stockFeet = STOCK_FEET_BY_NOMINAL[spec.nominal];
-  // Convert once at build time, freeze the array, and share the same
-  // frozen reference across every species/grade sharing the nominal.
-  // The catalog is module-scope and only builds this list once per
-  // record so a lightweight per-record freeze is fine (kept per-
-  // record so a future per-species stock list has no migration).
+  // Convert once at build time, freeze the array per record. Kept
+  // per-record (not shared across species/grade with the same
+  // nominal) so a future per-species stock list has no migration.
   const stockLengthsMm: readonly number[] = Object.freeze(stockFeet.map(ftToMm));
   const material: Material = Object.freeze({
     nominal: spec.nominal,

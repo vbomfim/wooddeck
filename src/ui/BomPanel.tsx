@@ -76,7 +76,8 @@ export function BomPanel(): JSX.Element {
   // options → kerfMm defaults to 3 mm inside deriveBom.
   const bom: BomResult = useMemo(() => deriveBom(layout, {}), [layout]);
 
-  const isEmpty = bom.lumber.length === 0 && bom.foundation.length === 0;
+  const isEmpty =
+    bom.lumber.length === 0 && bom.foundation.length === 0 && bom.footings.length === 0;
 
   return (
     <section aria-labelledby="wd-bom-panel__title" className="wd-bom-panel">
@@ -93,6 +94,9 @@ export function BomPanel(): JSX.Element {
           )}
           {bom.foundation.length > 0 && (
             <FoundationTable bom={bom} />
+          )}
+          {bom.footings.length > 0 && (
+            <FootingsTable bom={bom} />
           )}
         </>
       )}
@@ -139,13 +143,24 @@ function LumberTable({ bom, units }: { bom: BomResult; units: 'imperial' | 'metr
         <tbody>
           {bom.lumber.map((section) => {
             // The pack uses ONE stock length per pack (ticket §16).
-            // First board's stockLengthMm is the pack's stock length;
-            // fall back to the shortest available if the pack is
-            // somehow empty (won't happen in practice — a lumber
-            // section only exists when at least one member fed it).
-            const stockLengthMm =
-              section.pack.stockBoards[0]?.stockLengthMm ??
-              section.stockLengthsAvailableMm[0]!;
+            // First board's stockLengthMm is the pack's stock length.
+            // Invariant: a lumber SECTION only exists when at least
+            // one member fed cuts into the packer → at least one
+            // board is always packed → `stockBoards[0]` exists.
+            // (Enforced in `deriveBom` — every group has ≥1 cut,
+            // and `packCutList` throws on empty `cuts`.) The old
+            // fallback to `stockLengthsAvailableMm[0]` was dead
+            // code and hid this invariant; asserting is clearer.
+            const [firstBoard] = section.pack.stockBoards;
+            /* istanbul ignore next -- invariant: lumber sections always have ≥1 stock board */
+            if (firstBoard === undefined) {
+              throw new Error(
+                `BomPanel: lumber section '${section.sku}' has no packed ` +
+                  `boards — invariant violation. deriveBom should never ` +
+                  `emit an empty pack for a SKU with cuts.`,
+              );
+            }
+            const stockLengthMm = firstBoard.stockLengthMm;
             return (
               <tr key={section.sku}>
                 <th scope="row">{section.sku}</th>
@@ -196,6 +211,60 @@ function FoundationTable({ bom }: { bom: BomResult }): JSX.Element {
               <td>{section.count}</td>
             </tr>
           ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Footings sub-table (FIX 2 — one row per (widthMm × depthMm) group)
+// ---------------------------------------------------------------------------
+
+/**
+ * One row per concrete-footing dimension group (FIX 2 review-gate).
+ * Columns:
+ *
+ *   - Footing (the synthetic `displayName` — dimension-derived,
+ *     safe to render as-is) — <th scope="row">
+ *   - Count (integer number of footings to pour)
+ *
+ * Footings are POURED CONCRETE — they never enter the cut-list
+ * packer (they have no stock length; the volume calculation is
+ * out of scope for S21). S24 may enrich this with a concrete-
+ * yardage estimate. Original S21 silently dropped footings from
+ * the BOM entirely; the review gate flagged that as a HIGH-
+ * priority correctness bug.
+ */
+function FootingsTable({ bom }: { bom: BomResult }): JSX.Element {
+  return (
+    <section
+      aria-labelledby="wd-bom-panel__footings-title"
+      className="wd-bom-panel__section wd-bom-panel__section--footings"
+    >
+      <h3 id="wd-bom-panel__footings-title">Footings</h3>
+      <table className="wd-bom-panel__table wd-bom-panel__table--footings">
+        <caption className="wd-bom-panel__caption">
+          Concrete footings to pour (dimensions from the foundation spec).
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Footing</th>
+            <th scope="col">Count</th>
+          </tr>
+        </thead>
+        <tbody>
+          {bom.footings.map((section) => {
+            // Group key `(widthMm, depthMm)` is stable across
+            // deriveBom calls — safe as a React key.
+            const key = `${String(section.widthMm)}x${String(section.depthMm)}`;
+            return (
+              <tr key={key}>
+                <th scope="row">{section.displayName}</th>
+                <td>{section.count}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </section>

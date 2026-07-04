@@ -129,10 +129,36 @@ export interface BomSection_Foundation {
 }
 
 /**
+ * A concrete-footing group in the BOM (FIX 2 review-gate). Footings
+ * are the poured-concrete piers under an elevated deck's posts —
+ * NEITHER lumber (cut) NOR catalog blocks (they have no
+ * `FoundationProductId`; they're a custom pour from the
+ * `FoundationSpec.footing` dimensions). Grouped by (widthMm,
+ * depthMm) so a future spec allowing per-post footing overrides
+ * would emit multiple rows.
+ *
+ * `displayName` is a dimension-derived synthetic label like
+ * `"Concrete footing 300 × 300 mm (300 mm deep)"` — safe to render
+ * as-is in the UI (no catalog lookup).
+ *
+ * Without this section, an elevated deck's BOM would silently omit
+ * the concrete pier count → shopping list is incomplete. Original
+ * S21 landed with `footing`-kind members skipped entirely; the
+ * review gate flagged that as a HIGH-priority correctness bug.
+ */
+export interface BomSection_Footing {
+  readonly widthMm: Mm;
+  readonly depthMm: Mm;
+  readonly count: number;
+  readonly displayName: string;
+}
+
+/**
  * The BOM result. `lumber` sections are sorted by `sku` ascending;
- * `foundation` sections are sorted by `productId` ascending — both
- * canonical so the JSON output is byte-for-byte stable given the
- * same input (aside from `generatedAt`).
+ * `foundation` sections are sorted by `productId` ascending;
+ * `footings` sections are sorted by (widthMm asc, depthMm asc).
+ * All three orderings are canonical so the JSON output is byte-
+ * for-byte stable given the same input (aside from `generatedAt`).
  *
  * `generatedAt` is an ISO-8601 timestamp captured at derivation
  * time. Display-only — do NOT rely on it for cache-invalidation
@@ -141,6 +167,7 @@ export interface BomSection_Foundation {
 export interface BomResult {
   readonly lumber: readonly BomSection_Lumber[];
   readonly foundation: readonly BomSection_Foundation[];
+  readonly footings: readonly BomSection_Footing[];
   readonly generatedAt: string;
 }
 
@@ -187,24 +214,39 @@ export function deriveBom(layout: Layout, options: DeriveBomOptions = {}): BomRe
   const kerfMm = options.kerfMm ?? DEFAULT_KERF_MM;
 
   // Partition members: lumber → per-SKU grouped cuts; block → per-
-  // productId counts. Anything else on `member.material.kind` is a
-  // widening surprise and throws.
+  // productId counts; footing → per-(widthMm × depthMm) counts.
+  // Anything else on `member.material.kind` is a widening surprise
+  // and throws (exhaustive switch below).
   const lumberGroups = new Map<string, LumberGroup>();
   const blockGroups = new Map<FoundationProductId, number>();
+  const footingGroups = new Map<string, FootingGroup>();
 
   for (const member of layout.members) {
-    // ---- Skip footing-kind members entirely ----------------------------
-    // MVP quirk: the layout engine (`domain/layout/post-layout.ts`
-    // ~line 175) stamps footings with `material.kind='lumber'` as a
-    // placeholder because `LayoutMember.material` is required — a
-    // footing is actually CONCRETE (poured or precast). The old
-    // BOM (S14) tolerated this by omitting `eachLengthMm` on
-    // footing rows. S21's BomResult has no "footing" section (only
-    // `lumber` and `foundation`), so a footing member belongs in
-    // NEITHER — skip. When the layout engine gains a proper
-    // concrete-footing material variant (post-MVP), this branch
-    // will be revisited (probably a third `BomSection_Concrete`).
-    if (member.kind === 'footing') continue;
+    // ---- Fold footing-kind members into `footings` (FIX 2) -------------
+    // The layout engine (`domain/layout/post-layout.ts` ~line 175)
+    // stamps footings with `material.kind='lumber'` as a placeholder
+    // because `LayoutMember.material` is required — a footing is
+    // actually CONCRETE (poured in place from the `FoundationSpec`
+    // dimensions). We SKIP the material switch below (footings are
+    // neither lumber nor a catalog-block product) and route them
+    // into a dedicated group keyed by (widthMm, depthMm). The x
+    // axis is width, y is depth (see `layout/y-stack.ts` — footings
+    // sit below ground, y=−depth). Original S21 skipped footings
+    // entirely; the review gate flagged the resulting silent-drop
+    // as a HIGH-priority correctness bug (elevated deck's shopping
+    // list would omit the concrete piers).
+    if (member.kind === 'footing') {
+      const widthMm = member.size.x;
+      const depthMm = member.size.y;
+      const key = footingGroupKey(widthMm, depthMm);
+      const existing = footingGroups.get(key);
+      if (existing === undefined) {
+        footingGroups.set(key, { widthMm, depthMm, count: 1 });
+      } else {
+        existing.count += 1;
+      }
+      continue;
+    }
 
     switch (member.material.kind) {
       case 'lumber': {
@@ -235,7 +277,9 @@ export function deriveBom(layout: Layout, options: DeriveBomOptions = {}): BomRe
         // throw is belt-and-suspenders (matches derive-bom's prior
         // fail-loud discipline; see the S17 pair-fix on the
         // previous implementation).
+        /* istanbul ignore next -- exhaustive guard; unreachable when the union stays closed */
         const _exhaustive: never = member.material;
+        /* istanbul ignore next -- same */
         throw new Error(
           `deriveBom: unexpected material.kind on member '${member.id}': ` +
             `${String((_exhaustive as { kind: string }).kind)}. Add a ` +
@@ -283,9 +327,27 @@ export function deriveBom(layout: Layout, options: DeriveBomOptions = {}): BomRe
     a.productId < b.productId ? -1 : a.productId > b.productId ? 1 : 0,
   );
 
+  // ---- Build footing sections (dimension-derived displayName + sort) --
+  const footings: BomSection_Footing[] = [];
+  for (const group of footingGroups.values()) {
+    footings.push(
+      Object.freeze({
+        widthMm: group.widthMm,
+        depthMm: group.depthMm,
+        count: group.count,
+        displayName: formatFootingDisplayName(group.widthMm, group.depthMm),
+      }),
+    );
+  }
+  footings.sort((a, b) => {
+    if (a.widthMm !== b.widthMm) return a.widthMm - b.widthMm;
+    return a.depthMm - b.depthMm;
+  });
+
   return Object.freeze({
     lumber: Object.freeze(lumber),
     foundation: Object.freeze(foundation),
+    footings: Object.freeze(footings),
     generatedAt: new Date().toISOString(),
   });
 }
@@ -326,9 +388,13 @@ function formatSku(nominal: LumberNominal, species: Species, grade: Grade): stri
 /**
  * Compute the "cut length" for a lumber member — the extent along
  * the member's OWN axis in millimeters. See module header for the
- * axis-per-kind convention. Throws when called on a footing (no
- * meaningful linear extent) or on any newly-added kind — a future
- * widening of `MemberKind` fails LOUDLY, not silently.
+ * axis-per-kind convention.
+ *
+ * Throws for `footing` (skipped by the caller before dispatch, so
+ * this branch is unreachable in normal flow) and for `block`
+ * (blocks are counted via the foundation section — a block-kind
+ * member with lumber material is a producer bug). The exhaustive
+ * `default` traps a future widening of `MemberKind`.
  */
 function getMemberLengthMm(member: LayoutMember): Mm {
   switch (member.kind) {
@@ -348,20 +414,23 @@ function getMemberLengthMm(member: LayoutMember): Mm {
       // joists — the "length" is the piece's x-run (parallel to beams).
       return member.size.x;
     case 'footing':
-      // Unreachable at runtime — the caller skips footing-kind
-      // members before dispatching here (see the `if (member.kind
-      // === 'footing') continue;` guard in `deriveBom`). Kept as a
-      // fail-loud throw in case a future refactor drops the guard.
+      // Unreachable at runtime — the caller folds footing-kind
+      // members into the `footings` section BEFORE dispatching
+      // here (see the `if (member.kind === 'footing')` branch in
+      // `deriveBom`). Kept as a fail-loud throw in case a future
+      // refactor drops the guard. Marked `istanbul ignore` because
+      // covering it would require deleting the caller-side guard.
+      /* istanbul ignore next -- defensive; caller guards this path */
       throw new Error(
         `deriveBom.getMemberLengthMm: member '${member.id}' has kind='footing'; ` +
-          `the caller must skip footing members before dispatching. This is ` +
-          `a bug — footings have no linear extent and belong in neither the ` +
-          `lumber nor the foundation BOM section.`,
+          `the caller must fold footing members into result.footings before ` +
+          `dispatching. This is a bug.`,
       );
     case 'block':
       // Should never be called — the caller partitions on
       // material.kind first. Defensive throw for a bug where a
       // block-kind member somehow carries lumber material.
+      /* istanbul ignore next -- defensive; caller guards this path */
       throw new Error(
         `deriveBom.getMemberLengthMm: member '${member.id}' has kind='block' ` +
           `— blocks are counted via the foundation section, not the ` +
@@ -370,7 +439,9 @@ function getMemberLengthMm(member: LayoutMember): Mm {
     default: {
       // Exhaustive over MemberKind — a new kind fails-compile HERE
       // until a case is added.
+      /* istanbul ignore next -- exhaustive guard; unreachable when the union stays closed */
       const _exhaustive: never = member.kind;
+      /* istanbul ignore next -- same */
       throw new Error(
         `deriveBom.getMemberLengthMm: unexpected member.kind ` +
           `"${String(_exhaustive)}"; add a case to the switch when adding ` +
@@ -378,4 +449,44 @@ function getMemberLengthMm(member: LayoutMember): Mm {
       );
     }
   }
+}
+
+/**
+ * Mutable accumulator for footing groups (FIX 2). Group key is
+ * `(widthMm, depthMm)` — the two dimensions that vary per
+ * `FoundationSpec.footing`. `size.x` (footprint width) and
+ * `size.y` (below-ground depth) come from `post-layout.ts`
+ * ~line 189.
+ */
+interface FootingGroup {
+  widthMm: Mm;
+  depthMm: Mm;
+  count: number;
+}
+
+/**
+ * Canonical footing group key. Two footings with the same width
+ * and depth fold into ONE row.
+ */
+function footingGroupKey(widthMm: Mm, depthMm: Mm): string {
+  return `${String(widthMm)}x${String(depthMm)}`;
+}
+
+/**
+ * Human-readable display name for a concrete footing. Format:
+ * `"Concrete footing 400 × 400 mm footprint × 300 mm deep"`. Uses
+ * the width for BOTH footprint dimensions because
+ * `FoundationSpec.footing` is a square footprint (a single
+ * `widthMm` in the spec — see model.ts) and there is no separate
+ * "length" dimension. `depthMm` is the below-grade depth.
+ *
+ * The BOM UI renders this string as-is (no additional formatting).
+ * A future post-MVP feature (regional unit preferences, concrete-
+ * yardage calculator) can enrich it.
+ */
+function formatFootingDisplayName(widthMm: Mm, depthMm: Mm): string {
+  return (
+    `Concrete footing ${String(widthMm)} × ${String(widthMm)} mm footprint ` +
+    `× ${String(depthMm)} mm deep`
+  );
 }

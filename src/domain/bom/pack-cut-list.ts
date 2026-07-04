@@ -124,19 +124,41 @@ export interface PackResult {
 /**
  * Pack a cut-list into stock boards using First-Fit-Decreasing.
  *
- * @param input.cuts             The cuts to pack. May be empty.
+ * @param input.cuts             The cuts to pack. May be empty. Each
+ *                                `cut.lengthMm` MUST be a finite,
+ *                                strictly-positive number (zero is
+ *                                rejected — a zero-length cut is a
+ *                                producer bug; see FIX 1 below).
  * @param input.stockLengthsMm   Available stock lengths, sorted or not
  *                                (the function sorts a defensive copy
- *                                internally). Must be non-empty.
+ *                                internally). Must be non-empty and
+ *                                every entry must be a finite,
+ *                                strictly-positive number.
  * @param input.kerfMm           Blade-width lost per cut. Typically 3 mm
- *                                (default in `deriveBom`). Must be ≥ 0.
+ *                                (the `deriveBom` default; `packCutList`
+ *                                itself has NO default — `kerfMm` is a
+ *                                required argument). Must be a finite
+ *                                non-negative number (0 is permitted —
+ *                                idealized kerf-free packing).
  *
- * @throws {Error} when `stockLengthsMm` is empty, or when any cut's
- *   `lengthMm + kerfMm` exceeds every stock length. The error message
- *   names the offending member id, the offending cut length, and the
- *   max available stock length so the UI (S24) can surface a
- *   contextful "cut too long — choose longer stock or split the
- *   member" hint.
+ * @throws {Error} on any trust-boundary violation (FIX 1):
+ *   - `kerfMm` is non-finite or negative — throws `/kerf/` message.
+ *   - `stockLengthsMm` is empty, or any entry is non-finite / ≤ 0 —
+ *      throws `/stock/i` message (empty vs invalid distinguished by
+ *      text).
+ *   - Any `cut.lengthMm` is non-finite or ≤ 0 — throws naming the
+ *     offending `memberId` and the offending value.
+ *   - Any `cut.lengthMm` exceeds the maximum stock length — throws
+ *     naming the offender AND the max available stock length so the
+ *     UI (S24) can surface a contextful "cut too long — choose
+ *     longer stock or split the member" hint. The check uses the
+ *     RAW `lengthMm` (not `lengthMm + kerfMm`) because the first
+ *     cut on a bin pays no preceding kerf — a cut of exactly the
+ *     max stock length is a valid single-cut board.
+ *   - The internal FFD loop fails to make progress (defense-in-
+ *     depth: a bug that let an unplaceable cut past the pre-checks
+ *     would otherwise hang the process). Throws an invariant
+ *     error naming the stuck cut.
  */
 export function packCutList(input: {
   readonly cuts: readonly Cut[];
@@ -146,7 +168,14 @@ export function packCutList(input: {
   const { cuts, stockLengthsMm, kerfMm } = input;
 
   // ---- Validate inputs (fail-loud at the trust boundary) ------------------
-  if (kerfMm < 0 || !Number.isFinite(kerfMm)) {
+  // FIX 1 (review-gate): a `NaN` cut would hang the FFD loop
+  // forever because `NaN <= remaining` is false → nothing places
+  // → the outer `while (placedCount < orderedCuts.length)` never
+  // terminates. A zero-length cut would spin forever for the same
+  // reason (never fits when kerf > 0, but a 0-length cut on a 0-
+  // kerf pack would "place" infinitely without advancing offcut).
+  // Reject at the boundary with a message naming the offender.
+  if (!Number.isFinite(kerfMm) || kerfMm < 0) {
     throw new Error(
       `packCutList: kerfMm must be a non-negative finite number; got ${String(kerfMm)}.`,
     );
@@ -161,6 +190,32 @@ export function packCutList(input: {
       'packCutList: stockLengthsMm is empty — the catalog must supply ' +
         'at least one stock-board length per SKU.',
     );
+  }
+  // FIX 1: every stock length must be a positive finite number.
+  // A `NaN` / `Infinity` / 0 / negative entry would corrupt the
+  // sort (NaN comparisons are inconsistent) or the "smallest that
+  // fits" scan (Infinity always fits → could mask a real problem).
+  for (const s of stockLengthsMm) {
+    if (!Number.isFinite(s) || s <= 0) {
+      throw new Error(
+        `packCutList: every stockLengthsMm entry must be a positive finite ` +
+          `number; got ${String(s)} in [${stockLengthsMm.map((v) => String(v)).join(', ')}].`,
+      );
+    }
+  }
+  // FIX 1: every cut length must be a positive finite number.
+  // Iterate in caller order so the error message names an offender
+  // deterministically (helps debugging when multiple bad values
+  // slip through the same producer).
+  for (const c of cuts) {
+    if (!Number.isFinite(c.lengthMm) || c.lengthMm <= 0) {
+      throw new Error(
+        `packCutList: cut '${c.memberId}' has invalid lengthMm=${String(c.lengthMm)} ` +
+          `— every cut length must be a positive finite number (NaN, Infinity, 0, ` +
+          `and negative values are rejected at the trust boundary to prevent ` +
+          `non-terminating pack loops or corrupt accounting).`,
+      );
+    }
   }
 
   // Defensive-copy the stock list (input might be a frozen catalog
@@ -179,7 +234,7 @@ export function packCutList(input: {
   // error message names the actual offender when multiple cuts
   // exceed the max stock length. The first cut in a bin does NOT
   // pay a preceding kerf, so the check is against `lengthMm` alone
-  // (not `lengthMm + kerfMm`) — a cut equal to the max stock is
+  // (not `lengthMm + kerfMm`) — a cut of exactly the max stock is
   // permissible (single-cut board, offcut = 0).
   for (const c of orderedCuts) {
     if (c.lengthMm > maxStockMm) {
@@ -204,8 +259,9 @@ export function packCutList(input: {
   }
   const packStockLengthMm = smallestStockThatFits(stocksAsc, longestCutMm);
   // The AC5 pre-check above guarantees this is non-null.
-  // istanbul ignore next — defensive throw, never hit at runtime
+  /* istanbul ignore next -- defensive: pre-check accepted the longest cut */
   if (packStockLengthMm === null) {
+    /* istanbul ignore next -- same */
     throw new Error(
       `packCutList: internal invariant violated — no stock fits the ` +
         `longest cut ${String(longestCutMm)} after the pre-check accepted it.`,
@@ -223,6 +279,7 @@ export function packCutList(input: {
     // Open a new board of the FIXED pack stock length.
     const boardCuts: Cut[] = [];
     let remaining = packStockLengthMm;
+    const placedCountAtBoardStart = placedCount;
     for (let i = 0; i < orderedCuts.length; i++) {
       if (placed[i]) continue;
       const candidate = orderedCuts[i]!;
@@ -240,6 +297,27 @@ export function packCutList(input: {
         placed[i] = true;
         placedCount += 1;
       }
+    }
+    // FIX 1 (review-gate): no-progress guard. If the entire scan
+    // over unplaced cuts placed ZERO items on this new (empty)
+    // board, the outer `while` will loop forever. This is a
+    // defense-in-depth check: the input-validation and pre-checks
+    // above already reject every known cause (NaN cut, zero cut,
+    // oversize cut). A future refactor that introduces a fourth
+    // cause without updating the pre-check would surface HERE with
+    // an actionable diagnostic instead of a UI-thread hang. The
+    // guard fires only when the board began empty (remaining ==
+    // packStockLengthMm) and stayed empty (placedCount unchanged).
+    /* istanbul ignore next -- defense-in-depth; pre-checks make this unreachable */
+    if (placedCount === placedCountAtBoardStart) {
+      const stuck = orderedCuts.find((_c, i) => !placed[i])!;
+      throw new Error(
+        `packCutList: internal invariant violated — FFD loop made no ` +
+          `progress after opening a fresh ${String(packStockLengthMm)} mm board. ` +
+          `Stuck cut: '${stuck.memberId}' lengthMm=${String(stuck.lengthMm)}. ` +
+          `This indicates a bug in the pre-check (an unplaceable cut slipped ` +
+          `through validation).`,
+      );
     }
     boards.push(
       Object.freeze({

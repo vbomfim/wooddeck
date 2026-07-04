@@ -171,6 +171,46 @@ describe('<BomPanel /> — foundation section (S21 AC6)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Footings section (FIX 2 review-gate — elevated decks show footing count)
+// ---------------------------------------------------------------------------
+
+describe('<BomPanel /> — footings section (FIX 2)', () => {
+  it('renders a Footings h3 landmark when the layout has footing members', () => {
+    // The default store is an ELEVATED deck (`posts-on-footings`)
+    // → its layout includes `footing`-kind members. Regression
+    // against the S21 v1 bug where footings were silently
+    // dropped from the BOM (elevated deck's shopping list was
+    // incomplete).
+    render(<BomPanel />);
+    const footingsH3 = screen.getByRole('heading', { level: 3, name: /footings/i });
+    expect(footingsH3).toBeInTheDocument();
+  });
+
+  it('renders a footing row with a dimension-derived displayName + count', () => {
+    render(<BomPanel />);
+    // The footing row's <th scope="row"> contains the synthetic
+    // "Concrete footing …" displayName — safe to render as-is.
+    const rowHeader = screen.getByRole('rowheader', { name: /concrete footing/i });
+    expect(rowHeader).toBeInTheDocument();
+    // The default deck has ≥1 footing — count is a positive integer.
+    const row = rowHeader.closest('tr');
+    expect(row).not.toBeNull();
+    const countCell = row!.querySelector('td');
+    expect(countCell).not.toBeNull();
+    const count = Number(countCell!.textContent);
+    expect(Number.isInteger(count)).toBe(true);
+    expect(count).toBeGreaterThan(0);
+  });
+
+  it('does NOT render a Footings section for a floating (block-only) design', () => {
+    setLayout(makeFoundationOnlyLayout());
+    render(<BomPanel />);
+    const footingsH3 = screen.queryByRole('heading', { level: 3, name: /footings/i });
+    expect(footingsH3).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Empty layout
 // ---------------------------------------------------------------------------
 

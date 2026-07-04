@@ -84,12 +84,14 @@ const SELFTEST_DIRS = [
   resolve(ROOT, 'src', 'domain', '__selftest__'),
   resolve(ROOT, 'src', 'domain', 'spans', '__selftest__'),
   resolve(ROOT, 'src', 'domain', 'layout', '__selftest__'),
+  resolve(ROOT, 'src', 'domain', 'bom', '__selftest__'),
   resolve(ROOT, 'src', 'application', '__selftest__'),
   resolve(ROOT, 'src', 'persistence', '__selftest__'),
   resolve(ROOT, 'src', 'state', '__selftest__'),
   resolve(ROOT, 'src', 'scene', '__selftest__'),
   resolve(ROOT, 'src', 'scene', 'highlights', '__selftest__'),
   resolve(ROOT, 'src', 'ui', '__selftest__'),
+  resolve(ROOT, 'src', 'ui', 'bom', '__selftest__'),
   // Non-src fixture target dir — used by BLOCK-2g to prove the
   // persistence-non-src-imports rule fires when persistence reaches
   // outside `src/` (into `scripts/`, `docs/`, etc.).

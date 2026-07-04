@@ -338,11 +338,12 @@ describe('packCutList — edge cases', () => {
     expect(cutIds).toEqual(['c-0001', 'c-0002', 'c-0003', 'c-0000']);
   });
 
-  it('kerf defaults to 3 mm when omitted', () => {
-    // The interface documents `kerfMm` as required — this test
-    // asserts that ANY caller passing 3 explicitly gets the same
-    // result as the S21 default. Keeps the AC intent locked in even
-    // if a future refactor makes kerfMm optional.
+  it('kerf value 3 mm matches the AC3 baseline (locks in the S21 default)', () => {
+    // packCutList's `kerfMm` is REQUIRED — the 3 mm default lives
+    // in `deriveBom`, not here. This test locks in that a caller
+    // passing 3 explicitly gets the AC3 two-board result (test
+    // renamed under FIX 6.1 to remove the misleading "defaults"
+    // wording).
     const cuts = makeCuts(2, ftMm(8));
     const a = packCutList({
       cuts,
@@ -361,6 +362,148 @@ describe('packCutList — edge cases', () => {
     packCutList({ cuts, stockLengthsMm: stocks, kerfMm: DEFAULT_KERF_MM });
     expect(JSON.stringify(cuts)).toBe(cutsBefore);
     expect(JSON.stringify(stocks)).toBe(stocksBefore);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX 1 (review-gate) — trust-boundary input validation + non-termination
+// guard. The packer is called with cuts derived from user-supplied
+// layout data → every numeric input is a trust boundary. A `NaN` /
+// `Infinity` / zero / negative cut length that slipped through would
+// either hang the pack loop forever (the placement check `cut.lengthMm
+// <= remaining` never fires for `NaN`, so the outer `while` loops
+// indefinitely) or silently inflate the offcut/capacity accounting.
+// Fail LOUDLY at the boundary — see `pack-cut-list.ts` header.
+// ---------------------------------------------------------------------------
+
+describe('packCutList — FIX 1 trust-boundary input validation', () => {
+  it('rejects a cut with NaN lengthMm (naming the offender)', () => {
+    expect(() =>
+      packCutList({
+        cuts: [{ memberId: 'bad-nan', lengthMm: Number.NaN }],
+        stockLengthsMm: [ftMm(16)],
+        kerfMm: DEFAULT_KERF_MM,
+      }),
+    ).toThrow(/bad-nan/);
+  });
+
+  it('rejects a cut with Infinity lengthMm', () => {
+    expect(() =>
+      packCutList({
+        cuts: [{ memberId: 'bad-inf', lengthMm: Number.POSITIVE_INFINITY }],
+        stockLengthsMm: [ftMm(16)],
+        kerfMm: DEFAULT_KERF_MM,
+      }),
+    ).toThrow(/bad-inf/);
+  });
+
+  it('rejects a cut with lengthMm === 0 (fail-loud, matches project convention)', () => {
+    // Zero-length cut policy = THROW. A member with length 0 is a
+    // producer bug (layout engine should never emit one); silently
+    // "packing" it would buy a stock board for nothing.
+    expect(() =>
+      packCutList({
+        cuts: [{ memberId: 'bad-zero', lengthMm: 0 }],
+        stockLengthsMm: [ftMm(16)],
+        kerfMm: DEFAULT_KERF_MM,
+      }),
+    ).toThrow(/bad-zero/);
+  });
+
+  it('rejects a cut with negative lengthMm', () => {
+    expect(() =>
+      packCutList({
+        cuts: [{ memberId: 'bad-neg', lengthMm: -100 }],
+        stockLengthsMm: [ftMm(16)],
+        kerfMm: DEFAULT_KERF_MM,
+      }),
+    ).toThrow(/bad-neg/);
+  });
+
+  it('validates every cut (not just the first) — names the LAST offender', () => {
+    // Ensures the validation loop doesn't short-circuit on the
+    // first cut; every entry must be checked.
+    expect(() =>
+      packCutList({
+        cuts: [
+          { memberId: 'ok-0', lengthMm: 1000 },
+          { memberId: 'ok-1', lengthMm: 1500 },
+          { memberId: 'bad-last', lengthMm: -1 },
+        ],
+        stockLengthsMm: [ftMm(16)],
+        kerfMm: DEFAULT_KERF_MM,
+      }),
+    ).toThrow(/bad-last/);
+  });
+
+  it('rejects a stockLengthsMm entry that is NaN', () => {
+    expect(() =>
+      packCutList({
+        cuts: [{ memberId: 'c-0', lengthMm: 1000 }],
+        stockLengthsMm: [Number.NaN, ftMm(16)],
+        kerfMm: DEFAULT_KERF_MM,
+      }),
+    ).toThrow(/stock/i);
+  });
+
+  it('rejects a stockLengthsMm entry that is Infinity', () => {
+    expect(() =>
+      packCutList({
+        cuts: [{ memberId: 'c-0', lengthMm: 1000 }],
+        stockLengthsMm: [Number.POSITIVE_INFINITY],
+        kerfMm: DEFAULT_KERF_MM,
+      }),
+    ).toThrow(/stock/i);
+  });
+
+  it('rejects a stockLengthsMm entry that is 0', () => {
+    expect(() =>
+      packCutList({
+        cuts: [{ memberId: 'c-0', lengthMm: 1000 }],
+        stockLengthsMm: [0, ftMm(16)],
+        kerfMm: DEFAULT_KERF_MM,
+      }),
+    ).toThrow(/stock/i);
+  });
+
+  it('rejects a stockLengthsMm entry that is negative', () => {
+    expect(() =>
+      packCutList({
+        cuts: [{ memberId: 'c-0', lengthMm: 1000 }],
+        stockLengthsMm: [-1, ftMm(16)],
+        kerfMm: DEFAULT_KERF_MM,
+      }),
+    ).toThrow(/stock/i);
+  });
+
+  it('rejects kerfMm = NaN', () => {
+    expect(() =>
+      packCutList({
+        cuts: [{ memberId: 'c-0', lengthMm: 1000 }],
+        stockLengthsMm: [ftMm(16)],
+        kerfMm: Number.NaN,
+      }),
+    ).toThrow(/kerf/i);
+  });
+
+  it('rejects kerfMm < 0', () => {
+    expect(() =>
+      packCutList({
+        cuts: [{ memberId: 'c-0', lengthMm: 1000 }],
+        stockLengthsMm: [ftMm(16)],
+        kerfMm: -1,
+      }),
+    ).toThrow(/kerf/i);
+  });
+
+  it('rejects kerfMm = Infinity', () => {
+    expect(() =>
+      packCutList({
+        cuts: [{ memberId: 'c-0', lengthMm: 1000 }],
+        stockLengthsMm: [ftMm(16)],
+        kerfMm: Number.POSITIVE_INFINITY,
+      }),
+    ).toThrow(/kerf/i);
   });
 });
 
@@ -445,17 +588,32 @@ describe('packCutList — AC9 FFD asymptotic bound (SC-011)', () => {
   it('FFD board count ≤ ceil(11/9 × OPT + 6/9) on random small inputs', () => {
     // Fixed stock: [16 ft] = 4877 mm. Cut lengths bounded to ≤ 16 ft
     // (else AC5 throws). Small n so the brute-force reference
-    // terminates.
+    // terminates. Each cut is a `(lengthMm, idSalt)` tuple — the
+    // salt derives the memberId deterministically so a failing
+    // property REPRODUCES on shrink (fc replays with a seed and
+    // needs every arbitrary to be pure). The old implementation
+    // used `Math.random()` for the id, which broke shrinking (each
+    // replay generated a fresh id, so the "same" counterexample
+    // was never the same twice → useless failure diagnostics).
     const stockLengthMm: Mm = ftMm(16);
     const kerfMm: Mm = DEFAULT_KERF_MM;
     const cutArb = fc.array(
-      // A cut length between 6″ (rough minimum for a real member)
-      // and stockLengthMm (max fits stock — a single-cut board is
-      // valid; the first cut on a bin pays no preceding kerf).
       fc
-        .integer({ min: inMm(6), max: stockLengthMm })
-        .map<Cut>((lengthMm) => ({
-          memberId: `arb-${Math.random().toString(36).slice(2, 10)}`,
+        .tuple(
+          // A cut length between 6″ (rough minimum for a real
+          // member) and stockLengthMm (max fits stock — a single-
+          // cut board is valid; the first cut on a bin pays no
+          // preceding kerf).
+          fc.integer({ min: inMm(6), max: stockLengthMm }),
+          // Deterministic id salt — fc-derived integer serialized
+          // in base-36. Because fc replays with the same seed,
+          // this reproduces on shrink (the old
+          // `Math.random().toString(36)` broke shrinking because
+          // each replay drew a fresh id).
+          fc.integer({ min: 0, max: 0xfff_ffff }),
+        )
+        .map<Cut>(([lengthMm, idSalt]) => ({
+          memberId: `arb-${idSalt.toString(36)}`,
           lengthMm,
         })),
       { minLength: 0, maxLength: 12 },
