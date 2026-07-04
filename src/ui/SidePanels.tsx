@@ -14,10 +14,26 @@
  * application root. App.tsx stays the composition-root and just
  * places `<SidePanels />` in the slot.
  *
+ * ## Why each panel is wrapped in a `<PanelErrorBoundary>` (S24 UAT FIX 0(b))
+ *
+ * A live UAT for a 24 ft-wide deck exposed a critical crash:
+ * `deriveBom` (called inside `<BomPanel>`'s render `useMemo`) threw
+ * an over-length-cut error, which propagated up through the WHOLE
+ * render tree because no boundary sat between the panel and the
+ * app root. Result: white screen — parameter panel, disclaimer,
+ * and 3D scene all lost.
+ *
+ * The domain fix (splicing over-length cuts) removed THAT crash;
+ * `<PanelErrorBoundary>` catches any FUTURE panel-compute
+ * exception. Each panel is wrapped INDIVIDUALLY (not one boundary
+ * around all four) so a bug in the BOM panel does NOT knock out
+ * the export menu or the warnings panel — defense-in-depth on a
+ * per-panel granularity.
+ *
  * ## Boundary
  *
  *   - `./LayerTogglePanel` / `./WarningsPanel` / `./BomPanel` /
- *     `./ExportMenu` — sibling ui modules.
+ *     `./ExportMenu` / `./PanelErrorBoundary` — sibling ui modules.
  *   - NO state / domain / etc. — this is pure composition.
  */
 import type { JSX } from 'react';
@@ -25,6 +41,7 @@ import type { JSX } from 'react';
 import { BomPanel } from './BomPanel';
 import { ExportMenu } from './ExportMenu';
 import { LayerTogglePanel } from './LayerTogglePanel';
+import { PanelErrorBoundary } from './PanelErrorBoundary';
 import { WarningsPanel } from './WarningsPanel';
 
 import './styles/tokens.css';
@@ -38,10 +55,18 @@ import './styles/side-panels.css';
 export function SidePanels(): JSX.Element {
   return (
     <div className="wd-side-panels">
-      <LayerTogglePanel />
-      <WarningsPanel />
-      <BomPanel />
-      <ExportMenu />
+      <PanelErrorBoundary>
+        <LayerTogglePanel />
+      </PanelErrorBoundary>
+      <PanelErrorBoundary>
+        <WarningsPanel />
+      </PanelErrorBoundary>
+      <PanelErrorBoundary>
+        <BomPanel />
+      </PanelErrorBoundary>
+      <PanelErrorBoundary>
+        <ExportMenu />
+      </PanelErrorBoundary>
     </div>
   );
 }

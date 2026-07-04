@@ -16,9 +16,12 @@
  *          plus a 3 ft cut against [10, 12, 16] ft opens a 10 ft
  *          board first (perfect fit); the 3 ft cut then needs a new
  *          board (the 10 ft board is full after the 10 ft cut).
- *   - AC5: throws when the longest cut exceeds max stock — 24 ft cut
- *          against [8, 10, 12, 16] ft throws with a message naming
- *          the offending cut length AND the max stock length.
+ *   - FIX 0 (S24 UAT pair-fix): over-length cuts SPLICE. A 24 ft cut
+ *          against [16 ft] max stock → 2 boards (one 16 ft full-length,
+ *          one 8 ft cut + 8 ft offcut). This REPLACES the earlier
+ *          AC5 "throws on oversize" behavior — the throw was the
+ *          latent live-UAT bug that white-screened the app on any
+ *          deck wider than max stock.
  *   - AC9: FFD asymptotic bound (SC-011) — for random small inputs,
  *          FFD's totalStockBoards ≤ 11/9 × OPT + 6/9 (classical FFD
  *          bound, property test with 100+ iterations).
@@ -240,45 +243,179 @@ describe('packCutList — AC4 picks the smallest stock length that fits the long
 });
 
 // ---------------------------------------------------------------------------
-// AC5 — cut exceeds all stock lengths throws
+// FIX 0 (S24 UAT pair-fix) — over-length cuts SPLICE across multiple boards
 // ---------------------------------------------------------------------------
+// Prior to this fix, `packCutList` THREW on any cut > max stock length —
+// which crashed the UI (BomPanel's useMemo re-threw → uncaught render
+// error → whole app white-screened on a 24-ft deck, a normal DIY size).
+// A cut longer than the max stock is physically built by butt-jointing
+// multiple boards (real decking/framing practice). We now SPLICE.
+//
+// Semantics (MVP simplification):
+//   • For a cut with `lengthMm > maxStockMm`, emit
+//     `N = ceil(lengthMm / maxStockMm)` boards of the max stock length.
+//   • Boards 1..N-1 carry a single "full-length" cut of maxStockMm
+//     attributed to the member (each board fully consumed by the run).
+//   • Board N carries the REMAINDER cut of `lengthMm - (N-1)*maxStockMm`
+//     and an offcut of `maxStockMm - remainder`.
+//   • Spliced boards do NOT participate in FFD packing (the run consumes
+//     each full board; there is no leftover on boards 1..N-1 to share
+//     with other cuts).
+//   • Kerf is NOT charged for the joint (a butt joint on top of a joist
+//     is not a saw cut — no blade width lost). The final-board cut uses
+//     the same "first-cut-on-a-bin" rule as every other single-cut board:
+//     no preceding kerf.
+//
+// This section REPLACES the pre-fix "AC5 — throws when a cut exceeds
+// every stock length" section (that throw was the latent UAT bug).
 
-describe('packCutList — AC5 throws when a cut exceeds every stock length', () => {
-  it('a 24 ft cut against [8, 10, 12, 16] ft throws with cut + max stock in the message', () => {
+describe('packCutList — FIX 0: over-length cut splices across boards', () => {
+  it('a 24 ft cut on [16 ft] stock → 2 boards (16 ft full-length, 8 ft cut + 8 ft offcut)', () => {
+    // The exact live-UAT repro: `packCutList: cut 'board-0' has
+    // lengthMm=7315 (24 ft) exceeds the maximum stock length 6096 (20 ft)`.
+    // We use [16 ft] max here to also cover the OLDER test intent
+    // (24 ft against a 16 ft max). N = ceil(24/16) = 2 boards.
+    //
+    // Note on ft/mm rounding: `ftMm(x)` rounds to the nearest mm,
+    // so `ftMm(24) - ftMm(16) !== ftMm(8)` in general (7315 − 4877 =
+    // 2438, and ftMm(8) = 2438; but the OFFCUT is
+    // maxStockMm − remainderCut = 4877 − 2438 = 2439, which is
+    // NOT ftMm(8)). Assert against the exact arithmetic.
     const cuts: Cut[] = [makeCut(0, ftMm(24))];
-    let caught: unknown = null;
-    try {
-      packCutList({
-        cuts,
-        stockLengthsMm: [ftMm(8), ftMm(10), ftMm(12), ftMm(16)],
-        kerfMm: DEFAULT_KERF_MM,
-      });
-    } catch (err) {
-      caught = err;
-    }
-    expect(caught).toBeInstanceOf(Error);
-    const message = caught instanceof Error ? caught.message : String(caught);
-    // Must name the offending member id, the offending cut length,
-    // AND the max stock length — enough context for the user (via
-    // S24's UI surfacing) to know what to fix.
-    expect(message).toContain('c-0000');
-    expect(message).toContain(String(ftMm(24)));
-    expect(message).toContain(String(ftMm(16)));
+    const maxStock = ftMm(16);
+    const result = packCutList({
+      cuts,
+      stockLengthsMm: [ftMm(8), ftMm(10), ftMm(12), maxStock],
+      kerfMm: DEFAULT_KERF_MM,
+    });
+    const remainderCutMm = ftMm(24) - maxStock;
+    const remainderOffcutMm = maxStock - remainderCutMm;
+    expect(result.totalStockBoards).toBe(2);
+    // Board 1: full 16 ft consumed, one cut of 16 ft, offcut 0.
+    expect(result.stockBoards[0]!.stockLengthMm).toBe(maxStock);
+    expect(result.stockBoards[0]!.cuts).toEqual([{ memberId: 'c-0000', lengthMm: maxStock }]);
+    expect(result.stockBoards[0]!.offcutMm).toBe(0);
+    // Board 2: remainder cut, remainder offcut (both by exact
+    // arithmetic against the rounded ftMm values).
+    expect(result.stockBoards[1]!.stockLengthMm).toBe(maxStock);
+    expect(result.stockBoards[1]!.cuts).toEqual([{ memberId: 'c-0000', lengthMm: remainderCutMm }]);
+    expect(result.stockBoards[1]!.offcutMm).toBe(remainderOffcutMm);
+    // Total offcut = ONLY the remainder board's offcut.
+    expect(result.totalOffcutMm).toBe(remainderOffcutMm);
   });
 
-  it('a cut equal to the max stock length does NOT throw (boundary case)', () => {
-    // The first cut on a bin does not pay a preceding kerf, so a
-    // cut of exactly max-stock-length is allowed (single-cut board,
-    // offcut = 0). Ticket §4b edge case: "Cut length exactly matching
-    // stock length: offcut = 0, no kerf issue."
+  it('the exact UAT repro: 24 ft cut on [20 ft] stock → 2 boards (20 ft full, 4 ft + 16 ft offcut)', () => {
+    // 2×8 PT No.2 tops out at 20 ft in the catalog; a 24 ft joist
+    // (from a 24 ft-wide deck's decking board) is the crash the
+    // live UAT hit. N = ceil(24/20) = 2.
+    const cuts: Cut[] = [{ memberId: 'board-0', lengthMm: ftMm(24) }];
+    const result = packCutList({
+      cuts,
+      stockLengthsMm: [ftMm(8), ftMm(10), ftMm(12), ftMm(14), ftMm(16), ftMm(20)],
+      kerfMm: DEFAULT_KERF_MM,
+    });
+    expect(result.totalStockBoards).toBe(2);
+    // Every board is the max stock length (20 ft).
+    for (const board of result.stockBoards) {
+      expect(board.stockLengthMm).toBe(ftMm(20));
+    }
+    // Board 1: cut = 20 ft (full), offcut = 0.
+    expect(result.stockBoards[0]!.cuts).toEqual([{ memberId: 'board-0', lengthMm: ftMm(20) }]);
+    expect(result.stockBoards[0]!.offcutMm).toBe(0);
+    // Board 2: cut = 24 − 20 = 4 ft, offcut = 20 − 4 = 16 ft.
+    expect(result.stockBoards[1]!.cuts).toEqual([{ memberId: 'board-0', lengthMm: ftMm(4) }]);
+    expect(result.stockBoards[1]!.offcutMm).toBe(ftMm(16));
+    expect(result.totalOffcutMm).toBe(ftMm(16));
+  });
+
+  it('a 40 ft cut on [20 ft] stock → 2 boards (both fully used, 0 offcut — exact multiple)', () => {
+    // 40 ft is exactly 2 × 20 ft → N = ceil(40/20) = 2. No remainder,
+    // so both boards are fully consumed by the run, offcut 0 on each.
+    // The (N-1)-full-then-1-remainder algorithm degenerates cleanly
+    // when the last "remainder" equals maxStock (which happens when
+    // lengthMm % maxStockMm === 0).
+    const cuts: Cut[] = [makeCut(0, ftMm(40))];
+    const result = packCutList({
+      cuts,
+      stockLengthsMm: [ftMm(20)],
+      kerfMm: DEFAULT_KERF_MM,
+    });
+    expect(result.totalStockBoards).toBe(2);
+    for (const board of result.stockBoards) {
+      expect(board.stockLengthMm).toBe(ftMm(20));
+      expect(board.cuts).toEqual([{ memberId: 'c-0000', lengthMm: ftMm(20) }]);
+      expect(board.offcutMm).toBe(0);
+    }
+    expect(result.totalOffcutMm).toBe(0);
+  });
+
+  it('a 50 ft cut on [20 ft] stock → 3 boards (2 × 20 ft full + 1 × 10 ft cut + 10 ft offcut)', () => {
+    // N = ceil(50/20) = 3. Boards 1–2 = full 20 ft; board 3 = 10 ft
+    // cut + 10 ft offcut.
+    const cuts: Cut[] = [makeCut(0, ftMm(50))];
+    const result = packCutList({
+      cuts,
+      stockLengthsMm: [ftMm(20)],
+      kerfMm: DEFAULT_KERF_MM,
+    });
+    expect(result.totalStockBoards).toBe(3);
+    expect(result.stockBoards[0]!.cuts).toEqual([{ memberId: 'c-0000', lengthMm: ftMm(20) }]);
+    expect(result.stockBoards[0]!.offcutMm).toBe(0);
+    expect(result.stockBoards[1]!.cuts).toEqual([{ memberId: 'c-0000', lengthMm: ftMm(20) }]);
+    expect(result.stockBoards[1]!.offcutMm).toBe(0);
+    expect(result.stockBoards[2]!.cuts).toEqual([{ memberId: 'c-0000', lengthMm: ftMm(10) }]);
+    expect(result.stockBoards[2]!.offcutMm).toBe(ftMm(10));
+    expect(result.totalOffcutMm).toBe(ftMm(10));
+  });
+
+  it('a cut equal to the max stock length does NOT splice (single-board case, offcut 0)', () => {
+    // Regression against off-by-one in the splice trigger: a cut of
+    // exactly max-stock (lengthMm === maxStockMm) must NOT enter
+    // the splice branch — the FFD path handles it as a single
+    // full-length board, offcut = 0.
     const cuts: Cut[] = [makeCut(0, ftMm(16))];
-    expect(() =>
-      packCutList({
-        cuts,
-        stockLengthsMm: [ftMm(8), ftMm(16)],
-        kerfMm: DEFAULT_KERF_MM,
-      }),
-    ).not.toThrow();
+    const result = packCutList({
+      cuts,
+      stockLengthsMm: [ftMm(8), ftMm(16)],
+      kerfMm: DEFAULT_KERF_MM,
+    });
+    expect(result.totalStockBoards).toBe(1);
+    expect(result.stockBoards[0]!.stockLengthMm).toBe(ftMm(16));
+    expect(result.stockBoards[0]!.offcutMm).toBe(0);
+  });
+
+  it('an over-length cut mixed with a short cut: the short cut still FFD-packs into its own board', () => {
+    // A 24 ft joist AND a 4 ft blocking piece against [16 ft] stock:
+    // • 24 ft joist splices → 2 spliced boards (16 ft full, remainder
+    //   cut + remainder offcut — see rounding note above).
+    // • 4 ft blocking is normal → 1 FFD board (smallest stock ≥ 4 ft
+    //   = 8 ft; not 16 ft — FFD picks the smallest stock for the
+    //   longest remaining cut).
+    // Total: 3 boards. Regression against a splice implementation
+    // that consumed short cuts' bins instead of routing them to
+    // FFD.
+    const cuts: Cut[] = [makeCut(0, ftMm(24)), makeCut(1, ftMm(4))];
+    const maxStock = ftMm(16);
+    const result = packCutList({
+      cuts,
+      stockLengthsMm: [ftMm(8), maxStock],
+      kerfMm: DEFAULT_KERF_MM,
+    });
+    expect(result.totalStockBoards).toBe(3);
+    // The spliced boards come FIRST (deterministic emit order —
+    // spliced pass runs before FFD).
+    // Board 1: 16 ft full (spliced).
+    expect(result.stockBoards[0]!.cuts).toEqual([{ memberId: 'c-0000', lengthMm: maxStock }]);
+    expect(result.stockBoards[0]!.offcutMm).toBe(0);
+    // Board 2: remainder + its offcut (spliced).
+    const remainderCutMm = ftMm(24) - maxStock;
+    expect(result.stockBoards[1]!.cuts).toEqual([
+      { memberId: 'c-0000', lengthMm: remainderCutMm },
+    ]);
+    expect(result.stockBoards[1]!.offcutMm).toBe(maxStock - remainderCutMm);
+    // Board 3: the 4 ft short cut FFD-packed into 8 ft stock.
+    expect(result.stockBoards[2]!.cuts).toEqual([{ memberId: 'c-0001', lengthMm: ftMm(4) }]);
+    expect(result.stockBoards[2]!.stockLengthMm).toBe(ftMm(8));
   });
 });
 

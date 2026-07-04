@@ -14,11 +14,22 @@
  *
  * ## Algorithm — First-Fit-Decreasing (FFD) into FIXED-size bins
  *
- * 1. Compute `L_max = max(cut.lengthMm)` over ALL cuts (not per
- *    board — see §16 "OUT OF SCOPE: Multiple stock-length offerings
- *    within one pack"). Pick ONE stock length for the entire pack:
- *    the SMALLEST value in `stockLengthsMm` that is ≥ `L_max`. If
- *    none exists, throw naming the offending cut (AC5).
+ * 0. **Splice pass** (FIX 0 — S24 UAT pair-fix): before FFD, partition
+ *    cuts into `oversizeCuts` (lengthMm > maxStockMm) and `normalCuts`
+ *    (the rest). For each oversize cut, emit `N = ceil(lengthMm /
+ *    maxStockMm)` boards of the max stock length: N−1 fully-consumed
+ *    boards each carrying one `maxStockMm`-length "full board" cut,
+ *    plus one final board with the REMAINDER cut (`lengthMm − (N−1) ×
+ *    maxStockMm`) and its offcut. Butt-jointing two boards on top of
+ *    a joist is standard framing practice, so a run longer than the
+ *    catalog's max stock just adds the extra board(s) to the shopping
+ *    list. No kerf is charged for the joint (a butt join is not a
+ *    saw cut). Spliced boards do NOT participate in the FFD loop —
+ *    each full board is consumed by that member's run alone.
+ *
+ * 1. Compute `L_max = max(normalCut.lengthMm)` over the remaining
+ *    (non-spliced) cuts. Pick ONE stock length for those cuts: the
+ *    SMALLEST value in `stockLengthsMm` that is ≥ `L_max`.
  *
  *    Rationale (user Q3 + AC7 golden fixture): mixing stock sizes
  *    within one SKU makes the shopping list harder to hand to a
@@ -29,8 +40,8 @@
  *    smaller 8 ft boards for the blocking pieces would need 3+
  *    additional boards (see the derive-bom AC7 test).
  *
- * 2. Sort the cut-list by `lengthMm` DESCENDING. Ties tie-break by
- *    `memberId` ASCENDING → deterministic output, byte-for-byte.
+ * 2. Sort the (normal) cut-list by `lengthMm` DESCENDING. Ties
+ *    tie-break by `memberId` ASCENDING → deterministic output.
  * 3. Repeat until every cut is placed:
  *    a. Open a new board of `stockLengthMm`.
  *    b. Walk the DESCENDING-sorted cuts; place each cut that fits
@@ -148,17 +159,15 @@ export interface PackResult {
  *      text).
  *   - Any `cut.lengthMm` is non-finite or ≤ 0 — throws naming the
  *     offending `memberId` and the offending value.
- *   - Any `cut.lengthMm` exceeds the maximum stock length — throws
- *     naming the offender AND the max available stock length so the
- *     UI (S24) can surface a contextful "cut too long — choose
- *     longer stock or split the member" hint. The check uses the
- *     RAW `lengthMm` (not `lengthMm + kerfMm`) because the first
- *     cut on a bin pays no preceding kerf — a cut of exactly the
- *     max stock length is a valid single-cut board.
  *   - The internal FFD loop fails to make progress (defense-in-
  *     depth: a bug that let an unplaceable cut past the pre-checks
  *     would otherwise hang the process). Throws an invariant
  *     error naming the stuck cut.
+ *
+ *   FIX 0 (S24 UAT pair-fix): a cut LONGER than the max stock is
+ *   no longer a boundary violation — it splices across boards
+ *   (see the "Splice pass" step in the Algorithm section). Only
+ *   NaN / negative / zero / non-finite inputs still throw.
  */
 export function packCutList(input: {
   readonly cuts: readonly Cut[];
@@ -229,60 +238,110 @@ export function packCutList(input: {
   // contract asserted by the "input arrays are NOT mutated" test).
   const orderedCuts: Cut[] = [...cuts].sort(compareCutsDescStable);
 
-  // ---- Validate every cut fits SOME stock length -------------------------
-  // We check every cut individually (not just the largest) so the
-  // error message names the actual offender when multiple cuts
-  // exceed the max stock length. The first cut in a bin does NOT
-  // pay a preceding kerf, so the check is against `lengthMm` alone
-  // (not `lengthMm + kerfMm`) — a cut of exactly the max stock is
-  // permissible (single-cut board, offcut = 0).
+  // ---- FIX 0 (S24 UAT pair-fix) — SPLICE over-length cuts ---------------
+  // A cut LONGER than the max stock is physically built by butt-
+  // jointing multiple boards on top of a joist (real framing
+  // practice — decking boards are routinely spliced on wide decks).
+  // Prior behavior threw here, which crashed BomPanel's render
+  // useMemo → white-screened the whole app for any deck wider than
+  // ~20 ft. New behavior: split the over-length cut into
+  // `N = ceil(lengthMm / maxStockMm)` boards of the max stock
+  // length. Boards 1..N-1 are fully consumed by the run (single
+  // cut of `maxStockMm`, offcut 0); board N carries the remainder
+  // (`lengthMm - (N-1)*maxStockMm`) and its offcut. No kerf is
+  // charged for the joint (a butt-join is not a saw cut).
+  //
+  // The spliced boards are emitted UP-FRONT, so the returned
+  // `stockBoards` list has spliced boards first (in cut-order),
+  // then FFD-packed boards for the remaining "normal" cuts. This
+  // ordering is deterministic and testable.
+  const splicedBoards: PackedBoard[] = [];
+  const normalCuts: Cut[] = [];
   for (const c of orderedCuts) {
-    if (c.lengthMm > maxStockMm) {
-      throw new Error(
-        `packCutList: cut '${c.memberId}' has lengthMm=${String(c.lengthMm)} ` +
-          `which exceeds the maximum stock length ${String(maxStockMm)}. ` +
-          `Choose a longer stock length for this SKU or split the member ` +
-          `into shorter pieces.`,
+    if (c.lengthMm <= maxStockMm) {
+      normalCuts.push(c);
+      continue;
+    }
+    // Over-length: splice into ceil(lengthMm / maxStockMm) boards.
+    // The last board's cut length is (lengthMm mod maxStockMm) —
+    // but when the modulus is 0 (exact multiple), that "last cut"
+    // is a full `maxStockMm` board too, and we want to emit
+    // `lengthMm / maxStockMm` full boards, NOT one extra empty
+    // board. Handle the exact-multiple case explicitly.
+    const isExactMultiple = c.lengthMm % maxStockMm === 0;
+    const numFullBoards = isExactMultiple
+      ? c.lengthMm / maxStockMm
+      : Math.floor(c.lengthMm / maxStockMm);
+    for (let i = 0; i < numFullBoards; i++) {
+      splicedBoards.push(
+        Object.freeze({
+          stockLengthMm: maxStockMm,
+          cuts: Object.freeze([{ memberId: c.memberId, lengthMm: maxStockMm }]),
+          offcutMm: 0,
+        }),
+      );
+    }
+    if (!isExactMultiple) {
+      const remainderCutMm = c.lengthMm - numFullBoards * maxStockMm;
+      splicedBoards.push(
+        Object.freeze({
+          stockLengthMm: maxStockMm,
+          cuts: Object.freeze([{ memberId: c.memberId, lengthMm: remainderCutMm }]),
+          offcutMm: maxStockMm - remainderCutMm,
+        }),
       );
     }
   }
+  // If EVERY cut was oversize, we're done — no FFD pass needed.
+  if (normalCuts.length === 0) {
+    const totalOffcutMmSpliced = splicedBoards.reduce((s, b) => s + b.offcutMm, 0);
+    return Object.freeze({
+      stockBoards: Object.freeze(splicedBoards),
+      totalStockBoards: splicedBoards.length,
+      totalOffcutMm: totalOffcutMmSpliced,
+    });
+  }
 
   // ---- FFD pack (single stock length, fixed-size bins) -------------------
-  // Per ticket §16, the pack uses ONE stock length for the entire
-  // pack — the smallest that fits the LONGEST cut. This choice is
-  // the "shop-friendly" trade-off (Q3) AND is required by the AC7
-  // golden fixture (mixing 8 ft blocking boards with 16 ft beam
-  // boards over-counts total stock; see module header).
+  // Per ticket §16, the pack uses ONE stock length for the FFD-
+  // packed portion — the smallest that fits the LONGEST remaining
+  // (non-spliced) cut. This choice is the "shop-friendly" trade-off
+  // (Q3) AND is required by the AC7 golden fixture (mixing 8 ft
+  // blocking boards with 16 ft beam boards over-counts total stock;
+  // see module header).
   let longestCutMm = 0;
-  for (const c of orderedCuts) {
+  for (const c of normalCuts) {
     if (c.lengthMm > longestCutMm) longestCutMm = c.lengthMm;
   }
   const packStockLengthMm = smallestStockThatFits(stocksAsc, longestCutMm);
-  // The AC5 pre-check above guarantees this is non-null.
-  /* istanbul ignore next -- defensive: pre-check accepted the longest cut */
+  // The splice pass consumed every cut > maxStockMm; every remaining
+  // `normalCut` has lengthMm ≤ maxStockMm, so a stock >= longestCut
+  // exists (maxStockMm itself). This is provable — guarded for
+  // defense-in-depth only.
+  /* istanbul ignore next -- defensive: splice removed every oversize cut */
   if (packStockLengthMm === null) {
     /* istanbul ignore next -- same */
     throw new Error(
       `packCutList: internal invariant violated — no stock fits the ` +
-        `longest cut ${String(longestCutMm)} after the pre-check accepted it.`,
+        `longest remaining cut ${String(longestCutMm)} after the splice pass.`,
     );
   }
 
-  // `placed` is a boolean per cut index in `orderedCuts`. We open
+  // `placed` is a boolean per cut index in `normalCuts`. We open
   // fixed-size boards one at a time and greedily fill each in DESC
   // order, skipping cuts already placed on a prior board.
-  const placed = new Array<boolean>(orderedCuts.length).fill(false);
+  const placed = new Array<boolean>(normalCuts.length).fill(false);
   const boards: PackedBoard[] = [];
   let placedCount = 0;
 
-  while (placedCount < orderedCuts.length) {
+  while (placedCount < normalCuts.length) {
     // Open a new board of the FIXED pack stock length.
     const boardCuts: Cut[] = [];
     let remaining = packStockLengthMm;
     const placedCountAtBoardStart = placedCount;
-    for (let i = 0; i < orderedCuts.length; i++) {
+    for (let i = 0; i < normalCuts.length; i++) {
       if (placed[i]) continue;
-      const candidate = orderedCuts[i]!;
+      const candidate = normalCuts[i]!;
       // A cut fits when its length is ≤ remaining. Kerf is not
       // added to the fit-check because a cut that exactly consumes
       // remaining is a valid final cut (the trailing "kerf" would
@@ -303,14 +362,13 @@ export function packCutList(input: {
     // board, the outer `while` will loop forever. This is a
     // defense-in-depth check: the input-validation and pre-checks
     // above already reject every known cause (NaN cut, zero cut,
-    // oversize cut). A future refactor that introduces a fourth
-    // cause without updating the pre-check would surface HERE with
-    // an actionable diagnostic instead of a UI-thread hang. The
-    // guard fires only when the board began empty (remaining ==
-    // packStockLengthMm) and stayed empty (placedCount unchanged).
+    // oversize cut splices). A future refactor that introduces a
+    // fourth cause without updating the pre-check would surface
+    // HERE with an actionable diagnostic instead of a UI-thread
+    // hang.
     /* istanbul ignore next -- defense-in-depth; pre-checks make this unreachable */
     if (placedCount === placedCountAtBoardStart) {
-      const stuck = orderedCuts.find((_c, i) => !placed[i])!;
+      const stuck = normalCuts.find((_c, i) => !placed[i])!;
       throw new Error(
         `packCutList: internal invariant violated — FFD loop made no ` +
           `progress after opening a fresh ${String(packStockLengthMm)} mm board. ` +
@@ -328,10 +386,14 @@ export function packCutList(input: {
     );
   }
 
-  const totalOffcutMm = boards.reduce((s, b) => s + b.offcutMm, 0);
+  // Spliced boards go FIRST, then FFD-packed boards. Consumers see
+  // the shopping list in a stable order (spliced runs "belong" to
+  // one big member and are easier to identify at the top).
+  const allBoards = [...splicedBoards, ...boards];
+  const totalOffcutMm = allBoards.reduce((s, b) => s + b.offcutMm, 0);
   return Object.freeze({
-    stockBoards: Object.freeze(boards),
-    totalStockBoards: boards.length,
+    stockBoards: Object.freeze(allBoards),
+    totalStockBoards: allBoards.length,
     totalOffcutMm,
   });
 }

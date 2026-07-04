@@ -1,22 +1,25 @@
 /**
- * `BomPanel.test.tsx` — S14 issue #15 AC6 + AC7 + S21 issue #43.
+ * `BomPanel.test.tsx` — S14 issue #15 AC6 + AC7 + S21 issue #43 +
+ * S24 issue #46 (BomPanel cut-list rendering + foundation section).
  *
- * ## Coverage (S21 shape)
+ * ## Coverage (S24 shape)
  *
  *   - S14-AC6: renders `<h2>Bill of materials</h2>` (landmark).
- *   - S21: renders a "Lumber" sub-section (`<h3>`) with a table of
- *     per-SKU rows (Boards column shows the FFD `totalStockBoards`).
- *   - S21-AC6: renders a "Foundation" sub-section (`<h3>`) with a
- *     table of per-product rows when block-kind members exist.
- *   - Empty design → the "Empty layout" copy.
- *   - S14-AC7: switching units flips the stock-length/offcut string
- *     formatting; row counts stay stable (Mm is source of truth).
- *   - a11y-partial: `<th scope>` on header cells; captions present;
- *     sub-section landmarks via `<section aria-labelledby>`.
- *
- * The store default is a real 12×12 deck with LUMBER members
- * only, so the default path exercises the Lumber table. A stubbed
- * layout is used for empty + foundation-only paths.
+ *   - S24-AC1: renders a "Lumber" `<section aria-labelledby><h3>`
+ *     with one `<details>` per SKU (`role="group"`) — not one big
+ *     table.
+ *   - S24-AC4: renders a "Foundation" `<h3>` + table of
+ *     `FoundationRow`s below the Lumber section.
+ *   - FIX 2: renders a "Footings" `<h3>` + table below (elevated
+ *     designs).
+ *   - S24-AC5: empty layout → "Empty layout" copy.
+ *   - S14-AC7: switching units flips the length formatter in the
+ *     Lumber section (summary lines + cut-plan tables).
+ *   - a11y-partial: `<th scope>` on every table header cell; every
+ *     table has a caption; sub-section landmarks via `<section
+ *     aria-labelledby>`.
+ *   - DOM ORDER: Lumber `<section>` precedes Foundation `<section>`
+ *     which precedes Footings `<section>` (AC4).
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';
@@ -39,7 +42,7 @@ function makeFoundationOnlyLayout(): Layout {
   const members: LayoutMember[] = [];
   for (let i = 0; i < 3; i++) {
     members.push({
-      id: `block-${i}`,
+      id: `block-${String(i)}`,
       kind: 'block',
       position: { x: 0, y: 0, z: i * 500 },
       size: { x: 305, y: 102, z: 305 },
@@ -79,66 +82,82 @@ describe('<BomPanel /> — heading + landmark', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Non-empty layout — lumber section (S21)
+// Lumber section — S24 shape (one <details> per SKU, not one table)
 // ---------------------------------------------------------------------------
 
-describe('<BomPanel /> — lumber section (S21 minimal render)', () => {
-  it('renders a Lumber h3 landmark with a table', () => {
+describe('<BomPanel /> — lumber section (S24 shape)', () => {
+  it('renders a Lumber h3 landmark', () => {
     render(<BomPanel />);
     const h3 = screen.getByRole('heading', { level: 3, name: /lumber/i });
     expect(h3).toBeInTheDocument();
-    const tables = screen.getAllByRole('table');
-    // At least one table (the lumber one). If the default layout
-    // has foundation blocks, both will render.
-    expect(tables.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('uses <th scope="col"> on every lumber column header', () => {
+  it('renders ≥1 <details role="group"> under the Lumber section (one per SKU)', () => {
     render(<BomPanel />);
-    // Filter to the lumber table's headers via the table's caption.
-    const lumberTable = screen
-      .getAllByRole('table')
-      .find((t) => (t.querySelector('caption')?.textContent ?? '').match(/lumber/i));
-    expect(lumberTable).toBeDefined();
-    const headers = lumberTable!.querySelectorAll('thead th');
-    // SKU / Stock length / Boards / Offcut = 4 columns (S21).
-    expect(headers.length).toBe(4);
-    for (const h of Array.from(headers)) {
-      expect(h.getAttribute('scope')).toBe('col');
+    // Native <details> exposes role=group; every SKU row is one.
+    // (Foundation/Footings do NOT emit <details>, so counting
+    // role=group counts SKUs.)
+    const groups = screen.getAllByRole('group');
+    expect(groups.length).toBeGreaterThan(0);
+    for (const g of groups) {
+      expect(g.tagName.toLowerCase()).toBe('details');
     }
   });
 
-  it('renders a caption on the lumber table', () => {
+  it('every SKU row is CLOSED by default (AC7: collapse-by-default)', () => {
     render(<BomPanel />);
-    const lumberTable = screen
-      .getAllByRole('table')
-      .find((t) => (t.querySelector('caption')?.textContent ?? '').match(/lumber/i));
-    expect(lumberTable).toBeDefined();
-    const caption = lumberTable!.querySelector('caption');
-    expect(caption).not.toBeNull();
-    expect(caption?.textContent?.length ?? 0).toBeGreaterThan(0);
+    const groups = screen.getAllByRole<HTMLDetailsElement>('group');
+    for (const g of groups) {
+      expect(g.open).toBe(false);
+    }
   });
 
-  it('shows the SKU as the row header for every lumber row', () => {
+  it('each summary line mentions a lumber nominal (2x…, 4x…, or 5/4x…)', () => {
     render(<BomPanel />);
-    const lumberTable = screen
-      .getAllByRole('table')
-      .find((t) => (t.querySelector('caption')?.textContent ?? '').match(/lumber/i));
-    const rowHeaders = lumberTable!.querySelectorAll('tbody th[scope="row"]');
-    // Default deck has at least one lumber SKU (a joist SKU).
-    expect(rowHeaders.length).toBeGreaterThan(0);
-    // Every row-header text mentions a lumber nominal (2x…, 4x…, or 5/4x…).
-    for (const th of Array.from(rowHeaders)) {
-      expect(th.textContent).toMatch(/\d+x\d+|5\/4x\d+/);
+    const groups = screen.getAllByRole('group');
+    for (const g of groups) {
+      const summary = g.querySelector('summary');
+      const text = summary?.textContent ?? '';
+      expect(text).toMatch(/\d+x\d+|5\/4x\d+/);
+    }
+  });
+
+  it('each summary line contains the "N × …" count prefix (positive integer)', () => {
+    render(<BomPanel />);
+    const groups = screen.getAllByRole('group');
+    for (const g of groups) {
+      const summary = g.querySelector('summary');
+      const text = summary?.textContent ?? '';
+      const match = /^(\d+)\s*×/.exec(text.trim());
+      expect(match).not.toBeNull();
+      const n = Number(match![1]);
+      expect(Number.isInteger(n)).toBe(true);
+      expect(n).toBeGreaterThan(0);
+    }
+  });
+
+  it('every <th> inside the Lumber section carries a scope=… (a11y)', () => {
+    render(<BomPanel />);
+    // Under S24, the Lumber section contains <details> children,
+    // each hosting a CutPlanTable. Every <th> in any lumber table
+    // must have scope=col (headers) or scope=row (board number).
+    const lumberSection = screen.getByRole('heading', { level: 3, name: /lumber/i }).closest('section');
+    expect(lumberSection).not.toBeNull();
+    const ths = lumberSection!.querySelectorAll('th');
+    // Under S24 the CutPlanTable is inside <details> — headers ARE
+    // rendered (jsdom does not apply UA CSS to hide them).
+    expect(ths.length).toBeGreaterThan(0);
+    for (const th of Array.from(ths)) {
+      expect(th.getAttribute('scope')).toMatch(/^(col|row)$/);
     }
   });
 });
 
 // ---------------------------------------------------------------------------
-// Foundation section (S21 AC6)
+// Foundation section (S21 AC6 / S24 AC4)
 // ---------------------------------------------------------------------------
 
-describe('<BomPanel /> — foundation section (S21 AC6)', () => {
+describe('<BomPanel /> — foundation section (S24 AC4)', () => {
   it('renders a Foundation h3 landmark when the layout has block members', () => {
     setLayout(makeFoundationOnlyLayout());
     render(<BomPanel />);
@@ -153,17 +172,13 @@ describe('<BomPanel /> — foundation section (S21 AC6)', () => {
       .getAllByRole('table')
       .find((t) => (t.querySelector('caption')?.textContent ?? '').match(/foundation/i));
     expect(foundationTable).toBeDefined();
-    // Row-header contains the catalog displayName (TuffBlock …).
     const rowHeader = foundationTable!.querySelector('tbody th[scope="row"]');
     expect(rowHeader?.textContent).toMatch(/tuffblock/i);
-    // Count cell shows "3".
     const countCell = foundationTable!.querySelector('tbody td');
     expect(countCell?.textContent).toBe('3');
   });
 
   it('does NOT render a Foundation section when no block members exist', () => {
-    // The default store has NO block members — Foundation h3 must
-    // not appear.
     render(<BomPanel />);
     const foundationH3 = screen.queryByRole('heading', { level: 3, name: /foundation/i });
     expect(foundationH3).toBeNull();
@@ -176,11 +191,6 @@ describe('<BomPanel /> — foundation section (S21 AC6)', () => {
 
 describe('<BomPanel /> — footings section (FIX 2)', () => {
   it('renders a Footings h3 landmark when the layout has footing members', () => {
-    // The default store is an ELEVATED deck (`posts-on-footings`)
-    // → its layout includes `footing`-kind members. Regression
-    // against the S21 v1 bug where footings were silently
-    // dropped from the BOM (elevated deck's shopping list was
-    // incomplete).
     render(<BomPanel />);
     const footingsH3 = screen.getByRole('heading', { level: 3, name: /footings/i });
     expect(footingsH3).toBeInTheDocument();
@@ -188,11 +198,8 @@ describe('<BomPanel /> — footings section (FIX 2)', () => {
 
   it('renders a footing row with a dimension-derived displayName + count', () => {
     render(<BomPanel />);
-    // The footing row's <th scope="row"> contains the synthetic
-    // "Concrete footing …" displayName — safe to render as-is.
     const rowHeader = screen.getByRole('rowheader', { name: /concrete footing/i });
     expect(rowHeader).toBeInTheDocument();
-    // The default deck has ≥1 footing — count is a positive integer.
     const row = rowHeader.closest('tr');
     expect(row).not.toBeNull();
     const countCell = row!.querySelector('td');
@@ -211,11 +218,114 @@ describe('<BomPanel /> — footings section (FIX 2)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Empty layout
+// Section order (AC4) — Lumber first, Foundation second, Footings third
 // ---------------------------------------------------------------------------
 
-describe('<BomPanel /> — empty layout', () => {
-  it('renders the "Empty layout" copy and no table', () => {
+describe('<BomPanel /> — section order (AC4)', () => {
+  it('Lumber precedes Foundation precedes Footings in DOM order', () => {
+    // Compose a layout with all three: joist (lumber), block
+    // (foundation), and — leverage the default elevated deck which
+    // already has footings. But the default has no blocks, so we
+    // build a synthetic layout with 1 joist + 3 blocks + 1 footing.
+    const joist: LayoutMember = {
+      id: 'joist-0',
+      kind: 'joist',
+      position: { x: 0, y: 200, z: 0 },
+      size: { x: 38, y: 184, z: 3658 },
+      rotation: { x: 0, y: 0, z: 0 },
+      material: { kind: 'lumber', nominal: '2x8', species: 'PT', grade: 'No2' },
+    };
+    const block: LayoutMember = {
+      id: 'block-0',
+      kind: 'block',
+      position: { x: 0, y: 0, z: 0 },
+      size: { x: 305, y: 102, z: 305 },
+      rotation: { x: 0, y: 0, z: 0 },
+      material: { kind: 'block', productId: 'tuffblock-12x12x4' },
+    };
+    // Footings carry `material.kind='lumber'` as a placeholder —
+    // the layout engine stamps them that way because
+    // `LayoutMember.material` is required (see
+    // `derive-bom.ts` § FIX 2 comment). They're routed into
+    // `bom.footings` by member.kind BEFORE the material switch.
+    const footing: LayoutMember = {
+      id: 'footing-0',
+      kind: 'footing',
+      position: { x: 0, y: -305, z: 0 },
+      size: { x: 305, y: 305, z: 305 },
+      rotation: { x: 0, y: 0, z: 0 },
+      material: { kind: 'lumber', nominal: '2x8', species: 'PT', grade: 'No2' },
+    };
+    setLayout({
+      designId: 'fixture-all',
+      computedAt: '2024-01-01T00:00:00.000Z',
+      bounds: { widthMm: 3658, lengthMm: 3658, heightMm: 305 },
+      members: [joist, block, footing],
+    });
+    render(<BomPanel />);
+    const h3s = screen.getAllByRole('heading', { level: 3 });
+    const names = h3s.map((h) => h.textContent?.toLowerCase() ?? '');
+    const lumberIdx = names.findIndex((n) => n.includes('lumber'));
+    const foundationIdx = names.findIndex((n) => n.includes('foundation'));
+    const footingsIdx = names.findIndex((n) => n.includes('footings'));
+    expect(lumberIdx).toBeGreaterThan(-1);
+    expect(foundationIdx).toBeGreaterThan(-1);
+    expect(footingsIdx).toBeGreaterThan(-1);
+    expect(lumberIdx).toBeLessThan(foundationIdx);
+    expect(foundationIdx).toBeLessThan(footingsIdx);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX 0(c) — 24 ft-wide deck no longer white-screens (S24 UAT crash)
+// ---------------------------------------------------------------------------
+
+describe('<BomPanel /> — FIX 0(c): >20 ft deck renders (splice, no crash)', () => {
+  it('a joist longer than max stock (24 ft) renders with spliced boards, no throw', () => {
+    // Live-UAT repro: on a 24 ft-wide deck, a joist (7315 mm) exceeded
+    // the 20 ft (6096 mm) max stock length for 2x8 PT No.2 → packer
+    // threw → BomPanel's useMemo re-threw → uncaught render error →
+    // whole app unmounted (white screen). The FIX 0(a) splice pass
+    // removes the throw; this test guards against a regression that
+    // reintroduces it. If the throw came back, `render` would throw
+    // (jsdom re-raises boundary catches unless there's a boundary
+    // ABOVE the render root — this test intentionally has none).
+    const bigJoist: LayoutMember = {
+      id: 'joist-24ft',
+      kind: 'joist',
+      position: { x: 0, y: 200, z: 0 },
+      size: { x: 38, y: 184, z: 7315 }, // 24 ft (rounded from ftMm(24))
+      rotation: { x: 0, y: 0, z: 0 },
+      material: { kind: 'lumber', nominal: '2x8', species: 'PT', grade: 'No2' },
+    };
+    setLayout({
+      designId: 'fixture-24ft',
+      computedAt: '2024-01-01T00:00:00.000Z',
+      bounds: { widthMm: 7315, lengthMm: 7315, heightMm: 305 },
+      members: [bigJoist],
+    });
+    // MUST NOT throw. Prior to FIX 0, this render threw
+    // `/exceeds the maximum stock length/` and the app went blank.
+    expect(() => render(<BomPanel />)).not.toThrow();
+    // Sanity check: the BOM h2 is present (the tree survived).
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent(/bill of materials/i);
+    // The joist SKU renders as a details disclosure with the
+    // spliced boards inside.
+    const details = screen.getByRole('group');
+    expect(details).toBeInTheDocument();
+    // Summary line must indicate the SKU (2x8 PT No.2). Two
+    // spliced boards → "2 × 2x8 PT No.2 …".
+    expect(details.textContent ?? '').toMatch(/2x8/);
+    expect(details.textContent ?? '').toMatch(/^2\s*×/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Empty layout (S24 AC5)
+// ---------------------------------------------------------------------------
+
+describe('<BomPanel /> — empty layout (AC5)', () => {
+  it('renders the "No materials yet" copy and no table', () => {
     setLayout({
       designId: 'stub',
       computedAt: '2024-01-01T00:00:00.000Z',
@@ -225,6 +335,16 @@ describe('<BomPanel /> — empty layout', () => {
     render(<BomPanel />);
     expect(screen.getByText(EMPTY_LAYOUT_TEXT)).toBeInTheDocument();
     expect(screen.queryByRole('table')).toBeNull();
+    expect(screen.queryByRole('group')).toBeNull();
+  });
+
+  it('empty-state copy matches the ticket AC5 wording verbatim', () => {
+    // S24 UAT pair-fix FIX 3: the exact copy the ticket AC5 asks
+    // for — "No materials yet — adjust the parameters to generate
+    // a design." — guarded against typos and future drift.
+    expect(EMPTY_LAYOUT_TEXT).toBe(
+      'No materials yet — adjust the parameters to generate a design.',
+    );
   });
 
   it('uses role="status" so the empty message is announced', () => {
@@ -240,66 +360,47 @@ describe('<BomPanel /> — empty layout', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Unit switching (S14 AC7 preserved under S21 shape)
+// Unit switching (AC6 preserved under S24 shape)
 // ---------------------------------------------------------------------------
 
-describe('<BomPanel /> — unit switching (AC7)', () => {
-  it('does not change the row structure when units switch', () => {
+describe('<BomPanel /> — unit switching (AC6)', () => {
+  it('imperial lumber section shows foot/inch marks somewhere', () => {
     render(<BomPanel />);
-    const rowsImperial = screen.getAllByRole('row');
-
-    act(() => {
-      useUiStore.setState({ units: 'metric' });
-    });
-
-    const rowsMetric = screen.getAllByRole('row');
-    expect(rowsMetric).toHaveLength(rowsImperial.length);
-  });
-
-  it('renders imperial lengths (foot mark ′ or " ft") somewhere in the lumber table', () => {
-    render(<BomPanel />);
-    const lumberTable = screen
-      .getAllByRole('table')
-      .find((t) => (t.querySelector('caption')?.textContent ?? '').match(/lumber/i));
-    const text = lumberTable!.textContent ?? '';
+    const lumberSection = screen
+      .getByRole('heading', { level: 3, name: /lumber/i })
+      .closest('section');
+    const text = lumberSection?.textContent ?? '';
     expect(text).toMatch(/[′″]|ft/);
   });
 
-  it('renders metric lengths with " m" after unit switch', () => {
+  it('metric lumber section shows m/cm/mm after unit switch', () => {
     act(() => {
       useUiStore.setState({ units: 'metric' });
     });
     render(<BomPanel />);
-    const lumberTable = screen
-      .getAllByRole('table')
-      .find((t) => (t.querySelector('caption')?.textContent ?? '').match(/lumber/i));
-    const text = lumberTable!.textContent ?? '';
+    const lumberSection = screen
+      .getByRole('heading', { level: 3, name: /lumber/i })
+      .closest('section');
+    const text = lumberSection?.textContent ?? '';
     expect(text).toMatch(/\s(m|cm|mm)\b/);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Default bundle produces real lumber rows (FIX I preserved)
+// AC10 — S21 fixture math: default bundle produces real SKU rows
 // ---------------------------------------------------------------------------
 
-describe('<BomPanel /> — default store bundle produces real lumber rows (FIX I)', () => {
-  it('reads useLayout() from the default store and renders ≥1 lumber row', () => {
+describe('<BomPanel /> — default store bundle produces real lumber rows (AC10)', () => {
+  it('reads useLayout() from the default store and renders ≥1 SKU disclosure', () => {
     render(<BomPanel />);
-    const lumberTable = screen
-      .getAllByRole('table')
-      .find((t) => (t.querySelector('caption')?.textContent ?? '').match(/lumber/i));
-    expect(lumberTable).toBeDefined();
-    const bodyRows = lumberTable!.querySelectorAll('tbody tr');
-    expect(bodyRows.length).toBeGreaterThan(0);
-
-    // Boards column (3rd) must show a positive integer for every row.
-    for (const tr of Array.from(bodyRows)) {
-      const cells = tr.querySelectorAll('td');
-      // cells: [Stock length, Boards, Offcut]. 'Boards' is index 1.
-      const boardsText = cells[1]?.textContent ?? '';
-      const n = Number(boardsText);
-      expect(Number.isInteger(n)).toBe(true);
-      expect(n).toBeGreaterThan(0);
+    const groups = screen.getAllByRole('group');
+    expect(groups.length).toBeGreaterThan(0);
+    // Every summary line has the "N × …" prefix with N > 0.
+    for (const g of groups) {
+      const text = g.querySelector('summary')?.textContent ?? '';
+      const match = /^(\d+)\s*×/.exec(text.trim());
+      expect(match).not.toBeNull();
+      expect(Number(match![1])).toBeGreaterThan(0);
     }
   });
 });

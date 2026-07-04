@@ -503,16 +503,31 @@ describe('deriveBom — kerfMm option', () => {
 // FIX 6 (review-gate) — oversize cut throw + cross-kind SKU merge
 // ---------------------------------------------------------------------------
 
-describe('deriveBom — oversize cut throws (QA #6)', () => {
-  it('a 25 ft beam on a SKU whose max stock is 20 ft throws /exceeds/', () => {
-    // 2×8 PT No.2 tops out at 20 ft (see materials-catalog).
-    // A 25 ft cut cannot fit on ANY stock in the SKU → the packer's
-    // AC5 check rejects it. deriveBom must NOT swallow this — it
-    // must propagate so the UI can surface an actionable "cut too
-    // long" hint. Regression: a silently-passing oversize cut would
-    // yield a phantom "0 boards" pack.
+describe('deriveBom — over-length cuts SPLICE (S24 UAT FIX 0)', () => {
+  it('a 25 ft beam on a SKU whose max stock is 20 ft splices into 2 boards (no throw)', () => {
+    // Prior to the S24 UAT pair-fix, deriveBom re-threw the packer's
+    // "cut exceeds max stock" error. That crashed BomPanel's useMemo
+    // and white-screened the app for any deck wider than the max
+    // stock length (a 24 ft-wide deck is a normal DIY size).
+    //
+    // NEW semantics: over-length cuts are SPLICED — buying two boards
+    // and butt-jointing them is standard framing practice, so the BOM
+    // just adds the extra board(s). N = ceil(25/20) = 2 boards.
     const members = [makeMember('big-beam', 'beam', PT_2x8, ftMm(25))];
-    expect(() => deriveBom(makeLayout(members), {})).toThrow(/exceeds/i);
+    // Must NOT throw.
+    const result = deriveBom(makeLayout(members), {});
+    expect(result.lumber).toHaveLength(1);
+    const pack = result.lumber[0]!.pack;
+    expect(pack.totalStockBoards).toBe(2);
+    // Board 1 = full 20 ft, board 2 = 5 ft remainder + 15 ft offcut.
+    expect(pack.stockBoards[0]!.cuts).toEqual([
+      { memberId: 'big-beam', lengthMm: ftMm(20) },
+    ]);
+    expect(pack.stockBoards[0]!.offcutMm).toBe(0);
+    expect(pack.stockBoards[1]!.cuts).toEqual([
+      { memberId: 'big-beam', lengthMm: ftMm(5) },
+    ]);
+    expect(pack.stockBoards[1]!.offcutMm).toBe(ftMm(15));
   });
 });
 
