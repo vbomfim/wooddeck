@@ -81,6 +81,7 @@ import type { DeckDesign } from '../domain/model';
 import { IrcSpanTable } from '../domain/spans';
 import { MM_PER_FOOT } from '../domain/units';
 import { STORAGE_KEY, serialize } from '../persistence';
+import { V1_FIXTURE_A } from '../persistence/deck-file/__fixtures__/v1-envelopes';
 
 import {
   useDesignStore,
@@ -1222,5 +1223,272 @@ describe('design-store.downloadDeckFile — S14 UAT pair-fix FIX D', () => {
 
     createSpy.mockRestore();
     appendSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S23 — v1→v2 migration surface (design-store → ui-store bridge)
+// ---------------------------------------------------------------------------
+//
+// The S18 loader returns `{bundle, migrated}` on both file and
+// storage load paths. S18 threaded `migrated` through the loader
+// chain but explicitly DROPPED it at the design-store — the
+// pre-existing store code destructures `{bundle}` and ignores the
+// flag. S23 wires the flag: when `migrated === true`, the store
+// action calls `useUiStore.getState().notifyMigrationHappened()`
+// which bumps a monotonic event id (S23 pair-fix — see
+// `ui-store.ts` for the discrete-event rationale). The
+// `<MigrationToast>` component then surfaces the info via a
+// visibility predicate keyed on that counter.
+//
+// This is an ACTION-to-ACTION cross-store call (design → ui via
+// `.getState()`) — the two stores' STATE stays disjoint. Mirrors
+// the AC6 `setStorageBanner` precedent (design-side save failure
+// surfaces via ui-side banner slot).
+
+describe('useDesignStore — S23 loadFromFile bumps migration event id', () => {
+  it('loadFromFile with a v1 envelope increments useUiStore.migrationEventId', async () => {
+    // V1_FIXTURE_A.rawJson is a canonical v1-shape envelope; the
+    // application loader migrates it in-flight and returns
+    // `{bundle, migrated: true}`. The design-store MUST bump the
+    // event counter so a toast appears (and — for a second v1 load
+    // — restarts the timer).
+    const eventBefore = useUiStore.getState().migrationEventId;
+
+    const file = new File([V1_FIXTURE_A.rawJson], 'v1.deck.json', {
+      type: 'application/json',
+    });
+    switchToRealTimers();
+    await useDesignStore.getState().loadFromFile(file);
+    switchToFakeTimers();
+
+    // The load succeeded (bundle swapped to the migrated design) AND
+    // the migration event counter bumped.
+    expect(useDesignStore.getState().status).toBe('idle');
+    expect(useUiStore.getState().migrationEventId).toBe(eventBefore + 1);
+    // Belt-and-suspenders: the bundle is now a valid v2 design.
+    // The migration stamps structure:'elevated' + posts-on-footings.
+    expect(useDesignStore.getState().bundle.design.structure).toBe('elevated');
+    expect(useDesignStore.getState().bundle.design.foundation.type).toBe(
+      'posts-on-footings',
+    );
+  });
+
+  it('loadFromFile with a v2 envelope does NOT bump migrationEventId', async () => {
+    // Native v2 envelope → migrated:false → the counter must NOT bump.
+    // The ticket §AC6 pins this: only v1-migrated loads trigger the
+    // toast.
+    const v2Design = makeDefaultDesign(
+      '33333333-3333-4333-8333-333333333333',
+      '2026-07-03T12:00:00.000Z',
+    );
+    const file = new File([serialize(v2Design)], 'v2.deck.json', {
+      type: 'application/json',
+    });
+    const eventBefore = useUiStore.getState().migrationEventId;
+    switchToRealTimers();
+    await useDesignStore.getState().loadFromFile(file);
+    switchToFakeTimers();
+
+    expect(useDesignStore.getState().status).toBe('idle');
+    expect(useUiStore.getState().migrationEventId).toBe(eventBefore);
+  });
+
+  it('loadFromFile FAILURE (bad JSON) leaves migrationEventId untouched', async () => {
+    // A DeckFileError path lands in status='error' — no migration
+    // took place, so the counter must not spuriously bump.
+    const junk = new File(['not json'], 'bad.deck.json', {
+      type: 'application/json',
+    });
+    const eventBefore = useUiStore.getState().migrationEventId;
+    switchToRealTimers();
+    await useDesignStore.getState().loadFromFile(junk);
+    switchToFakeTimers();
+
+    expect(useDesignStore.getState().status).toBe('error');
+    expect(useUiStore.getState().migrationEventId).toBe(eventBefore);
+  });
+});
+
+describe('useDesignStore — S23 loadFromLocalStorage bumps migration event id', () => {
+  it('loadFromLocalStorage with a v1 slot increments migrationEventId', () => {
+    // Seed a v1 envelope directly into localStorage — the loader
+    // will accept it, migrate to v2, and return migrated:true.
+    localStorage.setItem(STORAGE_KEY, V1_FIXTURE_A.rawJson);
+    const eventBefore = useUiStore.getState().migrationEventId;
+
+    useDesignStore.getState().loadFromLocalStorage();
+
+    expect(useDesignStore.getState().status).toBe('idle');
+    expect(useUiStore.getState().migrationEventId).toBe(eventBefore + 1);
+    expect(useDesignStore.getState().bundle.design.structure).toBe('elevated');
+  });
+
+  it('loadFromLocalStorage with a v2 slot does NOT bump migrationEventId', () => {
+    // Native v2 in storage — no migration, no toast.
+    const v2Design = makeDefaultDesign(
+      '44444444-4444-4444-8444-444444444444',
+      '2026-07-03T13:00:00.000Z',
+    );
+    localStorage.setItem(STORAGE_KEY, serialize(v2Design));
+    const eventBefore = useUiStore.getState().migrationEventId;
+
+    useDesignStore.getState().loadFromLocalStorage();
+
+    expect(useDesignStore.getState().status).toBe('idle');
+    expect(useUiStore.getState().migrationEventId).toBe(eventBefore);
+  });
+
+  it('loadFromLocalStorage with NO slot does NOT bump migrationEventId', () => {
+    // The null-slot branch keeps the default bundle and returns
+    // early — the counter stays put.
+    localStorage.clear();
+    const eventBefore = useUiStore.getState().migrationEventId;
+
+    useDesignStore.getState().loadFromLocalStorage();
+
+    expect(useUiStore.getState().migrationEventId).toBe(eventBefore);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S23 pair-fix — QA Guardian gap-fill G3: structure/foundation
+// switch + undo restores EXACT prior design with no orphan keys.
+//
+// This locks two invariants together:
+//   1. zundo's `pastStates` restore is structural (deep-equal to
+//      the pre-switch design — same bundle reference in fact).
+//   2. The atomic re-stamp in `applyParameters` (S23 discriminator
+//      REPLACE) produces a foundation subtree with ONLY the
+//      variant's own allowed keys — no orphan `post`/`footing`
+//      lingering on a block variant, no orphan `product` on a
+//      posts-on-footings variant. The pre-pair-fix REPLACE path
+//      guarded only top-level `FORBIDDEN_KEYS`; a stale-spread
+//      caller could smuggle orphan variant keys through.
+// ---------------------------------------------------------------------------
+
+describe('useDesignStore — S23 QA G3: structure switch + undo has no orphan keys', () => {
+  it('elevated+posts → floating+tuffblocks, then undo restores the prior design exactly (deep-equal, no orphan keys)', () => {
+    // Baseline: default elevated + posts-on-footings design.
+    resetDesignStoreForTests();
+    const before = useDesignStore.getState().bundle;
+    expect(before.design.structure).toBe('elevated');
+    expect(before.design.foundation.type).toBe('posts-on-footings');
+    // Sanity — a posts-on-footings foundation carries EXACTLY the
+    // FR-026 variant keys.
+    expect(Object.keys(before.design.foundation).sort()).toEqual(
+      ['footing', 'post', 'type'].sort(),
+    );
+
+    // Act — atomic S23 re-stamp to floating + tuffblocks. The
+    // discriminator switches; the REPLACE branch materialises the
+    // new foundation subtree with only the tuffblocks variant's
+    // allowed keys (`type`, `product`).
+    useDesignStore.getState().applyParameters({
+      structure: 'floating',
+      foundation: {
+        type: 'tuffblocks',
+        product: { productId: 'tuffblock-12x12x4' },
+      },
+    });
+
+    const afterSwitch = useDesignStore.getState().bundle;
+    expect(afterSwitch.design.structure).toBe('floating');
+    expect(afterSwitch.design.foundation.type).toBe('tuffblocks');
+    // NO orphan keys — the tuffblocks foundation must NOT carry
+    // `post` or `footing` (left over from the prior posts-on-
+    // footings variant). This is the S23 pair-fix #1 invariant:
+    // the REPLACE branch's variant-shape check would have thrown
+    // ApplyParametersError if a stale-spread patch had been
+    // constructed, but here we assert the successful path lands
+    // clean.
+    const foundationKeys = Object.keys(afterSwitch.design.foundation).sort();
+    expect(foundationKeys).toEqual(['product', 'type'].sort());
+    expect('post' in afterSwitch.design.foundation).toBe(false);
+    expect('footing' in afterSwitch.design.foundation).toBe(false);
+
+    // zundo captured exactly ONE past state (the pre-switch bundle).
+    const past = useDesignStore.temporal.getState().pastStates;
+    expect(past.length).toBe(1);
+
+    // Act — undo restores the prior design.
+    useDesignStore.temporal.getState().undo();
+
+    const restored = useDesignStore.getState().bundle;
+    // Reference equality with the original bundle — zundo restored
+    // the exact object, not a re-materialised copy. This proves
+    // "no orphan keys" beyond structural equality: the same
+    // reference by definition has the same keys.
+    expect(restored).toBe(before);
+    // Belt-and-suspenders — deep-equal on the foundation subtree.
+    expect(restored.design.foundation).toEqual(before.design.foundation);
+    // And the exact key-set of the restored foundation is the
+    // posts-on-footings triple with NO tuffblocks-shaped
+    // leftovers (no `product`, no `blockRowsHint`).
+    expect(Object.keys(restored.design.foundation).sort()).toEqual(
+      ['footing', 'post', 'type'].sort(),
+    );
+    expect('product' in restored.design.foundation).toBe(false);
+    expect('blockRowsHint' in restored.design.foundation).toBe(false);
+    expect('blockColsHint' in restored.design.foundation).toBe(false);
+  });
+
+  it('floating+tuffblocks (with hints) → elevated+posts, then undo restores hints exactly', () => {
+    // Seed a floating+tuffblocks design that carries S25 block
+    // hints — the hint keys are FR-026-optional on block variants
+    // and MUST round-trip through undo without loss.
+    resetDesignStoreForTests();
+    useDesignStore.getState().applyParameters({
+      structure: 'floating',
+      foundation: {
+        type: 'tuffblocks',
+        product: { productId: 'tuffblock-12x12x4' },
+        blockRowsHint: 3,
+        blockColsHint: 5,
+      },
+    });
+    // Reset undo history so the seed doesn't count.
+    useDesignStore.temporal.getState().clear();
+
+    const before = useDesignStore.getState().bundle;
+    expect(before.design.foundation.type).toBe('tuffblocks');
+    if (before.design.foundation.type !== 'tuffblocks') return;
+    expect(before.design.foundation.blockRowsHint).toBe(3);
+    expect(before.design.foundation.blockColsHint).toBe(5);
+
+    // Switch to elevated + posts. This drops the block hints
+    // (they're not part of the posts-on-footings variant shape).
+    useDesignStore.getState().applyParameters({
+      structure: 'elevated',
+      foundation: {
+        type: 'posts-on-footings',
+        post: {
+          nominal: '6x6',
+          species: 'PT',
+          grade: 'No2',
+        },
+        footing: {
+          widthMm: 300,
+          depthMm: 300,
+        },
+      },
+    });
+    const afterSwitch = useDesignStore.getState().bundle.design;
+    expect(afterSwitch.foundation.type).toBe('posts-on-footings');
+    // Orphan-key check on the FORWARD switch: elevated+posts must
+    // NOT carry `product` / `blockRowsHint` / `blockColsHint`.
+    expect('product' in afterSwitch.foundation).toBe(false);
+    expect('blockRowsHint' in afterSwitch.foundation).toBe(false);
+    expect('blockColsHint' in afterSwitch.foundation).toBe(false);
+
+    // Undo restores the tuffblocks bundle — hints exactly restored.
+    useDesignStore.temporal.getState().undo();
+    const restored = useDesignStore.getState().bundle.design;
+    expect(restored.foundation.type).toBe('tuffblocks');
+    if (restored.foundation.type !== 'tuffblocks') return;
+    expect(restored.foundation.blockRowsHint).toBe(3);
+    expect(restored.foundation.blockColsHint).toBe(5);
+    // Deep-equal round-trip.
+    expect(restored.foundation).toEqual(before.design.foundation);
   });
 });

@@ -146,6 +146,65 @@ export interface UiStoreState {
    * Neither direction requires a scene↔ui coupling.
    */
   readonly webglContextLost: boolean;
+  /**
+   * S23 — the v1→v2 migration EVENT counter.
+   *
+   * ## Discrete-event semantics (S23 pair-fix — GPT MED #2 / Opus INFO)
+   *
+   * The pre-pair-fix design used a `migrationJustHappened: boolean`
+   * flag. Zustand's default `Object.is` equality made a re-set of
+   * `true` while ALREADY `true` a NO-OP — so:
+   *   (i)  A v1→v2 load while a prior toast was still visible did
+   *        NOT restart the 8 s timer and did NOT re-announce.
+   *   (ii) The flag wasn't cleared on load-start, so a stale toast
+   *        could linger across a subsequent non-migrated load.
+   *
+   * The fix models the surface as a DISCRETE event stream:
+   *
+   *   - `migrationEventId: number` — monotonic counter.
+   *     Incremented by `notifyMigrationHappened()` from the
+   *     design-store's `loadFromFile` / `loadFromLocalStorage`
+   *     when `migrated === true`. Starts at `0` (no event).
+   *   - `dismissedMigrationEventId: number` — the id up to which
+   *     migration events are considered dismissed. Starts at `0`.
+   *     A dismiss action (`dismissMigration()`) sets it to the
+   *     current `migrationEventId`.
+   *
+   * The toast is visible iff `migrationEventId >
+   * dismissedMigrationEventId`. Each new migration bumps the
+   * event id, which — as long as it exceeds the last-dismissed id
+   * — flips the visibility back to true AND changes a `useEffect`
+   * dependency in `<MigrationToast>` so the 8 s auto-dismiss
+   * timer restarts fresh per event.
+   *
+   * ## Non-migrated loads (`{migrated: false}`)
+   *
+   * The load handlers do NOT touch either counter on a v2 load —
+   * that matches the pre-fix "boolean is false at rest" behaviour
+   * for successful non-migration loads. A stale toast (from a
+   * prior v1 load) is dismissed via the ordinary click / 8 s
+   * paths, not incidentally by a subsequent load.
+   *
+   * ## Why a `number` (not a `symbol` / opaque id)
+   *
+   * A `number` compares cheaply, serializes in dev-tools, and
+   * the "monotonic" invariant is trivially auditable. Overflow
+   * is not a concern (`Number.MAX_SAFE_INTEGER` ≈ 9e15; a real
+   * user cannot fire 9e15 migration events).
+   *
+   * ## Why a boolean, not a payload — historical note
+   *
+   * The pre-pair-fix rationale (a boolean is enough for a fixed-
+   * copy toast) still holds — the toast copy is compile-time
+   * pinned. Promoting to a `{id, from, to} | null` shape is a
+   * safe widening if a future story wants per-migration detail.
+   */
+  readonly migrationEventId: number;
+  /**
+   * See `migrationEventId` — the id up to which migration events
+   * are considered dismissed.
+   */
+  readonly dismissedMigrationEventId: number;
 }
 
 export interface UiStoreActions {
@@ -165,6 +224,24 @@ export interface UiStoreActions {
    * proper restore-and-recreate, this contract can loosen.
    */
   setWebglContextLost(lost: boolean): void;
+  /**
+   * S23 — notify that a v1→v2 migration just occurred. Called
+   * with no arguments by the design-store load handlers
+   * (`loadFromFile`, `loadFromLocalStorage`) when the
+   * application-layer loader returned `{migrated: true}`. Bumps
+   * `migrationEventId` by 1 — the monotonic counter is what makes
+   * two back-to-back migrations distinguishable (see doc on the
+   * state field for the full rationale — S23 pair-fix GPT MED #2).
+   */
+  notifyMigrationHappened(): void;
+  /**
+   * S23 — dismiss the CURRENT outstanding migration event. Called
+   * by `<MigrationToast>`'s click / 8 s auto-dismiss / unmount
+   * paths. Sets `dismissedMigrationEventId` to the current
+   * `migrationEventId`. Idempotent — repeated dismisses of the
+   * same event are no-ops.
+   */
+  dismissMigration(): void;
 }
 
 /**
@@ -210,6 +287,8 @@ export const useUiStore = create<UiStoreState & UiStoreActions>((set) => ({
   disclaimerAcknowledged: false,
   storageBanner: null,
   webglContextLost: false,
+  migrationEventId: 0,
+  dismissedMigrationEventId: 0,
 
   // ---- actions ---------------------------------------------------
   //
@@ -238,5 +317,19 @@ export const useUiStore = create<UiStoreState & UiStoreActions>((set) => ({
   },
   setWebglContextLost(webglContextLost): void {
     set({ webglContextLost });
+  },
+  notifyMigrationHappened(): void {
+    // Monotonic increment — see `migrationEventId` field doc for
+    // the discrete-event semantics. Uses the `(state) => ...`
+    // updater form so a rapid double-call (should never happen in
+    // real load handlers but defense in depth) sees the fresh
+    // counter each time.
+    set((state) => ({ migrationEventId: state.migrationEventId + 1 }));
+  },
+  dismissMigration(): void {
+    // Sync the dismissed pointer to the current event id — the
+    // toast's `migrationEventId > dismissedMigrationEventId`
+    // predicate falls to false, the render returns null.
+    set((state) => ({ dismissedMigrationEventId: state.migrationEventId }));
   },
 }));

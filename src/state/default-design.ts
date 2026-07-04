@@ -69,7 +69,7 @@
 
 import type { DeckDesign } from '../domain/model';
 import { MM_PER_FOOT } from '../domain/units';
-import { FOOTING_DEPTH_MM, FOOTING_WIDTH_MM } from '../domain/layout';
+import { defaultFoundationFor } from '../domain/foundation-defaults';
 
 /**
  * The frozen 5-tuple of default design parameters — issue #9 AC8
@@ -127,7 +127,6 @@ export function makeDefaultDesign(id: string, createdAt: string): DeckDesign {
     joistSpacingMm,
     joistNominal,
     beamNominal,
-    postNominal,
     deckingNominal,
     species,
     grade,
@@ -154,12 +153,27 @@ export function makeDefaultDesign(id: string, createdAt: string): DeckDesign {
     // truth for the post material — the previous top-level
     // `design.post` field was removed to eliminate the dual-SoT
     // drift bug (see model.ts FoundationSpec doc).
+    //
+    // S23 pair-fix (Opus #4) — the foundation is stamped via
+    // `defaultFoundationFor('posts-on-footings')` from
+    // `domain/foundation-defaults.ts`. That module is the SINGLE
+    // source of truth for the "what does a fresh <foundation> look
+    // like?" defaults (6×6 PT No2 post + 300×300 mm footing) — the
+    // three call sites (this factory, StructureSelector,
+    // FoundationTypeSelector) all read through it. The pinned values
+    // are asserted byte-stable by `foundation-defaults.test.ts` and
+    // by this file's `spanCheck === []` regression.
+    //
+    // NOTE: `DEFAULT_DESIGN_PARAMS.postNominal` is retained as a
+    // frozen record for backward-compat with any consumer that
+    // reads the manifest directly (there are none in tree today
+    // outside the manifest's own test); the ACTUAL post material
+    // used in the boot design is the one from
+    // `defaultFoundationFor('posts-on-footings')`. The two are
+    // byte-identical (6×6 PT No2) — the domain-owned defaults are
+    // authoritative going forward.
     structure: 'elevated',
-    foundation: {
-      type: 'posts-on-footings',
-      post: { nominal: postNominal, species, grade },
-      footing: { widthMm: FOOTING_WIDTH_MM, depthMm: FOOTING_DEPTH_MM },
-    },
+    foundation: defaultFoundationFor('posts-on-footings'),
     joist: {
       material: { nominal: joistNominal, species, grade },
       spacingMm: joistSpacingMm,

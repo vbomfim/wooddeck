@@ -1,0 +1,74 @@
+/*
+ * `src/ui/styles/foundation-type-selector.css` — S23 issue #45 AC2.
+ *
+ * Labelled `<select>` with a description region that is EITHER:
+ *   - visually visible (when a compat reason is active — WCAG FR-030
+ *     surface-as-text requirement, S23 pair-fix Opus MED #3), or
+ *   - visually hidden but a11y-tree-present (the default hint copy).
+ * Both branches share the `aria-describedby` wiring so screen
+ * readers hear the current text on focus.
+ */
+.wd-foundation-type-selector {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: var(--wd-space-2) var(--wd-space-3);
+  align-items: start;
+}
+
+.wd-foundation-type-selector__label {
+  font-weight: 600;
+  color: var(--wd-color-text);
+  align-self: center;
+}
+
+.wd-foundation-type-selector__select {
+  padding: var(--wd-space-1) var(--wd-space-2);
+  border: 1px solid var(--wd-color-border);
+  border-radius: 4px;
+  background: var(--wd-color-surface);
+  color: var(--wd-color-text);
+  font: inherit;
+}
+
+.wd-foundation-type-selector__select:focus-visible {
+  outline: var(--wd-focus-outline-width) solid var(--wd-focus-outline-color);
+  outline-offset: 2px;
+}
+
+/*
+ * Description hint (default, when no compat reason is active) —
+ * visually hidden but readable by assistive tech (WCAG "sr-only"
+ * pattern). Absolute-positioned + clipped so it never influences
+ * layout while remaining in the DOM.
+ */
+.wd-foundation-type-selector__hint {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/*
+ * Active compat-reason caption (S23 pair-fix Opus MED #3) —
+ * VISIBLE below the select so a sighted keyboard-only user learns
+ * WHY the disabled option is disabled. Uses the same muted-amber
+ * palette S16's remediation labels use — informational, not error.
+ * Grid column 2 puts it under the <select> and out of the label
+ * gutter.
+ */
+.wd-foundation-type-selector__reason {
+  grid-column: 2;
+  margin-top: var(--wd-space-1);
+  padding: var(--wd-space-1) var(--wd-space-2);
+  background: var(--wd-color-banner-recompute-bg);
+  color: var(--wd-color-banner-recompute-text);
+  border: 1px solid var(--wd-color-banner-recompute-border);
+  border-radius: 4px;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}

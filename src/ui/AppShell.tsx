@@ -76,6 +76,7 @@ import { AppHeader } from './AppHeader';
 import { ContextLostBanner } from './ContextLostBanner';
 import { DisclaimerBanner } from './DisclaimerBanner';
 import { StorageBanner } from './StorageBanner';
+import { MigrationToast } from './MigrationToast';
 
 /**
  * Props for {@link AppShell}. All three slots are REQUIRED —
@@ -115,6 +116,17 @@ export function AppShell(props: AppShellProps): JSX.Element {
        * when false, so no layout shift on the happy path.
        */}
       <ContextLostBanner />
+
+      {/*
+       * MigrationToast (S23 issue #45 AC5/AC6) — fixed-position
+       * bottom-right toast that appears when the design-store
+       * loads a v1 envelope and reports `migrated === true`. Does
+       * NOT occupy layout space (position: fixed), so mounting
+       * inside the AppShell body is safe. Auto-dismisses at 8 s or
+       * on user click. Renders `null` when the ui-store flag is
+       * false, so no DOM churn on the happy path.
+       */}
+      <MigrationToast />
 
       {/*
        * AppHeader — h1 name, version, spec link.

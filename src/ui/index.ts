@@ -92,3 +92,26 @@ export {
   RESET_CONFIRM_TEXT,
 } from './export-menu-helpers';
 export { SidePanels } from './SidePanels';
+
+// ---- S23 issue #45 — v1→v2 migration toast + foundation selectors --------
+//
+// The migration toast is a small custom widget (~40 lines) that
+// reactively renders the ui-store's discrete migration-event
+// counters (`migrationEventId` / `dismissedMigrationEventId` — see
+// the S23 pair-fix in `state/ui-store.ts` for the discrete-event
+// rationale). See `MigrationToast.tsx` for the "why not a toast
+// library" trade-off decision (ticket §17). The three
+// foundation-related field components mirror the S13 field-primitive
+// layout (fields/ subdirectory) but each carries S23-specific
+// behaviour — the StructureSelector's atomic re-stamp, the
+// FoundationTypeSelector's compat-matrix-driven disabled reasons,
+// and the BlockProductSelector's category filter.
+export {
+  MIGRATION_TOAST_AUTO_DISMISS_MS,
+  MIGRATION_TOAST_MESSAGE,
+  MigrationToast,
+} from './MigrationToast';
+export { StructureSelector } from './fields/StructureSelector';
+export { FoundationTypeSelector } from './fields/FoundationTypeSelector';
+export { BlockProductSelector } from './fields/BlockProductSelector';
+

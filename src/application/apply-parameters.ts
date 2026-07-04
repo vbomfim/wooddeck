@@ -19,6 +19,61 @@
  * not element-by-element merge, so undo/redo snapshots stay
  * consistent — see `types.ts` `DeepPartial` doc.
  *
+ * ## S23 — discriminated-union `type`-tag switch (REPLACE)
+ *
+ * `DeckDesign.foundation` is a discriminated union tagged on `.type`
+ * (see `domain/model.ts` `FoundationSpec`). A caller flipping the
+ * discriminator — e.g. `{foundation: {type:'tuffblocks', product:...}}`
+ * on top of the current `{type:'posts-on-footings', post:..., footing:...}`
+ * — MUST cause the whole subtree to be REPLACED, not deep-merged.
+ * A merge would carry the OLD variant's sibling keys (`post`,
+ * `footing`) into a hybrid shape that matches NO discriminant of
+ * the union, and would then fail the unknown-key check on the NEW
+ * variant's fields (`product` isn't a key of `posts-on-footings`).
+ * That would break S23's atomic structure↔foundation re-stamp.
+ *
+ * `deepMerge` detects a discriminator switch via
+ * `isDiscriminatorSwitch(currentValue, patchValue)`: both are plain
+ * objects, both have an own `type` string, and the two `type`
+ * values DIFFER. In that case the OLD subtree is dropped and the
+ * new patch value is installed verbatim (as a fresh shallow copy so
+ * the caller's patch is untouched).
+ *
+ * ### REPLACE-path invariants (S23 pair-fix — BLOCKING #1)
+ *
+ * The replacement subtree is validated by
+ * `assertReplacementSubtreeSafe` BEFORE installation:
+ *
+ *   - **Recursive FORBIDDEN_KEYS walk.** A JSON.parse-preserved
+ *     `__proto__` / `constructor` / `prototype` at ANY depth in
+ *     the replacement (e.g. `foundation.product.__proto__`) is
+ *     rejected with `ApplyParametersError` naming the full
+ *     dotted path. The pre-fix version checked only top-level
+ *     keys — a nested attack bypassed the whole defense despite
+ *     the module docstring promising recursion.
+ *   - **Variant-key-aware shape check for `foundation` targets.**
+ *     `FoundationSpec` (see `domain/model.ts`) is a discriminated
+ *     union tagged on `type`; each variant declares a fixed set
+ *     of allowed own keys (FR-026). A REPLACE payload MUST NOT
+ *     carry keys outside the target variant's allowed set — a
+ *     stale-spread pattern like `{...current.foundation, type:
+ *     'tuffblocks', product}` that drags `post`+`footing` from a
+ *     former posts-on-footings variant produces a hybrid
+ *     runtime object matching NO discriminant, and is rejected
+ *     with `ApplyParametersError` naming the offending key +
+ *     the target variant. The FR-026-legit optional leaves
+ *     (`blockRowsHint` / `blockColsHint` on the block variants —
+ *     S25 / ticket #47) ARE in the allow set so REPLACE and the
+ *     S25 leaf-allowlist mechanism don't collide.
+ *
+ * Downstream `computeLayoutAndCheck` remains the authoritative
+ * validator of the resulting shape's REQUIRED fields (a variant
+ * missing its mandatory field → `LayoutError`).
+ *
+ * Same-value `type` is NOT a switch and still deep-merges — a
+ * caller can patch `foundation.product.productId` in place without
+ * abandoning the surrounding subtree.
+ *
  * ## Prototype-pollution safety
  *
  * Untrusted patches (from JSON.parse of a .deck file, from a state-
@@ -289,6 +344,413 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * S23 — is this pair a discriminated-union `type`-tag switch?
+ *
+ * Returns `true` iff BOTH `current` and `patch` are plain objects
+ * whose own key `type` is a string, AND the two string values
+ * DIFFER. This is the exact shape a discriminated union takes when
+ * a caller flips the discriminator (e.g. `foundation.type` from
+ * `'posts-on-footings'` to `'tuffblocks'`).
+ *
+ * When true, the caller (`deepMerge`) treats the patch subtree as a
+ * full REPLACE — no per-key merge, no unknown-key scan against the
+ * old variant. This is the ONLY situation in which deep-merge
+ * abandons its structural-sharing discipline for a subtree: the
+ * caller has explicitly declared a new shape by flipping the tag.
+ *
+ * ## Why check the CURRENT value's `type` too
+ *
+ * A subtree that ISN'T a discriminated union (e.g. `footprint`)
+ * has no `type` field; the check bails out on the missing/non-string
+ * `current.type`, so accidentally naming a field `type` on a
+ * non-discriminant subtree doesn't silently switch merge semantics.
+ *
+ * ## Same-value `type` is NOT a switch
+ *
+ * `current.type === patch.type` means the caller is keeping the
+ * current variant — the standard deep-merge applies (so a caller
+ * can patch `foundation.product.productId` in place).
+ */
+function isDiscriminatorSwitch(
+  currentValue: Record<string, unknown>,
+  patchValue: Record<string, unknown>,
+): boolean {
+  const currentType = currentValue['type'];
+  const patchType = patchValue['type'];
+  return (
+    typeof currentType === 'string' &&
+    typeof patchType === 'string' &&
+    currentType !== patchType
+  );
+}
+
+/**
+ * S23 — validate a REPLACE-subtree payload BEFORE installing it.
+ *
+ * ## Two invariants enforced (S23 pair-fix BLOCKING #1)
+ *
+ * The pre-pair-fix version walked ONLY the top-level keys of the
+ * replacement subtree, calling `FORBIDDEN_KEYS.has(key)`. Two
+ * defects — both flagged by three reviewers (Opus HIGH, GPT HIGH,
+ * Security MED) — motivated the rewrite:
+ *
+ *   1. **Nested prototype pollution.** A JSON.parse-preserved
+ *      `__proto__` / `constructor` / `prototype` at depth ≥ 2
+ *      (e.g. `foundation.product.__proto__`) BYPASSED the check —
+ *      even though the module docstring PROMISES recursive
+ *      protection and the deep-merge path (non-REPLACE) DOES
+ *      recurse. Fix: walk every plain-object descendant AND
+ *      every array element (iter-2: array traversal — defense
+ *      in depth for future variants; FoundationSpec has no array
+ *      fields today).
+ *
+ *   2. **Orphan variant keys (FR-026) at TOP LEVEL and NESTED.**
+ *      A stale-spread patch like `{ foundation: {
+ *      ...current.foundation, type: 'tuffblocks', product } }`
+ *      produced a hybrid `tuffblocks` foundation still carrying
+ *      `post` + `footing`, matching NO discriminant of
+ *      `FoundationSpec`. Fix: at the FOUNDATION top level, reject
+ *      keys outside the variant's allowed set (per FR-026 shape).
+ *      Iter-2: same at the NESTED level — `product` must be
+ *      `{productId}` only; `post` only `MaterialRef` keys
+ *      (nominal/species/grade); `footing` only `{widthMm,depthMm}`.
+ *
+ * ## Interaction with S25's optional-leaf allowlist
+ *
+ * The block variants (`deck-blocks`, `tuffblocks`) legitimately
+ * carry OPTIONAL `blockRowsHint` / `blockColsHint` (S25 / ticket
+ * #47). The variant-key allow set INCLUDES those two names at the
+ * FOUNDATION TOP level so a REPLACE that installs them does NOT
+ * collide with S25's leaf-allowlist. The two mechanisms are
+ * orthogonal: S25's allowlist covers deep-merge inserts (adding a
+ * hint to a foundation without one); this check covers REPLACE
+ * shape (the whole subtree is written verbatim).
+ *
+ * ## Recursion & error priority
+ *
+ * `assertNoForbiddenKeysDeep` walks BOTH plain-object descendants
+ * (recursing into own values) AND array elements (recursing into
+ * each plain-object element by index). Primitives are skipped.
+ * The path convention: dotted for object keys (`foo.bar`),
+ * bracketed for array indices (`foo[0]`, `foo[0].bar[1]`) — reads
+ * naturally in a stack trace.
+ *
+ * The dispatcher runs `assertNoForbiddenKeysDeep` FIRST — a
+ * prototype-pollution vector is a higher-priority error than a
+ * variant-shape mismatch, so a payload that would fail BOTH
+ * reports the security error first. Then the variant top-level
+ * check, then the nested-shape check.
+ *
+ * @throws {ApplyParametersError} naming the FULL dotted path to the
+ *   offending key (forbidden vector OR orphan variant key OR
+ *   nested orphan).
+ */
+function assertReplacementSubtreeSafe(
+  patchValue: Record<string, unknown>,
+  pathPrefix: string,
+): void {
+  // 1. Recursive FORBIDDEN_KEYS walk — highest-priority error.
+  //    A prototype-pollution vector anywhere in the payload is
+  //    reported before any shape-mismatch error, so a rogue
+  //    input that ALSO happens to have an orphan variant key
+  //    surfaces the security bug first.
+  assertNoForbiddenKeysDeep(patchValue, pathPrefix);
+  // 2. Variant-key-awareness for the `foundation` subtree —
+  //    reject own keys not in the target variant's allowed set.
+  //    FR-026 top-level shape defense. Only fires when the
+  //    caller targets `foundation` (identifiable by the exact
+  //    prefix `foundation.`).
+  if (pathPrefix === 'foundation.') {
+    assertFoundationReplacementShape(patchValue);
+    // 3. Nested-shape check — `foundation.product` must be
+    //    `{productId}`, `foundation.post` a `MaterialRef`,
+    //    `foundation.footing` a `FootingSpec`. Rejects orphan
+    //    keys under any of those (FR-026 at depth ≥ 2).
+    assertFoundationNestedShape(patchValue);
+  }
+}
+
+/**
+ * S23 pair-fix BLOCKING #1(a) — recursive FORBIDDEN_KEYS walk
+ * (iter-2 extended: descends into arrays too).
+ *
+ * Walks `value` and every plain-object descendant, throwing
+ * `ApplyParametersError` on the first forbidden key found (naming
+ * the full dotted path from the patch root). When a value is an
+ * ARRAY, iterates its elements and recurses into each plain-object
+ * element by index — the path convention is `[idx]` bracketed
+ * (e.g. `foundation.someArray[0].__proto__`).
+ *
+ * Primitives and non-plain non-array objects (Date, Map, class
+ * instances) are skipped. `Object.keys` returns only OWN
+ * enumerable string keys — no `hasOwnProperty` / `toString`
+ * ambient noise — but a JSON.parse-preserved `__proto__` IS an
+ * own key on plain objects, so this check fires there.
+ *
+ * FoundationSpec has no array fields today, so the array branch
+ * is not reachable from a valid domain shape via the public API.
+ * It exists as defense in depth: a future variant addition that
+ * introduces an array-typed field (or a payload constructed with
+ * an orphan array key that this dispatcher's variant-shape check
+ * would ALSO reject downstream) is caught here first because the
+ * dispatcher runs this walk BEFORE the shape checks — a
+ * prototype-pollution vector is always the higher-priority error.
+ *
+ * Exported semantically (via `assertReplacementSubtreeSafe`) so
+ * only the REPLACE path calls it; the deep-merge path already
+ * catches every FORBIDDEN_KEY at every level via its own iteration
+ * loop.
+ */
+function assertNoForbiddenKeysDeep(
+  value: Record<string, unknown>,
+  pathPrefix: string,
+): void {
+  for (const key of Object.keys(value)) {
+    if (FORBIDDEN_KEYS.has(key)) {
+      throw new ApplyParametersError(
+        `${pathPrefix}${key}`,
+        `Forbidden key '${key}' in discriminator-switch replacement at path '${pathPrefix}${key}' (prototype-pollution defence — see apply-parameters.ts module docs)`,
+      );
+    }
+    const child = value[key];
+    if (isPlainObject(child)) {
+      assertNoForbiddenKeysDeep(child, `${pathPrefix}${key}.`);
+      continue;
+    }
+    if (Array.isArray(child)) {
+      // Iter-2 gap #1 — array traversal. Walk each element by
+      // index; recurse into plain-object elements, skip
+      // primitives. Nested arrays recurse via the same branch
+      // (`walkArray` calls this function again for each
+      // plain-object element AND recurses through its own
+      // Array.isArray check).
+      walkArrayForForbiddenKeys(child, `${pathPrefix}${key}`);
+      continue;
+    }
+    // Primitives / non-plain non-array objects: skip. A non-plain
+    // object at this depth is either a Date/Map/class instance the
+    // caller sent by accident (downstream `computeLayoutAndCheck`
+    // catches it as an unknown value type) or a prototype-backed
+    // bag whose OWN keys are empty — no attack surface here.
+  }
+}
+
+/**
+ * Iter-2 helper for `assertNoForbiddenKeysDeep` — walks an array
+ * looking for FORBIDDEN keys in plain-object elements. Nested
+ * arrays are traversed recursively; primitive elements are
+ * skipped. The path convention is `[idx]` bracketed so the
+ * error message reads naturally
+ * (e.g. `foundation.nested[0][0].constructor`).
+ *
+ * Kept as a small dedicated helper (rather than folded into
+ * `assertNoForbiddenKeysDeep` via a union parameter type) because
+ * the loop indexes an array vs an object's own keys — different
+ * iteration primitive. Single-responsibility per helper.
+ */
+function walkArrayForForbiddenKeys(
+  arr: readonly unknown[],
+  pathPrefix: string,
+): void {
+  for (let i = 0; i < arr.length; i += 1) {
+    const element = arr[i];
+    if (isPlainObject(element)) {
+      assertNoForbiddenKeysDeep(element, `${pathPrefix}[${i}].`);
+      continue;
+    }
+    if (Array.isArray(element)) {
+      walkArrayForForbiddenKeys(element, `${pathPrefix}[${i}]`);
+      continue;
+    }
+    // Primitive: no FORBIDDEN keys reachable.
+  }
+}
+
+/**
+ * S23 pair-fix BLOCKING #1(b) — variant-key-aware shape check for
+ * `foundation` REPLACE payloads.
+ *
+ * The `FoundationSpec` union is discriminated on `type` (FR-026).
+ * Each variant declares a FIXED set of allowed own keys — plus
+ * two OPTIONAL keys on the block variants (S25 leaf allowlist).
+ * A REPLACE payload MUST NOT carry keys outside the target
+ * variant's allowed set; a stale-spread pattern that dragged
+ * old-variant keys into the new variant (e.g. `post`+`footing`
+ * on a `tuffblocks` payload) would produce a hybrid runtime
+ * object matching NO variant — FR-026 violation.
+ *
+ * The allowed-key sets are derived from `FoundationSpec` in
+ * `src/domain/model.ts` — every literal here corresponds 1:1 to a
+ * TS field of the union. A future variant extension (e.g. adding
+ * `helical-pier` type with a `depthMm` field) MUST update this
+ * map AND `FoundationSpec`; the tests here catch a drift.
+ *
+ * @throws {ApplyParametersError} naming the first offending key
+ *   PLUS the target variant name.
+ */
+function assertFoundationReplacementShape(
+  patchValue: Record<string, unknown>,
+): void {
+  const rawType = patchValue['type'];
+  // If `type` is missing / not a string, the discriminator-switch
+  // predicate would not have fired — but defense in depth: if
+  // somehow this validator is called on a non-discriminant
+  // shape, we cannot look up an allow set. Fall back to a
+  // permissive check (the recursive FORBIDDEN_KEYS pass still
+  // runs; downstream `computeLayoutAndCheck` catches the missing
+  // discriminator as a `LayoutError`).
+  if (typeof rawType !== 'string') return;
+  const allowed = FOUNDATION_VARIANT_ALLOWED_KEYS[rawType];
+  if (allowed === undefined) {
+    // Unknown variant string — a future story added a variant to
+    // the type union but forgot to update this map. Fail loud so
+    // the omission is caught in test rather than at runtime.
+    throw new ApplyParametersError(
+      'foundation.type',
+      `Unknown foundation variant '${rawType}' in REPLACE payload — ` +
+        `expected one of ${Object.keys(FOUNDATION_VARIANT_ALLOWED_KEYS).join(', ')}. ` +
+        `Update FOUNDATION_VARIANT_ALLOWED_KEYS in apply-parameters.ts when ` +
+        `adding a new FoundationSpec variant (see domain/model.ts).`,
+    );
+  }
+  for (const key of Object.keys(patchValue)) {
+    // FORBIDDEN_KEYS are checked separately (recursive pass).
+    // Do NOT double-report a `__proto__` here as an "orphan
+    // variant key" — the prototype-pollution error is the more
+    // informative one.
+    if (FORBIDDEN_KEYS.has(key)) continue;
+    if (!allowed.has(key)) {
+      throw new ApplyParametersError(
+        `foundation.${key}`,
+        `Key 'foundation.${key}' is not a field of the '${rawType}' variant ` +
+          `(FR-026 shape violation). The '${rawType}' variant accepts only: ` +
+          `${Array.from(allowed).sort().join(', ')}. This usually indicates a ` +
+          `stale-spread pattern in a UI selector — e.g. \`{...current.foundation, ` +
+          `type: '${rawType}', ...}\` carrying keys from the previous variant. ` +
+          `Emit a fresh subtree instead. See apply-parameters.ts module docs.`,
+      );
+    }
+  }
+}
+
+/**
+ * S23 pair-fix BLOCKING #1(b) — the per-variant allowed-key map.
+ *
+ * Derived from `FoundationSpec` in `src/domain/model.ts`:
+ *
+ *   - `posts-on-footings` : { type, post, footing }
+ *   - `deck-blocks`       : { type, product, blockRowsHint?, blockColsHint? }
+ *   - `tuffblocks`        : { type, product, blockRowsHint?, blockColsHint? }
+ *
+ * The two hint keys are declared OPTIONAL on the block variants
+ * (S25 / ticket #47) — they belong in the allow set because a
+ * REPLACE payload MAY carry them (the S25 add-support-row
+ * remediation produces such patches, and the S23 pair-fix test
+ * suite explicitly asserts they're accepted).
+ *
+ * Kept as a `ReadonlyMap<Set>` so the check is O(1) per key. The
+ * map is built from a literal at module load; a lint of the
+ * literal against `FoundationSpec` runs in
+ * `apply-parameters.test.ts` via the "accept legit REPLACE"
+ * fixtures — a drift here (e.g. adding a new required field to
+ * `FoundationSpec` without updating this map) fails those tests.
+ */
+const FOUNDATION_VARIANT_ALLOWED_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
+  'posts-on-footings': new Set(['type', 'post', 'footing']),
+  'deck-blocks': new Set(['type', 'product', 'blockRowsHint', 'blockColsHint']),
+  'tuffblocks': new Set(['type', 'product', 'blockRowsHint', 'blockColsHint']),
+};
+
+/**
+ * S23 pair-fix iter-2 gap #2 — allowed keys for NESTED foundation
+ * subobjects.
+ *
+ * Derived from `FoundationSpec` in `src/domain/model.ts`:
+ *
+ *   - `product` : `FoundationBlockRef` = `{ productId }`
+ *   - `post`    : `MaterialRef`        = `{ nominal, species, grade }`
+ *   - `footing` : `FootingSpec`        = `{ widthMm, depthMm }`
+ *
+ * A REPLACE payload MUST NOT smuggle extra keys inside any of
+ * these nested objects — an installed `foundation.product.orphan`
+ * would leak stale state into the persisted design (FR-026
+ * violation at depth ≥ 2). This map is the source of truth for
+ * the nested shape check; a `FoundationSpec` change (new field on
+ * MaterialRef, e.g.) requires updating BOTH `model.ts` and this
+ * literal — the "positive control" REPLACE tests catch the drift.
+ *
+ * Note: the `blockRowsHint` / `blockColsHint` keys are OPTIONAL
+ * LEAVES at the FOUNDATION TOP level (not nested under `product`),
+ * so they belong in `FOUNDATION_VARIANT_ALLOWED_KEYS` above, NOT
+ * here. This map is only consulted when the outer key is one of
+ * `product` / `post` / `footing`.
+ */
+const FOUNDATION_NESTED_ALLOWED_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
+  product: new Set(['productId']),
+  post: new Set(['nominal', 'species', 'grade']),
+  footing: new Set(['widthMm', 'depthMm']),
+};
+
+/**
+ * S23 pair-fix iter-2 gap #2 — nested-shape check for the
+ * `foundation` REPLACE payload.
+ *
+ * Validates that each of `patchValue.product`, `patchValue.post`,
+ * `patchValue.footing` — when present — is a PLAIN OBJECT whose
+ * own keys are a subset of the corresponding
+ * `FOUNDATION_NESTED_ALLOWED_KEYS[k]` set. Non-object values at
+ * a required nested slot (e.g. `product: []`) are rejected with
+ * a clear "expected a plain object" error so the REPLACE branch
+ * does not install a shape-broken subtree.
+ *
+ * Runs AFTER `assertNoForbiddenKeysDeep` and
+ * `assertFoundationReplacementShape` in the dispatcher — the
+ * top-level variant check already guarantees `patchValue`'s keys
+ * are a subset of `{type,post,footing,product,blockRowsHint,
+ * blockColsHint}` for the target variant, so we only need to
+ * inspect the ones that appear in this nested-allowed map.
+ *
+ * @throws {ApplyParametersError} naming the FULL dotted path to
+ *   the offending nested key (e.g. `foundation.product.orphan`)
+ *   OR the shape-mismatched nested slot itself when a required
+ *   nested field is not a plain object.
+ */
+function assertFoundationNestedShape(
+  patchValue: Record<string, unknown>,
+): void {
+  for (const nestedKey of Object.keys(FOUNDATION_NESTED_ALLOWED_KEYS)) {
+    if (!(nestedKey in patchValue)) continue;
+    const nestedValue = patchValue[nestedKey];
+    // The nested slot MUST be a plain object — a bare array,
+    // primitive, or class instance at `foundation.product` etc.
+    // would install a shape-broken subtree.
+    if (!isPlainObject(nestedValue)) {
+      throw new ApplyParametersError(
+        `foundation.${nestedKey}`,
+        `Expected a plain object at 'foundation.${nestedKey}' — refusing to REPLACE a domain subtree with a non-plain value (${
+          Array.isArray(nestedValue) ? 'received an Array' : `received ${nestedValue === null ? 'null' : typeof nestedValue}`
+        }). See apply-parameters.ts module docs.`,
+      );
+    }
+    const allowed = FOUNDATION_NESTED_ALLOWED_KEYS[nestedKey]!;
+    for (const key of Object.keys(nestedValue)) {
+      // FORBIDDEN_KEYS handled by the recursive walk (higher
+      // priority error). Don't double-report.
+      if (FORBIDDEN_KEYS.has(key)) continue;
+      if (!allowed.has(key)) {
+        throw new ApplyParametersError(
+          `foundation.${nestedKey}.${key}`,
+          `Key 'foundation.${nestedKey}.${key}' is not a field of the '${nestedKey}' sub-object ` +
+            `(FR-026 nested shape violation). '${nestedKey}' accepts only: ` +
+            `${Array.from(allowed).sort().join(', ')}. Emit a fresh nested subtree ` +
+            `matching the FoundationSpec shape in domain/model.ts. See apply-parameters.ts module docs.`,
+        );
+      }
+    }
+  }
+}
+
+/**
  * Recursive deep-merge of `patch` into `current`. Produces a NEW
  * top-level object at every level of the patch (immutability
  * guarantee — AC4). Untouched subtrees are structurally SHARED
@@ -357,6 +819,32 @@ function deepMerge<T extends object>(
           `${pathPrefix}${key}`,
           `Expected a plain object at '${pathPrefix}${key}' — refusing to REPLACE a domain subtree with a non-plain value (prototype-pollution defence — see apply-parameters.ts module docs)`,
         );
+      }
+      // S23 — discriminated-union `type`-tag switch.
+      //
+      // When BOTH current and patch declare a `type` string and the
+      // two values DIFFER, the caller is explicitly flipping the
+      // union's discriminator (e.g. `foundation.type` from
+      // `'posts-on-footings'` to `'tuffblocks'`). Deep-merging the
+      // two variants would carry the OLD variant's sibling keys
+      // (`post`, `footing`) into a shape that matches NO discriminant
+      // of the union — a hybrid runtime object that would then fail
+      // the unknown-key check on the NEW variant's fields (`product`
+      // isn't a key of `posts-on-footings`), breaking S23's atomic
+      // structure↔foundation re-stamp.
+      //
+      // The REPLACE path drops the OLD subtree, validates the NEW
+      // one against FORBIDDEN_KEYS (defense in depth — a JSON.parse
+      // payload can still carry `__proto__`), and installs it
+      // verbatim. Downstream `computeLayoutAndCheck` remains the
+      // authoritative validator of the resulting shape's fields
+      // (missing required field → LayoutError).
+      if (isDiscriminatorSwitch(currentValue, patchValue)) {
+        assertReplacementSubtreeSafe(patchValue, `${pathPrefix}${key}.`);
+        // Fresh shallow copy so the caller's patch object stays
+        // untouched (immutability discipline).
+        result[key] = { ...patchValue };
+        continue;
       }
       // Recurse: extend the path prefix so nested errors report the
       // full dotted path (e.g. `footprint.rogueField`).
