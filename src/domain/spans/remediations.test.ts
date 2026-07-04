@@ -31,6 +31,7 @@ import { describe, expect, it } from 'vitest';
 import { MM_PER_FOOT, type Mm } from '../units';
 import type {
   DeckDesign,
+  FoundationSpec,
   MaterialRef,
   MemberKind,
   Warning,
@@ -993,6 +994,25 @@ function applyPatchLikeStateWould(
           },
         },
       };
+    case 'add-support-row': {
+      // S25 (ticket #47) — mirror the domain module's
+      // `applyPatchForVerification` semantics: bump
+      // `foundation.blockRowsHint` on the (deck-blocks /
+      // tuffblocks) foundation. `produceAddSupportRow` never
+      // emits this patch for `posts-on-footings`, so the guard
+      // here is defence-in-depth and returns the design
+      // unchanged for that case.
+      if (design.foundation.type === 'posts-on-footings') {
+        return design;
+      }
+      return {
+        ...design,
+        foundation: {
+          ...design.foundation,
+          blockRowsHint: patch.proposedRows,
+        },
+      };
+    }
   }
 }
 
@@ -1063,6 +1083,208 @@ describe('computeRemediations — Composite → wood species swap forces grade N
     // fixed "grade" mismatch.
     if (!change.disabled) {
       expect(change.wouldClear).toBe(true);
+    }
+  });
+});
+
+// ==========================================================
+// S25 — add-support-row remediation (ticket #47)
+// ==========================================================
+//
+// Extends S16's compute-remediations pattern to floating decks:
+// an over-span-beam warning on a floating (deck-blocks / tuffblocks)
+// design can be remediated by ADDING a row of blocks under the
+// beam — the added support reduces the beam-to-support span.
+//
+// Coverage:
+//   - AC1  Floating over-span beam warning under deck-blocks /
+//          tuffblocks → produces an `add-support-row` option with
+//          `proposedRows = currentRows + 1`.
+//   - AC5  Elevated designs with an over-span beam warning → NO
+//          `add-support-row` proposed. Only S16's beam remediations
+//          apply (post-MVP: elevated intermediate-beam variant is
+//          deferred per ticket §16, Q7).
+//   - AC6  Floating with `posts-on-footings` (invalid combo, but
+//          defense-in-depth) → NO `add-support-row` proposed.
+//   - AC8  Ordering — add-support-row FIRST (least invasive: no
+//          material change), THEN upgrade-beam-size (medium),
+//          change-beam-species (largest).
+//   - proposedRows-vs-currentRows arithmetic
+//   - wouldClear ground-truth via recompute (S16 pair-fix)
+
+const PT_2X8: MaterialRef = { nominal: '2x8', species: 'PT', grade: 'No2' };
+const PT_54: MaterialRef = { nominal: '5/4x6', species: 'PT', grade: 'No2' };
+const TUFFBLOCK_FOUNDATION: Extract<
+  FoundationSpec,
+  { type: 'deck-blocks' | 'tuffblocks' }
+> = { type: 'tuffblocks', product: { productId: 'tuffblock-12x12x4' } };
+
+/**
+ * A floating DeckDesign with an artificially-small blockRowsHint
+ * so the derived layout produces an over-span-beam warning. Used
+ * by the S25 remediation + apply tests.
+ */
+function makeFloating(overrides: {
+  readonly widthFt?: number;
+  readonly lengthFt?: number;
+  readonly blockRowsHint?: number;
+} = {}): DeckDesign {
+  const widthFt = overrides.widthFt ?? 12;
+  const lengthFt = overrides.lengthFt ?? 12;
+  const foundation: FoundationSpec =
+    overrides.blockRowsHint !== undefined
+      ? { ...TUFFBLOCK_FOUNDATION, blockRowsHint: overrides.blockRowsHint }
+      : TUFFBLOCK_FOUNDATION;
+  return {
+    id: '00000000-0000-4000-8000-000000000025',
+    createdAt: '2026-07-04T00:00:00.000Z',
+    footprint: {
+      widthMm: widthFt * MM_PER_FOOT,
+      lengthMm: lengthFt * MM_PER_FOOT,
+      // MIN legal height for 2×8 beam + 5/4×6 decking (184 + 25).
+      heightMm: 209,
+    },
+    structure: 'floating',
+    foundation,
+    joist: { material: PT_2X8, spacingMm: 406 },
+    beam: { material: PT_2X8 },
+    decking: { material: PT_54, orientation: 'parallel-to-width' },
+    layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+  };
+}
+
+describe('computeRemediations — S25 add-support-row (ticket #47)', () => {
+  it('AC1 — floating over-spanned beam under tuffblocks → add-support-row proposed with proposedRows=currentRows+1', () => {
+    // 12 ft × 12 ft floating, 2×8 PT beam, blockRowsHint = 2:
+    //   step = 3657.6 mm >> allowable (~2400 mm at 1828.8 mm trib).
+    // Over-span warning fires on the beam(s). computeRemediations
+    // should include an `add-support-row` option with
+    // currentRows=2, proposedRows=3.
+    const design = makeFloating({ widthFt: 12, lengthFt: 12, blockRowsHint: 2 });
+    const initial = RECOMPUTE(design);
+    const beamWarning = initial.find((w) => w.kind === 'over-span-beam');
+    expect(beamWarning).toBeDefined();
+    if (!beamWarning) return;
+
+    const options = computeRemediations(beamWarning, design, IRC, RECOMPUTE);
+    const addSupport = options.find((o) => o.kind === 'add-support-row');
+    expect(addSupport).toBeDefined();
+    if (!addSupport) return;
+    expect(addSupport.patch.kind).toBe('add-support-row');
+    if (addSupport.patch.kind === 'add-support-row') {
+      expect(addSupport.patch.currentRows).toBe(2);
+      expect(addSupport.patch.proposedRows).toBe(3);
+      expect(addSupport.patch.targetBeamId).toBe(beamWarning.memberId);
+    }
+  });
+
+  it('AC1 — recompute-verified wouldClear is TRUE when +1 row drops the step below allowable', () => {
+    // 12 ft length, hint=2 → step=3657.6 mm (over-span).
+    // hint=3 → step=1828.8 mm (≤ ~2400 mm allowable) → clears.
+    const design = makeFloating({ widthFt: 12, lengthFt: 12, blockRowsHint: 2 });
+    const initial = RECOMPUTE(design);
+    const beamWarning = initial.find((w) => w.kind === 'over-span-beam');
+    expect(beamWarning).toBeDefined();
+    if (!beamWarning) return;
+    const options = computeRemediations(beamWarning, design, IRC, RECOMPUTE);
+    const addSupport = options.find((o) => o.kind === 'add-support-row');
+    expect(addSupport).toBeDefined();
+    if (!addSupport) return;
+    expect(addSupport.wouldClear).toBe(true);
+    expect(addSupport.disabled).toBe(false);
+  });
+
+  it('AC1 — recompute-verified wouldClear is FALSE when +1 row still over-spans (disabled)', () => {
+    // 30 ft length, hint=2 → step ≈ 9144 mm. hint=3 → step ≈ 4572 mm,
+    // STILL over-span (allowable ~2400 mm at 1828.8 mm trib for 2×8 PT).
+    // add-support-row is offered but disabled — the user must iterate.
+    const design = makeFloating({ widthFt: 12, lengthFt: 30, blockRowsHint: 2 });
+    const initial = RECOMPUTE(design);
+    const beamWarning = initial.find((w) => w.kind === 'over-span-beam');
+    expect(beamWarning).toBeDefined();
+    if (!beamWarning) return;
+    const options = computeRemediations(beamWarning, design, IRC, RECOMPUTE);
+    const addSupport = options.find((o) => o.kind === 'add-support-row');
+    expect(addSupport).toBeDefined();
+    if (!addSupport) return;
+    expect(addSupport.wouldClear).toBe(false);
+    expect(addSupport.disabled).toBe(true);
+    expect(addSupport.disabledReason).not.toBeNull();
+  });
+
+  it('AC5 — elevated over-span beam → NO add-support-row proposed (floating-only)', () => {
+    // Elevated designs never carry the block foundation → the
+    // "add row of blocks" remediation is not physically meaningful.
+    // Only S16 remediations (increase-beam-nominal, change-species)
+    // apply.
+    const design = makeDesign({
+      widthFt: 20,
+      lengthFt: 20,
+      beamNominal: '2x8',
+      beamSpecies: 'PT',
+    });
+    const warning = makeBeamWarning({
+      memberId: 'beam-near',
+      actualMm: 6000,
+      allowableMm: 1981,
+    });
+    const options = computeRemediations(warning, design, IRC, RECOMPUTE);
+    for (const opt of options) {
+      expect(opt.kind).not.toBe('add-support-row');
+    }
+  });
+
+  it('AC6 — posts-on-footings foundation (defensive) → NO add-support-row proposed', () => {
+    // Defense-in-depth: even if a corrupt design put
+    // structure='floating' with posts-on-footings (rejected by
+    // compat-matrix at load time), computeRemediations must not
+    // offer add-support-row for it — the foundation carries no
+    // block-grid to add a row to.
+    const design: DeckDesign = {
+      ...makeDesign({
+        widthFt: 12,
+        lengthFt: 12,
+        beamNominal: '2x8',
+        beamSpecies: 'PT',
+      }),
+      structure: 'floating',
+      // Intentionally-invalid combination for the AC6 defensive
+      // check. Cast is safe here because the compat-matrix would
+      // reject this at load; the point is to prove computeRemediations
+      // itself does not depend on load-time validation.
+    };
+    const warning = makeBeamWarning({
+      memberId: 'beam-near',
+      actualMm: 4000,
+      allowableMm: 1981,
+    });
+    const options = computeRemediations(warning, design, IRC, RECOMPUTE);
+    for (const opt of options) {
+      expect(opt.kind).not.toBe('add-support-row');
+    }
+  });
+
+  it('AC8 — add-support-row surfaces FIRST (least invasive) before upgrade-beam-size / change-beam-species', () => {
+    const design = makeFloating({ widthFt: 12, lengthFt: 12, blockRowsHint: 2 });
+    const initial = RECOMPUTE(design);
+    const beamWarning = initial.find((w) => w.kind === 'over-span-beam');
+    expect(beamWarning).toBeDefined();
+    if (!beamWarning) return;
+    const options = computeRemediations(beamWarning, design, IRC, RECOMPUTE);
+    // First option kind must be add-support-row.
+    expect(options[0]?.kind).toBe('add-support-row');
+    // upgrade-beam-size follows.
+    const idxUpgrade = options.findIndex((o) => o.kind === 'upgrade-beam-size');
+    const idxAdd = options.findIndex((o) => o.kind === 'add-support-row');
+    expect(idxAdd).toBeLessThan(idxUpgrade);
+  });
+
+  it('over-span JOIST warnings do NOT emit add-support-row (scope is beam warnings only)', () => {
+    const design = makeFloating({ widthFt: 12, lengthFt: 12, blockRowsHint: 2 });
+    const joistWarning = makeJoistWarning();
+    const options = computeRemediations(joistWarning, design, IRC, RECOMPUTE);
+    for (const opt of options) {
+      expect(opt.kind).not.toBe('add-support-row');
     }
   });
 });

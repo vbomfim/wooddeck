@@ -49,7 +49,7 @@ export {
   computeFloatingLayout,
 } from './floating/floating-layout';
 export type { ComputeFloatingLayoutOptions } from './floating/floating-layout';
-export { computeBlockGrid } from './floating/block-grid';
+export { computeBlockGrid, MIN_BLOCK_SPACING_MM } from './floating/block-grid';
 export type { BlockGridInput } from './floating/block-grid';
 export { computeFloatingBeams } from './floating/floating-beam-layout';
 export { computeBlocking } from './floating/blocking-layout';

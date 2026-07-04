@@ -167,3 +167,63 @@ describe('formatRemediationOption — purity + robustness', () => {
     expect(() => formatRemediationOption(option, 'metric')).not.toThrow();
   });
 });
+
+// ---------------------------------------------------------------------------
+// S25 (ticket #47) — add-support-row label
+// ---------------------------------------------------------------------------
+
+describe('formatRemediationOption — S25 add-support-row', () => {
+  it('produces a headline in the form "Add a row of blocks (N → M)"', () => {
+    const option = makeOption({
+      kind: 'add-support-row',
+      memberId: 'beam-near',
+      patch: {
+        kind: 'add-support-row',
+        targetBeamId: 'beam-near',
+        currentRows: 2,
+        proposedRows: 3,
+      },
+    });
+    const imperial = formatRemediationOption(option, 'imperial');
+    const metric = formatRemediationOption(option, 'metric');
+    // The block-row count is a dimensionless integer — same string
+    // across unit systems.
+    expect(imperial.headline).toBe(metric.headline);
+    // Must mention "row" and the count change 2 → 3.
+    expect(imperial.headline).toMatch(/row/i);
+    expect(imperial.headline).toContain('2');
+    expect(imperial.headline).toContain('3');
+  });
+
+  it('non-empty headline + detail for both enabled and disabled variants', () => {
+    const enabled = makeOption({
+      kind: 'add-support-row',
+      memberId: 'beam-near',
+      patch: {
+        kind: 'add-support-row',
+        targetBeamId: 'beam-near',
+        currentRows: 3,
+        proposedRows: 4,
+      },
+    });
+    const disabled = makeOption({
+      kind: 'add-support-row',
+      memberId: 'beam-near',
+      patch: {
+        kind: 'add-support-row',
+        targetBeamId: 'beam-near',
+        currentRows: 3,
+        proposedRows: 4,
+      },
+      wouldClear: false,
+      disabled: true,
+      disabledReason:
+        'One more row would still exceed the allowable beam span.',
+    });
+    for (const opt of [enabled, disabled]) {
+      const out = formatRemediationOption(opt, 'imperial');
+      expect(out.headline.length).toBeGreaterThan(0);
+      expect(out.detail.length).toBeGreaterThan(0);
+    }
+  });
+});

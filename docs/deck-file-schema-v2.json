@@ -123,7 +123,17 @@
       "required": ["type", "product"],
       "properties": {
         "type": { "type": "string", "const": "deck-blocks" },
-        "product": { "$ref": "#/$defs/FoundationBlockRef" }
+        "product": { "$ref": "#/$defs/FoundationBlockRef" },
+        "blockRowsHint": {
+          "description": "S25 (ticket #47) — OPTIONAL override for the derived block-row count under a floating deck. Dimensionless positive integer; clamped by the layout engine to [2, floor(lengthMm / MIN_BLOCK_SPACING_MM) + 1]. Omit for the S19 derivation (byte-identical to pre-S25).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "blockColsHint": {
+          "description": "S25 (ticket #47) — OPTIONAL override for the derived block-column count under a floating deck. Dimensionless positive integer; clamped by the layout engine to [2, floor(widthMm / MIN_BLOCK_SPACING_MM) + 1]. Omit for the S19 derivation.",
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "FoundationSpecTuffBlocks": {
@@ -132,7 +142,17 @@
       "required": ["type", "product"],
       "properties": {
         "type": { "type": "string", "const": "tuffblocks" },
-        "product": { "$ref": "#/$defs/FoundationBlockRef" }
+        "product": { "$ref": "#/$defs/FoundationBlockRef" },
+        "blockRowsHint": {
+          "description": "S25 (ticket #47) — OPTIONAL override for the derived block-row count under a floating deck. Dimensionless positive integer; clamped by the layout engine to [2, floor(lengthMm / MIN_BLOCK_SPACING_MM) + 1]. Omit for the S19 derivation (byte-identical to pre-S25).",
+          "type": "integer",
+          "minimum": 0
+        },
+        "blockColsHint": {
+          "description": "S25 (ticket #47) — OPTIONAL override for the derived block-column count under a floating deck. Dimensionless positive integer; clamped by the layout engine to [2, floor(widthMm / MIN_BLOCK_SPACING_MM) + 1]. Omit for the S19 derivation.",
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "FootingSpec": {

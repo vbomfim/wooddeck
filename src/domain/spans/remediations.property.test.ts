@@ -197,6 +197,25 @@ function applyPatch(
           },
         },
       };
+    case 'add-support-row': {
+      // S25 — the property test synthesizes designs on the fly
+      // and asserts "wouldClear ⟹ actually clears" after
+      // applying the patch. Add-support-row only fires on
+      // FLOATING + block foundations, and the arbitrary can
+      // produce those variants; mirror the domain module's
+      // `applyPatchForVerification` behavior so the property
+      // still holds for this KIND.
+      if (design.foundation.type === 'posts-on-footings') {
+        return design; // Guard — producer never emits for this.
+      }
+      return {
+        ...design,
+        foundation: {
+          ...design.foundation,
+          blockRowsHint: patch.proposedRows,
+        },
+      };
+    }
   }
 }
 

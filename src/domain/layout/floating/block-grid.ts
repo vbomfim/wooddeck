@@ -23,6 +23,14 @@
  *
  *         numRows = ceil(lengthMm / joistSpanMaxMm) + 1
  *
+ *   - S25 override: if `foundation.blockRowsHint` /
+ *     `foundation.blockColsHint` is set, that value replaces the
+ *     derivation, CLAMPED to
+ *     `[2, floor(spanMm / MIN_BLOCK_SPACING_MM) + 1]` so the
+ *     adjacent-block gap stays ≥ MIN_BLOCK_SPACING_MM.
+ *     `undefined` (or omitted) preserves the S19 derivation
+ *     byte-identically — every golden fixture is unaffected.
+ *
  *   - Outermost block CENTERS anchor at ±widthMm/2 on x and
  *     ±lengthMm/2 on z (AC4 "outer blocks directly under the rim
  *     beams"). Interior columns and rows are EVENLY spaced between
@@ -69,6 +77,34 @@
 import { lookupFoundationProduct } from '../../foundation-catalog';
 import type { FoundationSpec, LayoutMember } from '../../model';
 import type { Mm } from '../../units';
+
+/**
+ * MINIMUM adjacent-block spacing (mm) permitted along either grid
+ * axis. Used by S25 (ticket #47) to CLAMP a user-supplied
+ * `foundation.blockRowsHint` / `blockColsHint` so an out-of-range
+ * hint (e.g. `100` on a 12-ft deck) cannot spawn a grid dense
+ * enough to be physically nonsensical (blocks overlapping,
+ * over-detailed geometry, absurd BOM row counts).
+ *
+ * ## Value rationale (300 mm ≈ 12 in)
+ *
+ * 12 in is the tightest tabulated joist-spacing value in the IRC
+ * R507.6 table and the tightest column in AWC DCA-6-2015. That
+ * matches DIY carpentry practice: block-under-beam spacing this
+ * tight is already at the density limit before you would
+ * transition to a continuous footing rather than discrete blocks.
+ * The clamp doesn't STOP the user from densifying to that limit;
+ * it prevents `blockRowsHint = 100` from producing a grid whose
+ * adjacent-block gap collapses toward 0 mm (which would then have
+ * the outer blocks physically overlap on paper).
+ *
+ * Documented as an autonomous decision per Developer Guardian
+ * rules — reversible by editing this constant. Increases (e.g.
+ * to 400 mm) would need to be checked against the S19 goldens for
+ * derived floating layouts (all currently ≥ 610 mm block-to-block
+ * gap by construction, so a 400 mm clamp would not affect them).
+ */
+export const MIN_BLOCK_SPACING_MM: Mm = 300;
 
 /**
  * Input for `computeBlockGrid`. `foundation` is narrowed to the two
@@ -122,8 +158,20 @@ export function computeBlockGrid(input: BlockGridInput): readonly LayoutMember[]
   const productDepthMm = product.actual.depthMm;
   const yCenter = -productHeightMm / 2; // block TOP at y=0
 
-  const numCols = Math.ceil(widthMm / beamSpanMaxMm) + 1;
-  const numRows = Math.ceil(lengthMm / joistSpanMaxMm) + 1;
+  // S25 (ticket #47): honor `foundation.blockColsHint` /
+  // `blockRowsHint` when set. Undefined → derive as before (S19
+  // behavior preserved byte-identically). See module header + the
+  // FoundationSpec doc-block in `model.ts`.
+  const numCols = resolveGridCount(
+    foundation.blockColsHint,
+    widthMm,
+    beamSpanMaxMm,
+  );
+  const numRows = resolveGridCount(
+    foundation.blockRowsHint,
+    lengthMm,
+    joistSpanMaxMm,
+  );
 
   const xCenters = computeAxisCenters(widthMm, numCols);
   const zCenters = computeAxisCenters(lengthMm, numRows);
@@ -146,6 +194,49 @@ export function computeBlockGrid(input: BlockGridInput): readonly LayoutMember[]
     }
   }
   return members;
+}
+
+/**
+ * Resolve the row/column count along ONE axis. If a hint is
+ * provided AND finite AND an integer-ish positive number, clamp it
+ * to `[2, floor(spanMm / MIN_BLOCK_SPACING_MM) + 1]` (S25 AC4).
+ * Otherwise fall back to the S19 derivation
+ * `ceil(spanMm / maxSpacingMm) + 1`.
+ *
+ * ## Clamp bounds
+ *
+ *   - Lower bound 2: a grid with a single row/column collapses the
+ *     block layout into a single line of supports along one axis
+ *     (nonsensical for a rectangular deck). AC4 in the ticket
+ *     locks the perimeter-two minimum.
+ *   - Upper bound `floor(spanMm / MIN_BLOCK_SPACING_MM) + 1`:
+ *     adjacent-block center-to-center gap = `spanMm / (count − 1)`.
+ *     For this to stay ≥ `MIN_BLOCK_SPACING_MM`, we need
+ *     `count − 1 ≤ floor(spanMm / MIN_BLOCK_SPACING_MM)`, i.e.
+ *     `count ≤ floor(spanMm / MIN_BLOCK_SPACING_MM) + 1`. Off-by-
+ *     one careful: floor (not ceil) keeps the last honored count
+ *     just at-or-above the min-gap threshold.
+ *
+ * ## Non-integer / NaN / negative hints
+ *
+ * Silently clamped to the safe range (min = 2). Non-integer values
+ * are rounded down (via `Math.floor`) before clamping — the block
+ * grid is a count, not a continuous quantity. `NaN` / non-finite
+ * values are treated as "no hint" and fall through to the derivation.
+ */
+function resolveGridCount(
+  hint: number | undefined,
+  spanMm: Mm,
+  maxSpacingMm: Mm,
+): number {
+  if (hint === undefined || !Number.isFinite(hint)) {
+    return Math.ceil(spanMm / maxSpacingMm) + 1;
+  }
+  const maxCount = Math.floor(spanMm / MIN_BLOCK_SPACING_MM) + 1;
+  const asInt = Math.floor(hint);
+  if (asInt < 2) return 2;
+  if (asInt > maxCount) return maxCount;
+  return asInt;
 }
 
 /**

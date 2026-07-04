@@ -78,6 +78,18 @@ export function patchFromRemediation(
       return {
         beam: { material: { species: patch.newSpecies, grade: 'No2' } },
       };
+    case 'add-support-row':
+      // S25 (ticket #47) — bump the block-row hint on the
+      // foundation. The whitelist entry in
+      // `apply-parameters.KNOWN_OPTIONAL_LEAF_KEYS` allows this
+      // key even when the current foundation has no such
+      // property yet (typical — hint is undefined on freshly
+      // parametrized designs). Only meaningful on `deck-blocks`
+      // / `tuffblocks` — `produceAddSupportRow` guards emission
+      // and won't produce this patch for `posts-on-footings`.
+      return {
+        foundation: { blockRowsHint: patch.proposedRows },
+      };
     /* c8 ignore next 6 */
     default: {
       // Compile-time exhaustiveness. A new RemediationKind

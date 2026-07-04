@@ -87,6 +87,12 @@ function headlineFor(option: RemediationOption, units: UnitSystem): string {
       return `Change joist species to ${formatSpecies(patch.newSpecies)}`;
     case 'change-beam-species':
       return `Change beam species to ${formatSpecies(patch.newSpecies)}`;
+    case 'add-support-row':
+      // S25 (ticket #47) — reads as
+      // "Add a row of blocks (3 → 4)". The counts are POSITIONAL
+      // in the sentence (source-of-change → target) so screen
+      // readers and translators keep the order predictable.
+      return `Add a row of blocks (${patch.currentRows} → ${patch.proposedRows})`;
     /* c8 ignore next 6 */
     default: {
       const _exhaustive: never = patch;

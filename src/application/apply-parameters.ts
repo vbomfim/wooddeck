@@ -198,6 +198,58 @@ const FORBIDDEN_KEYS: ReadonlySet<string> = new Set([
 const NON_EDITABLE_TOP_KEYS: ReadonlySet<string> = new Set(['id', 'createdAt']);
 
 /**
+ * OPTIONAL DOMAIN FIELDS that a patch MAY introduce even when the
+ * current subtree does not yet have them as own properties.
+ *
+ * ## Why the whitelist exists
+ *
+ * The general `Object.hasOwn(current, key)` "unknown-key" check
+ * enforces two invariants: (a) prototype-pollution defence (a
+ * `__proto__`-derived rogue key is not a hit); and (b) typo
+ * defence — a patch key like `spacingMM` (wrong case) is rejected
+ * instead of silently adding an orphan field. Both are load-
+ * bearing.
+ *
+ * BUT: some `DeckDesign` fields are legitimately OPTIONAL and
+ * appear on the current design only WHEN they carry a non-default
+ * value. `foundation.blockRowsHint` (S25 / ticket #47) is the
+ * canonical example: it is `readonly blockRowsHint?: number` on
+ * the `deck-blocks` / `tuffblocks` variants; an initial design
+ * omits the property, and the S25 `add-support-row` remediation
+ * patches it in. Without the whitelist, that legitimate patch
+ * would trip the unknown-key check and fail with
+ * "Unknown key 'foundation.blockRowsHint'".
+ *
+ * ## Why a whitelist (and not just remove the check)
+ *
+ * The whitelist keeps the typo-defence for the 99% common path
+ * (`{ joist: { spacingMm: 305 } }` — every key is a known member
+ * of the current subtree). Only genuinely-optional additive fields
+ * declared in `model.ts` FoundationSpec (or a future extension)
+ * are exempted, and each one is documented here with a citation
+ * to the ticket that introduced it. A future field is added by
+ * appending one entry — a rewrite that adds a new optional field
+ * without touching this set produces a runtime failure, which is
+ * caught by the test suite, not silent corruption.
+ *
+ * ## Security invariant
+ *
+ * Every key in this set is a LITERAL alphanumeric identifier
+ * declared in `src/domain/model.ts` — none of them collide with
+ * prototype-pollution vectors (`__proto__`, `constructor`,
+ * `prototype`) which remain rejected by `FORBIDDEN_KEYS` earlier
+ * in the same loop. Adding a key to this set does NOT weaken
+ * the prototype-pollution defence.
+ */
+const KNOWN_OPTIONAL_LEAF_KEYS: ReadonlySet<string> = new Set([
+  // S25 / ticket #47 — FoundationSpec deck-blocks/tuffblocks
+  // additive-optional block-grid overrides. See `FoundationSpec`
+  // doc-block in `src/domain/model.ts`.
+  'blockRowsHint',
+  'blockColsHint',
+]);
+
+/**
  * Runtime type guard: is `value` a merge-eligible plain object?
  *
  * "Plain object" here means: an object whose prototype is either
@@ -261,7 +313,7 @@ function deepMerge<T extends object>(
         `Forbidden key '${key}' in patch at path '${pathPrefix}${key}' (prototype-pollution defence — see apply-parameters.ts module docs)`,
       );
     }
-    if (!Object.hasOwn(current, key)) {
+    if (!Object.hasOwn(current, key) && !KNOWN_OPTIONAL_LEAF_KEYS.has(key)) {
       throw new ApplyParametersError(
         `${pathPrefix}${key}`,
         `Unknown key '${pathPrefix}${key}' — not a field of DeckDesign at that path (see apply-parameters.ts module docs)`,
