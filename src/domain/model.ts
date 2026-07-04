@@ -46,7 +46,6 @@
  */
 
 import type { Mm } from './units';
-import type { FoundationProductId } from './foundation-catalog';
 
 // ==========================================================
 // SKU-based lumber identity
@@ -180,6 +179,19 @@ export interface MaterialRef {
  *     Epic 2 (S19).
  */
 export type StructureMode = 'elevated' | 'floating';
+
+/**
+ * Stable id union for every foundation block product the MVP catalog
+ * stocks. Kept in `model.ts` (not `foundation-catalog.ts`) so the
+ * domain types form an acyclic dependency graph — `foundation-catalog`
+ * IMPORTS this type, not the other way around.
+ *
+ * Adding a new product = add a literal here + a row to
+ * `MVP_PRODUCTS` in `foundation-catalog.ts`. Downstream consumers
+ * `switch(productId)` with an exhaustive `default: never` so an
+ * omitted branch fails-compile.
+ */
+export type FoundationProductId = 'oldcastle-11x11x7' | 'tuffblock-12x12x4';
 
 /**
  * Dimensions of a poured or precast footing. Kept as a small

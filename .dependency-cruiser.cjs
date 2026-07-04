@@ -146,9 +146,10 @@ module.exports = {
     // The `persistence-allowlist` rule above only governs `^src/` targets,
     // so an accidental `import '../../../scripts/build/foo.ts'` from
     // `src/persistence/**` would sail past it (finding Code Review GPT#5).
-    // This rule locks the outside-src/ surface down to exactly one file:
-    // the checked-in JSON Schema at `docs/deck-file-schema-v1.json`, which
-    // `validator.ts` legitimately imports as `with { type: 'json' }`.
+    // This rule locks the outside-src/ surface down to exactly the two
+    // checked-in JSON Schemas — `docs/deck-file-schema-v1.json` (S6) and
+    // `docs/deck-file-schema-v2.json` (S18) — which `validator.ts`
+    // legitimately imports as `with { type: 'json' }`.
     //
     // NPM packages resolve to `node_modules/...` and are excluded by the
     // negative lookahead; Node core modules (`node:*`) do not appear in
@@ -160,16 +161,17 @@ module.exports = {
       severity: 'error',
       comment:
         'src/persistence/** may only import project files under src/ (governed by ' +
-        'persistence-allowlist) plus the checked-in JSON Schema at ' +
-        'docs/deck-file-schema-v1.json. Any other project-relative import from ' +
-        'persistence/ is a boundary violation (Code Review GPT#5 hardening).',
+        'persistence-allowlist) plus the checked-in JSON Schemas at ' +
+        'docs/deck-file-schema-v1.json and docs/deck-file-schema-v2.json. ' +
+        'Any other project-relative import from persistence/ is a boundary ' +
+        'violation (Code Review GPT#5 hardening).',
       from: { path: '^src/persistence/' },
       to: {
         // The negative lookahead admits (a) any src/... path, (b) any
-        // node_modules/... path, (c) the exact schema file. Anything
-        // else that starts with an ASCII character is a project-relative
-        // import outside the allowed surface — flag it.
-        path: '^(?!src/|node_modules/|docs/deck-file-schema-v1\\.json$|node:)[A-Za-z0-9._-]',
+        // node_modules/... path, (c) either checked-in schema file.
+        // Anything else that starts with an ASCII character is a
+        // project-relative import outside the allowed surface — flag it.
+        path: '^(?!src/|node_modules/|docs/deck-file-schema-v(?:1|2)\\.json$|node:)[A-Za-z0-9._-]',
       },
     },
 

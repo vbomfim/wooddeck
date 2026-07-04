@@ -58,7 +58,7 @@
  * and `./model` (type-only). No runtime dependency on any other
  * layer. dependency-cruiser's `domain-allowlist` rule permits both.
  */
-import type { LumberNominal } from './model';
+import type { LumberNominal, FoundationProductId } from './model';
 import { MM_PER_INCH } from './units';
 import type { Mm } from './units';
 
@@ -67,13 +67,12 @@ import type { Mm } from './units';
 // ==========================================================
 
 /**
- * Stable id union for every block product the MVP catalog stocks.
- * Adding a new product = add a literal here + a row to
- * `MVP_PRODUCTS` below. Downstream consumers `switch(productId)`
- * with an exhaustive `default: never` so an omitted branch
- * fails-compile.
+ * Re-export `FoundationProductId` from `model.ts` for consumers that
+ * import "the catalog surface" from this module. The type LIVES in
+ * `model.ts` (single canonical location; see the doc there for why —
+ * acyclic domain graph) — this re-export is a convenience alias only.
  */
-export type FoundationProductId = 'oldcastle-11x11x7' | 'tuffblock-12x12x4';
+export type { FoundationProductId } from './model';
 
 /**
  * Product family / material category. Kept as an open (but
