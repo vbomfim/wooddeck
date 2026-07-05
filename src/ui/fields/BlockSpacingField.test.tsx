@@ -97,7 +97,7 @@ describe('<BlockSpacingField /> — visibility gating', () => {
     // The hint copy from the field's own docstring surfaces to the
     // user; assert the substring so a future rewording is caught.
     expect(
-      screen.getByText(/distance between adjacent foundation blocks/i),
+      screen.getByText(/distance between block rows along each joist/i),
     ).toBeInTheDocument();
   });
 });

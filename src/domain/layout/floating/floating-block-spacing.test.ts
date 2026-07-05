@@ -1,29 +1,45 @@
 /**
  * `src/domain/layout/floating/floating-block-spacing.test.ts` —
- * feat/block-spacing — TDD RED for user-controllable Method B
- * block spacing.
+ * fix/joists-on-blocks-flying — Method B block spacing invariants.
  *
- * ## Regression target — the UAT bug ("too many blocks")
+ * ## Regression targets
  *
- * Before this ticket Method B (`'joists-on-blocks'`) placed ONE
- * block per joist × N rows: a 16 ft × 16 ft deck at 16″ o.c. joist
+ * ### 1. UAT bug "too many blocks" (feat/block-spacing PR #66)
+ *
+ * Before PR #66 Method B (`'joists-on-blocks'`) placed ONE block
+ * per joist × N rows: a 16 ft × 16 ft deck at 16″ o.c. joist
  * spacing produced 13 joists × 8 rows = 104 blocks — and QA
- * reproduced ~150 on wider decks with the S25 blockRowsHint tuned
- * up. The user (a DIY homeowner) reported it as "adds too many
- * blocks; ask the distance between blocks."
+ * reproduced ~150 on wider decks with S25 `blockRowsHint` tuned
+ * up. Filed as "adds too many blocks; ask the distance between
+ * blocks."
  *
- * The fix: Method B now places a REGULAR GRID at pitch
- * `blockSpacingMm` (both axes), with the outer blocks anchored at
- * the footprint edges (same anchor formula `computeAxisCenters`
- * uses for Method A). Column count and row count both derive from
- * the SAME spacing: `count = round(span / spacing) + 1` (min 2),
- * so a 16 × 16 ft deck at the 1220 mm default produces
- * 5 cols × 5 rows = 25 blocks — 4× to 6× fewer than pre-fix.
+ * ### 2. UAT bug "flying joists" (fix/joists-on-blocks-flying)
  *
- * These tests PIN the invariants so the pre-fix ~150 model cannot
- * return: block count is small, block count is a function of
- * spacing (NOT joist count), and Method A / elevated layouts are
- * UNAFFECTED by the new field.
+ * PR #66's fix went too far the other way: it decoupled block
+ * columns from joists entirely, placing a REGULAR grid at
+ * `blockSpacingMm` on BOTH axes. On the 16 × 16 ft example above
+ * that produced 5 cols × 5 rows = 25 blocks but joists sat at 13
+ * unrelated x-positions — most joists had NO block anywhere
+ * beneath them ("flew" unsupported). Physical nonsense for a
+ * no-beam design.
+ *
+ * ## Current model (this file's invariants)
+ *
+ * Block COLUMNS are pinned to joist x-centers (one column per
+ * joist — no flying joists). Block ROWS run along +z at
+ * `blockSpacingMm` pitch, outer rows anchored at ±length/2.
+ *
+ *   - `count = numJoists × rows` (NOT joist-independent).
+ *   - `rows = blockCountForAxis(lengthMm, blockSpacingMm)`,
+ *     clamped ≥ 2 (perimeter floor).
+ *   - `MAX_METHOD_B_BLOCK_COUNT` cap reduces ROWS only — columns
+ *     stay at `numJoists` (dropping a column would recreate the
+ *     "flying joists" bug).
+ *   - Column x-values are byte-identical to
+ *     `layoutFloatingJoists(design).map(j => j.position.x)`.
+ *
+ * These tests PIN those invariants so neither past regression
+ * can return.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -87,50 +103,67 @@ function makeMethodB(overrides: Overrides = {}): DeckDesign {
 // The core regression pin — the "16×16 ~150 blocks" bug is dead
 // ---------------------------------------------------------------------------
 
-describe('Method B block grid — count is DERIVED FROM SPACING, not from joist count', () => {
-  it('16 × 16 ft deck @ default spacing produces a SMALL block grid (≤ 36), NOT the pre-fix ~150', () => {
-    // Pre-fix: 16 ft @ 16″ oc joists = 13 joists × ~8 rows = ~104
-    // blocks (or ~150 with a wider blockRowsHint). Post-fix at
-    // the 1220 mm default: ~5 cols × ~5 rows = 25 blocks.
+describe('Method B block grid — count is DERIVED FROM BOTH joist count AND blockSpacingMm', () => {
+  it('16 × 16 ft deck @ default spacing produces a SMALL block grid (numJoists × ~5 rows), NOT the pre-fix ~150', () => {
+    // Pre-#66 fix: 16 ft @ 16″ oc joists = 13 joists × ~8 rows = ~104
+    // blocks (or ~150 with a wider blockRowsHint). Post-#66 (broken
+    // "regular grid on both axes"): 5 × 5 = 25 blocks BUT the block
+    // columns didn't align with the joists (flying-joist bug).
+    // Post-fix (fix/joists-on-blocks-flying): 13 joists × 5 rows =
+    // 65 blocks, with a block column under EACH joist (no flying).
     const design = makeMethodB({ widthFt: 16, lengthFt: 16 });
     const layout = computeFloatingLayout(design);
     const blocks = layout.members.filter((m) => m.kind === 'block');
-    expect(blocks.length).toBeLessThanOrEqual(36);
-    // Also PIN a specific, testable count: a 16 × 16 ft footprint
-    // = 4877 × 4877 mm. count = round(4877 / 1220) + 1 = 5 per
-    // axis → 25 total blocks.
-    expect(blocks.length).toBe(25);
+    expect(blocks.length).toBeLessThanOrEqual(80);
+    // PIN a specific, testable count: numJoists × rows.
+    // Width 16 ft = 4877 mm @ 16″ oc (406 mm) + 2×8 joist
+    // thickness 38.1 mm → 13 joists. Length 4877 mm @ 1220 mm
+    // default → rows = max(2, ceil(4877/1220)+1) = 5. Total 13 × 5 = 65.
+    expect(blocks.length).toBe(65);
   });
 
-  it('block count is INDEPENDENT of joist spacing (13 joists vs 33 joists → same block grid)', () => {
-    // Change joist spacing 16″ → 6″ (33 joists on a 16 ft deck).
-    // Pre-fix: cols scaled with joist count. Post-fix: cols
-    // depend only on blockSpacingMm — must stay identical.
+  it('block count SCALES with joist count (13 joists vs 33 joists → more blocks; same row count)', () => {
+    // Post-fix: block columns are pinned to joist x-centers, so
+    // block count IS a function of joist count. Changing joist
+    // spacing 16″ → 6″ increases both the joist count AND (linearly)
+    // the block count. Rows stay identical (blockSpacingMm did
+    // not change).
     const wide = makeMethodB({ widthFt: 16, lengthFt: 16, spacingMm: 406 });
     const tight = makeMethodB({
       widthFt: 16,
       lengthFt: 16,
       spacingMm: 152, // 6"
     });
-    const nWide = computeFloatingLayout(wide).members.filter(
-      (m) => m.kind === 'block',
-    ).length;
-    const nTight = computeFloatingLayout(tight).members.filter(
-      (m) => m.kind === 'block',
-    ).length;
-    // Joist count DID change:
-    const jWide = computeFloatingLayout(wide).members.filter(
-      (m) => m.kind === 'joist',
-    ).length;
-    const jTight = computeFloatingLayout(tight).members.filter(
-      (m) => m.kind === 'joist',
-    ).length;
+    const wideLayout = computeFloatingLayout(wide);
+    const tightLayout = computeFloatingLayout(tight);
+    const nWide = wideLayout.members.filter((m) => m.kind === 'block').length;
+    const nTight = tightLayout.members.filter((m) => m.kind === 'block').length;
+    const jWide = wideLayout.members.filter((m) => m.kind === 'joist').length;
+    const jTight = tightLayout.members.filter((m) => m.kind === 'joist').length;
+    // Joist count went UP:
     expect(jTight).toBeGreaterThan(jWide);
-    // Block count did NOT:
-    expect(nTight).toBe(nWide);
+    // Block count went UP too — MORE columns because MORE joists.
+    expect(nTight).toBeGreaterThan(nWide);
+    // Row count identical between the two (same blockSpacingMm).
+    const rowsWide =
+      new Set(
+        wideLayout.members
+          .filter((m) => m.kind === 'block')
+          .map((b) => Math.round(b.position.z * 1e3) / 1e3),
+      ).size;
+    const rowsTight =
+      new Set(
+        tightLayout.members
+          .filter((m) => m.kind === 'block')
+          .map((b) => Math.round(b.position.z * 1e3) / 1e3),
+      ).size;
+    expect(rowsTight).toBe(rowsWide);
+    // And the linear relationship holds: nTight/jTight ==
+    // nWide/jWide (both equal the shared row count).
+    expect(nTight / jTight).toBe(nWide / jWide);
   });
 
-  it('a smaller blockSpacingMm produces MORE blocks (denser grid)', () => {
+  it('a smaller blockSpacingMm produces MORE blocks (denser grid — more rows, same columns)', () => {
     const coarse = makeMethodB({
       widthFt: 16,
       lengthFt: 16,
@@ -150,20 +183,22 @@ describe('Method B block grid — count is DERIVED FROM SPACING, not from joist 
     expect(nFine).toBeGreaterThan(nCoarse);
   });
 
-  it('a larger blockSpacingMm produces FEWER blocks (sparser grid, floor at 2 × 2 = 4)', () => {
+  it('a larger blockSpacingMm produces FEWER blocks (rows floor at 2; columns remain = numJoists)', () => {
     const design = makeMethodB({
       widthFt: 16,
       lengthFt: 16,
-      // 2438 mm → 16 ft / 2438 = 2.0 → count = round(2.0) + 1 = 3.
-      // Slightly wider: 4000 mm → 16 ft / 4000 = 1.22 → 2 per axis.
+      // MAX_BLOCK_SPACING_MM = 2438.4 mm ≈ 8 ft. Row count floors
+      // at max(2, ceil(4877/2438.4)+1) = 3 on a 16 ft deck.
       blockSpacingMm: MAX_BLOCK_SPACING_MM,
     });
     const layout = computeFloatingLayout(design);
     const blocks = layout.members.filter((m) => m.kind === 'block');
-    // Sparse grid still respects the perimeter-two minimum:
-    expect(blocks.length).toBeGreaterThanOrEqual(4);
-    // And it's dramatically smaller than pre-fix:
-    expect(blocks.length).toBeLessThanOrEqual(16);
+    const joists = layout.members.filter((m) => m.kind === 'joist');
+    // Perimeter-two floor on rows: still ≥ numJoists × 2 blocks.
+    expect(blocks.length).toBeGreaterThanOrEqual(joists.length * 2);
+    // And it's dramatically smaller than the default-pitch count
+    // (rows collapsed from 5 to 3).
+    expect(blocks.length).toBeLessThan(80);
   });
 });
 
@@ -172,7 +207,12 @@ describe('Method B block grid — count is DERIVED FROM SPACING, not from joist 
 // ---------------------------------------------------------------------------
 
 describe('Method B block grid — placement invariants', () => {
-  it('outer blocks are anchored at the footprint edges (±widthMm/2, ±lengthMm/2)', () => {
+  it('outer block ROWS anchored at the length axis ends (±lengthMm/2); outer COLUMNS anchored at outermost joist x-centers', () => {
+    // Post-fix (fix/joists-on-blocks-flying): block ROWS along +z
+    // still anchor at ±lengthMm/2 (same convention as Method A).
+    // Block COLUMNS are pinned to joist x-centers — outermost
+    // columns sit at the -x-flush + +x-flush joist positions
+    // (which are inset from ±widthMm/2 by half the joist thickness).
     const design = makeMethodB({
       widthFt: 16,
       lengthFt: 16,
@@ -180,7 +220,7 @@ describe('Method B block grid — placement invariants', () => {
     });
     const layout = computeFloatingLayout(design);
     const blocks = layout.members.filter((m) => m.kind === 'block');
-    const halfWidth = design.footprint.widthMm / 2;
+    const joists = layout.members.filter((m) => m.kind === 'joist');
     const halfLength = design.footprint.lengthMm / 2;
     const xs = Array.from(new Set(blocks.map((b) => b.position.x))).sort(
       (a, b) => a - b,
@@ -188,10 +228,15 @@ describe('Method B block grid — placement invariants', () => {
     const zs = Array.from(new Set(blocks.map((b) => b.position.z))).sort(
       (a, b) => a - b,
     );
-    expect(xs[0]).toBeCloseTo(-halfWidth, 6);
-    expect(xs[xs.length - 1]).toBeCloseTo(+halfWidth, 6);
+    // Rows: outer rows at length ends.
     expect(zs[0]).toBeCloseTo(-halfLength, 6);
     expect(zs[zs.length - 1]).toBeCloseTo(+halfLength, 6);
+    // Columns: outer columns at outermost joist x-centers.
+    const joistXs = joists
+      .map((j) => j.position.x)
+      .sort((a, b) => a - b);
+    expect(xs[0]).toBeCloseTo(joistXs[0]!, 6);
+    expect(xs[xs.length - 1]).toBeCloseTo(joistXs[joistXs.length - 1]!, 6);
   });
 
   it('the grid is REGULAR (all blocks lie at cartesian product of the unique x and z sets)', () => {
@@ -215,30 +260,41 @@ describe('Method B block grid — placement invariants', () => {
     expect(blocks.length).toBe(xs.size * zs.size);
   });
 
-  it('adjacent-block gap (both axes) is ≤ the effective blockSpacingMm', () => {
+  it('adjacent-block ROW gap (along +z) is ≤ the effective blockSpacingMm; COLUMN gap (along +x) = joist o.c. pitch', () => {
+    // Post-fix (fix/joists-on-blocks-flying): row pitch is
+    // bounded by `blockSpacingMm` (still true — rows are the
+    // support-along-joist axis). Column pitch is the joist o.c.
+    // pitch (columns are pinned to joists — the joist spacing
+    // controls the +x gap, NOT `blockSpacingMm`).
     const design = makeMethodB({
       widthFt: 16,
       lengthFt: 16,
       blockSpacingMm: 1220,
+      spacingMm: 406, // 16" o.c.
     });
     const layout = computeFloatingLayout(design);
     const blocks = layout.members.filter((m) => m.kind === 'block');
+    const joists = layout.members.filter((m) => m.kind === 'joist');
     const xs = Array.from(new Set(blocks.map((b) => b.position.x))).sort(
       (a, b) => a - b,
     );
     const zs = Array.from(new Set(blocks.map((b) => b.position.z))).sort(
       (a, b) => a - b,
     );
-    // Gap between two adjacent xs (or zs) is `span / (count-1)`.
-    // With `count = round(span / spacing) + 1` (ceil-flavoured),
-    // that gap is ≤ spacing (the anchor formula guarantees it).
-    // Small epsilon for float division.
     const epsilonMm = 1e-6;
-    for (let i = 1; i < xs.length; i++) {
-      expect(xs[i]! - xs[i - 1]!).toBeLessThanOrEqual(1220 + epsilonMm);
-    }
+    // ROW gap (+z) ≤ blockSpacingMm.
     for (let i = 1; i < zs.length; i++) {
       expect(zs[i]! - zs[i - 1]!).toBeLessThanOrEqual(1220 + epsilonMm);
+    }
+    // COLUMN gap (+x) matches joist gap exactly (columns == joists).
+    const joistXs = joists
+      .map((j) => j.position.x)
+      .sort((a, b) => a - b);
+    for (let i = 1; i < xs.length; i++) {
+      expect(xs[i]! - xs[i - 1]!).toBeCloseTo(
+        joistXs[i]! - joistXs[i - 1]!,
+        6,
+      );
     }
   });
 });

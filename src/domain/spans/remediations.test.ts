@@ -1410,6 +1410,112 @@ describe('computeRemediations — S25 add-support-row (ticket #47)', () => {
       expect(opt.kind).not.toBe('add-support-row');
     }
   });
+
+  // -------------------------------------------------------------------
+  // fix/joists-on-blocks-flying (review MED #1) — cap-aware proposedRows
+  // -------------------------------------------------------------------
+  //
+  // The Method B block grid is now capped at
+  // `numJoists × rows ≤ MAX_METHOD_B_BLOCK_COUNT` by reducing
+  // ROWS only (columns are pinned to joist x-centers — dropping
+  // one would leave a joist unsupported, re-introducing the
+  // "flying joists" bug). On a large, joist-dense deck the
+  // resolver's `maxRows = max(2, floor(MAX / numJoists))` can be
+  // small enough that no smaller `blockSpacingMm` produces MORE
+  // rows than the current capped count.
+  //
+  // Pre-fix `produceAddSupportRow` reported `proposedRows` as the
+  // RAW `blockCountForAxis(length, proposedSpacing)` value —
+  // ignoring the cap — so a design that stays at 6 rows post-
+  // recompute might advertise "6 → 9". Verify then disabled the
+  // option (safe), but the LABEL still lied. Post-fix the
+  // producer uses the cap-aware resolver, so the metadata
+  // reflects what the recomputed design will ACTUALLY produce.
+  it('MED #1 — Method B capped by numJoists: proposedRows matches cap-aware resolver, NOT the raw blockCountForAxis', () => {
+    // 80 ft × 40 ft at 12" o.c. → 81 joists → maxRows = 4.
+    // Default spacing 1220 mm wants 12 rows → capped to 4.
+    // Reducing spacing to any legal value can't add rows (max
+    // is 4 either way). Joist span at 4 rows = 40 ft / 3 =
+    // 4064 mm > 3988 mm allowable → over-span-joist warning
+    // fires. Pre-fix `produceAddSupportRow` would advertise a
+    // lying "4 → 6" (raw blockCountForAxis at proposed spacing);
+    // post-fix it reports the TRUTH: proposedRows ≤ current
+    // → disabled with cap-specific reason.
+    const design = makeFloating({
+      widthFt: 80,
+      lengthFt: 40,
+      framing: 'joists-on-blocks',
+    });
+    // Override joist spacing to 12" (305 mm) — makeFloating uses
+    // 406 mm by default; we need enough joists to trigger the cap.
+    const denseDesign: DeckDesign = {
+      ...design,
+      joist: { ...design.joist, spacingMm: 305 },
+    };
+
+    const initial = RECOMPUTE(denseDesign);
+    const joistWarning = initial.find((w) => w.kind === 'over-span-joist');
+    // Precondition: this configuration MUST over-span (otherwise
+    // there's no remediation to inspect).
+    expect(joistWarning).toBeDefined();
+    if (!joistWarning) return;
+
+    const options = computeRemediations(
+      joistWarning,
+      denseDesign,
+      IRC,
+      RECOMPUTE,
+    );
+    const addSupport = options.find((o) => o.kind === 'add-support-row');
+    expect(addSupport).toBeDefined();
+    if (!addSupport) return;
+    if (addSupport.patch.kind !== 'add-support-row') return;
+
+    // The naive raw-count that pre-fix would report is strictly
+    // GREATER than the cap-aware count. Post-fix, `proposedRows`
+    // reflects what a recomputed design would ACTUALLY produce,
+    // so it is ≤ `currentRows`.
+    expect(addSupport.patch.proposedRows).toBeLessThanOrEqual(
+      addSupport.patch.currentRows,
+    );
+
+    // Because the cap prevents adding support rows, the option
+    // is DISABLED with a cap-specific reason — NOT a generic
+    // "would produce an invalid design" message and NOT enabled
+    // with a lying "N → M > N" arrow.
+    expect(addSupport.disabled).toBe(true);
+    expect(addSupport.wouldClear).toBe(false);
+    expect(addSupport.disabledReason).toMatch(/cap/i);
+  });
+
+  it('MED #1 — Method B uncapped case: proposedRows > currentRows (control — the cap-aware fix does NOT regress the enabled path)', () => {
+    // Sanity check: on a design where the cap does NOT bite, the
+    // producer still enables the option and reports a
+    // proposedRows > currentRows. Rules out an over-eager
+    // "always disable" regression.
+    const design = makeFloating({
+      widthFt: 12,
+      lengthFt: 30, // long enough to over-span at default hint
+      blockRowsHint: 2,
+      framing: 'joists-on-blocks',
+    });
+    const initial = RECOMPUTE(design);
+    const joistWarning = initial.find((w) => w.kind === 'over-span-joist');
+    expect(joistWarning).toBeDefined();
+    if (!joistWarning) return;
+    const options = computeRemediations(joistWarning, design, IRC, RECOMPUTE);
+    const addSupport = options.find((o) => o.kind === 'add-support-row');
+    expect(addSupport).toBeDefined();
+    if (!addSupport) return;
+    if (addSupport.patch.kind !== 'add-support-row') return;
+
+    // Enabled path — proposal STRICTLY adds rows.
+    expect(addSupport.disabled).toBe(false);
+    expect(addSupport.wouldClear).toBe(true);
+    expect(addSupport.patch.proposedRows).toBeGreaterThan(
+      addSupport.patch.currentRows,
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

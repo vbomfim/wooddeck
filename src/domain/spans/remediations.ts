@@ -167,11 +167,11 @@ import type { SpanTable } from './span-table';
 // spacing-primary Method B resolver so the remediation's
 // `currentRows` mirrors what the layout actually produces).
 import {
-  blockCountForAxis,
   MAX_BLOCK_SPACING_MM,
   MIN_BLOCK_SPACING_MM,
 } from '../layout/floating/block-grid';
 import { resolveMethodBGrid } from '../layout/floating/floating-layout';
+import { layoutFloatingJoists } from '../layout/floating/floating-joist-layout';
 
 // ==========================================================
 // Public shape (frozen — ticket §2 Interface Contract)
@@ -1334,6 +1334,13 @@ function produceAddSupportRow(
 
   const { widthMm, lengthMm } = design.footprint;
 
+  // fix/joists-on-blocks-flying: `resolveMethodBGrid` now requires
+  // the joist count (block columns are pinned to joist x-centers —
+  // one column per joist). Read from the joist layer so this
+  // callsite consumes the SAME numJoists the layout does. Cheap +
+  // pure (mirror-import of the same helper `computeMethodB` calls).
+  const numJoists = layoutFloatingJoists(design).length;
+
   // HIGH #3 (review — feat/block-spacing): the ACTIVE resolver
   // for Method B is `resolveMethodBGrid`, which prefers
   // `blockSpacingMm` over the legacy hints. Reflect what the
@@ -1347,6 +1354,7 @@ function produceAddSupportRow(
     design.foundation.blockSpacingMm,
     design.foundation.blockRowsHint,
     design.foundation.blockColsHint,
+    numJoists,
   );
   const currentRows = currentGrid.rows;
 
@@ -1384,7 +1392,19 @@ function produceAddSupportRow(
     currentEffectiveSpacingMm <= MIN_BLOCK_SPACING_MM + 1e-6 &&
     warning.allowableMm < currentEffectiveSpacingMm
   ) {
-    const disabledRows = blockCountForAxis(lengthMm, MIN_BLOCK_SPACING_MM);
+    // fix/joists-on-blocks-flying (review MED #1): use the
+    // cap-aware resolver so the metadata reflects what a
+    // recomputed design would ACTUALLY produce (not the raw
+    // `blockCountForAxis` value the cap may reduce).
+    const disabledGrid = resolveMethodBGrid(
+      widthMm,
+      lengthMm,
+      MIN_BLOCK_SPACING_MM,
+      design.foundation.blockRowsHint,
+      design.foundation.blockColsHint,
+      numJoists,
+    );
+    const disabledRows = disabledGrid.rows;
     return {
       kind: 'add-support-row',
       memberId: warning.memberId,
@@ -1418,7 +1438,55 @@ function produceAddSupportRow(
   const proposedSpacingMm = wouldShrink
     ? clampedProposedSpacingMm
     : MIN_BLOCK_SPACING_MM;
-  const proposedRows = blockCountForAxis(lengthMm, proposedSpacingMm);
+  // fix/joists-on-blocks-flying (review MED #1): the ACTUAL layout
+  // resolver caps rows at `max(2, floor(MAX_METHOD_B_BLOCK_COUNT /
+  // numJoists))` because block columns are now pinned to joist
+  // x-centers (one column per joist — total = numJoists × rows).
+  // A naive `blockCountForAxis(length, proposedSpacingMm)` reports
+  // the row count that spacing WOULD produce IF the cap didn't
+  // exist. On a large / joist-dense Method-B deck that value can
+  // exceed `maxRows`, so the remediation would render a lying
+  // "N → M" arrow (M unreachable). Use the SAME cap-aware
+  // resolver the layout uses so the patch metadata reflects what
+  // the recomputed design will ACTUALLY produce.
+  const proposedGrid = resolveMethodBGrid(
+    widthMm,
+    lengthMm,
+    proposedSpacingMm,
+    design.foundation.blockRowsHint,
+    design.foundation.blockColsHint,
+    numJoists,
+  );
+  const proposedRows = proposedGrid.rows;
+
+  // If the cap prevents adding any support rows (proposed ≤
+  // current), the option can't help — surface a cap-specific
+  // reason instead of a misleading "N → N" arrow. This short-
+  // circuits before verify to avoid the invalidPatch path
+  // swallowing the cap case with a generic message.
+  if (proposedRows <= currentRows) {
+    return {
+      kind: 'add-support-row',
+      memberId: warning.memberId,
+      patch: {
+        kind: 'add-support-row',
+        targetBeamId: warning.memberId,
+        currentRows,
+        proposedRows: currentRows,
+        currentSpacingMm: currentEffectiveSpacingMm,
+        proposedSpacingMm,
+      },
+      summary: 'Reduce block spacing to add support (disabled)',
+      currentAllowableMm: warning.allowableMm,
+      newAllowableMm: 0,
+      actualSpanMm: warning.actualMm,
+      wouldClear: false,
+      disabled: true,
+      disabledReason:
+        'Block-count cap prevents adding more support rows — reduce ' +
+        'deck size / joist count or use a stronger joist.',
+    };
+  }
 
   const patch: RemediationPatch = {
     kind: 'add-support-row',
