@@ -449,34 +449,30 @@ describe('Method B block grid — clamp + cap defensive bounds', () => {
   });
 
   // ---------------------------------------------------------------
-  // SHOULD-FIX (QA MED#3, review): PRECEDENCE — when BOTH
-  // `blockSpacingMm` and the legacy `blockRowsHint` are set,
-  // spacing wins (the resolver's PRIMARY path). Pins the ticket's
-  // "blockSpacingMm > legacy hints" contract at the layout seam.
+  // feat/block-count-per-joist — PRECEDENCE FLIP: `blockRowsHint`
+  // is now the primary Method-B control (COUNT input) and wins
+  // over the legacy `blockSpacingMm` (DISTANCE, superseded).
+  // The tighter precedence pin lives in
+  // `floating-block-count.test.ts`; this test just asserts that a
+  // spacing-only design continues to work byte-identically (back-
+  // compat for the legacy path — a user who saved a design under
+  // the previous feat/block-spacing model still opens correctly).
   // ---------------------------------------------------------------
-  it('SHOULD-FIX — precedence: BOTH blockSpacingMm and blockRowsHint set → blockSpacingMm controls the grid', () => {
-    // Design A: blockSpacingMm=1220, blockRowsHint=10 (a bogus
-    // large hint the resolver MUST ignore).
-    const dBoth = makeMethodB({
-      widthFt: 16,
-      lengthFt: 16,
-      blockSpacingMm: 1220,
-      blockRowsHint: 10,
-    });
-    // Design B: blockSpacingMm=1220 alone.
+  it('legacy back-compat: blockSpacingMm alone still drives the grid (when blockRowsHint is absent)', () => {
+    // With rowsHint absent, spacing controls the row count as it
+    // did pre-feat/block-count-per-joist. This preserves the
+    // save/reload path for designs saved under the previous
+    // block-spacing model.
     const dSpacingOnly = makeMethodB({
       widthFt: 16,
       lengthFt: 16,
       blockSpacingMm: 1220,
     });
-    const nBoth = computeFloatingLayout(dBoth).members.filter(
-      (m) => m.kind === 'block',
-    ).length;
     const nSpacingOnly = computeFloatingLayout(dSpacingOnly).members.filter(
       (m) => m.kind === 'block',
     ).length;
-    // Precedence: adding the hint MUST NOT change the grid.
-    expect(nBoth).toBe(nSpacingOnly);
+    // 13 joists × 5 rows = 65 blocks (pre-fix pin).
+    expect(nSpacingOnly).toBe(65);
   });
 });
 

@@ -173,7 +173,7 @@ describe('formatRemediationOption — purity + robustness', () => {
 // ---------------------------------------------------------------------------
 
 describe('formatRemediationOption — S25 add-support-row', () => {
-  it('produces a headline in the form "Add a row of blocks (N → M)"', () => {
+  it('produces a headline in the form "Add support rows (N → M)"', () => {
     const option = makeOption({
       kind: 'add-support-row',
       memberId: 'beam-near',
@@ -266,17 +266,22 @@ describe('formatRemediationOption — S25 add-support-row', () => {
 });
 
 // ---------------------------------------------------------------------------
-// HIGH #3 (review — feat/block-spacing): the ACTIVE Method-B
-// path carries `currentSpacingMm` + `proposedSpacingMm` on the
-// patch. The label MUST render length-based headlines
-// ("Reduce block spacing to add support (X → Y)") when those
-// fields are present — the user thinks in spacing, not row
-// counts. Legacy path (fields undefined) still renders the
-// count-arrow.
+// Review-gate Fix #1 (feat/block-count-per-joist): the ACTIVE
+// Method-B path now uses a COUNT knob (`blockRowsHint`), NOT a
+// distance. The label MUST render count-based headlines
+// ("Add support rows (X → Y)") when `currentRows`/`proposedRows`
+// are present — the user's control is the row count, not the
+// spacing. Rendering "Reduce block spacing to add support
+// (12′ → 3′)" is a LIE because (a) the UI no longer has a "block
+// spacing" control, and (b) the value the user acts on INCREASES
+// (rows go UP), so "reduce" is confusing.
+//
+// This test WAS the HIGH #3 pin (spacing-primary label) — flipped
+// as part of the count-primary pivot review fixes.
 // ---------------------------------------------------------------------------
 
-describe('formatRemediationOption — HIGH #3 Method-B spacing-primary headline', () => {
-  it('renders "Reduce block spacing to add support (X → Y)" with unit-aware length values', () => {
+describe('formatRemediationOption — Fix #1 Method-B count-primary headline', () => {
+  it('renders "Add support rows (X → Y)" using the row counts, even when spacing fields are also on the patch', () => {
     const option = makeOption({
       kind: 'add-support-row',
       memberId: 'joist-3',
@@ -285,27 +290,36 @@ describe('formatRemediationOption — HIGH #3 Method-B spacing-primary headline'
         targetBeamId: 'joist-3',
         currentRows: 2,
         proposedRows: 5,
+        // Spacing fields may STILL appear on the patch (back-compat
+        // — some producers still populate them). The label MUST
+        // ignore them in the enabled Method-B path and use the
+        // COUNT arrow instead.
         currentSpacingMm: 3657.6, // 12 ft
         proposedSpacingMm: 914.4, // 3 ft
       },
     });
     const imperial = formatRemediationOption(option, 'imperial');
     const metric = formatRemediationOption(option, 'metric');
-    // Both systems mention "Reduce block spacing".
-    expect(imperial.headline.toLowerCase()).toContain('reduce block spacing');
-    expect(metric.headline.toLowerCase()).toContain('reduce block spacing');
-    // Imperial displays feet/inches; metric displays SI units.
-    expect(imperial.headline).toMatch(/′|ft/); // prime or "ft" (formatLength uses ′)
-    expect(metric.headline).toMatch(/mm|cm|m\b/);
-    // No misleading count-arrow "N → M" alongside the length arrow.
-    // Only the length arrow present.
-    expect(metric.headline).toContain('→');
-    // No lying (5 → 8) — the counts are secondary; the headline
-    // is length-primary.
-    expect(imperial.headline).not.toMatch(/\(5 → 8\)/);
+    // Both systems say "Add support rows" — the user's control is
+    // the ROW COUNT.
+    expect(imperial.headline).toBe('Add support rows (2 → 5)');
+    expect(metric.headline).toBe('Add support rows (2 → 5)');
+    // No length units in the headline — the misleading "12′ → 3′"
+    // has been removed.
+    expect(imperial.headline).not.toMatch(/′|ft|mm|cm/);
+    expect(metric.headline).not.toMatch(/′|ft|mm|cm/);
+    // No "reduce" wording — the count INCREASES.
+    expect(imperial.headline.toLowerCase()).not.toContain('reduce');
+    expect(metric.headline.toLowerCase()).not.toContain('reduce');
   });
 
-  it('legacy patch (no spacing fields) still renders the count-arrow ("Add a row of blocks (N → M)")', () => {
+  it('renders the SAME count-arrow label regardless of whether spacing fields are on the patch (post-unification)', () => {
+    // Pre-fix, the label differed based on the patch shape:
+    //   - Legacy patch (no `proposedSpacingMm`) → "Add a row of blocks (N → M)"
+    //   - Active patch (`proposedSpacingMm` set) → "Reduce block spacing to add support (X′ → Y′)"
+    // Post-fix (Code Review Fix #1) both paths render the SAME
+    // count-based label. This regression pin catches any future
+    // divergence.
     const option = makeOption({
       kind: 'add-support-row',
       memberId: 'beam-near',
@@ -318,6 +332,6 @@ describe('formatRemediationOption — HIGH #3 Method-B spacing-primary headline'
       },
     });
     const out = formatRemediationOption(option, 'imperial');
-    expect(out.headline).toBe('Add a row of blocks (2 → 3)');
+    expect(out.headline).toBe('Add support rows (2 → 3)');
   });
 });

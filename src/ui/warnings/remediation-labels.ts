@@ -105,24 +105,22 @@ function headlineFor(option: RemediationOption, units: UnitSystem): string {
       if (option.disabled) {
         return option.summary;
       }
-      // HIGH #3 (review — feat/block-spacing): when the producer
-      // supplied `proposedSpacingMm` (the ACTIVE Method-B path),
-      // render the length-based label — the user thinks in
-      // "block spacing", not row counts. The unit-aware
-      // `formatLength` handles imperial ⇄ metric.
-      if (
-        patch.currentSpacingMm !== undefined &&
-        patch.proposedSpacingMm !== undefined
-      ) {
-        const from = formatLength(patch.currentSpacingMm, units);
-        const to = formatLength(patch.proposedSpacingMm, units);
-        return `Reduce block spacing to add support (${from} → ${to})`;
-      }
-      // LEGACY path (pre-HIGH#3 producer): the count-based
-      // arrow — kept for backwards compat with any consumer that
-      // synthesizes an add-support-row patch without spacing
-      // fields.
-      return `Add a row of blocks (${patch.currentRows} → ${patch.proposedRows})`;
+      // Code Review Fix #1 (feat/block-count-per-joist review):
+      // the ACTIVE Method-B path now uses a COUNT knob
+      // (`blockRowsHint`) — NOT a distance. Render the count-
+      // based label using `currentRows`/`proposedRows` on the
+      // patch. The prior length-based label ("Reduce block
+      // spacing to add support (12′ → 3′)") was misleading:
+      //   (a) the UI no longer has a "block spacing" control,
+      //   (b) X and Y were LENGTHS while the user's knob is a
+      //       COUNT (mismatch — user can't relate the arrow to
+      //       the field they'll edit),
+      //   (c) "reduce" contradicts the count INCREASING.
+      // The spacing fields on the patch (`currentSpacingMm` /
+      // `proposedSpacingMm`) are IGNORED for the label — they
+      // remain on the patch for back-compat with legacy
+      // consumers that read them (e.g. persistence, audit).
+      return `Add support rows (${patch.currentRows} → ${patch.proposedRows})`;
     /* c8 ignore next 6 */
     default: {
       const _exhaustive: never = patch;

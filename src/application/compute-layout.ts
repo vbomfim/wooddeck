@@ -72,7 +72,13 @@ export function computeLayoutAndCheck(
   design: DeckDesign,
   table: SpanTable,
 ): { layout: Layout; warnings: Warning[] } {
-  const layout = computeLayout(design);
+  // Thread the `SpanTable` into `computeLayout` (Code Review
+  // Fix #4) so the Method-B span-safe default row-count derivation
+  // has access to the joist's IRC allowable. Without this the
+  // default falls back to the 1220 mm-derived count — span-safe
+  // for typical decks but starts over-spanned on very large legal
+  // decks (60–75 ft). The span-check still runs unchanged.
+  const layout = computeLayout(design, { spanTable: table });
   const warnings = spanCheck(layout, table);
   return { layout, warnings };
 }

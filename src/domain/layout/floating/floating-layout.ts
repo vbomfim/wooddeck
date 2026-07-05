@@ -75,7 +75,7 @@
  * Pure `src/domain/**` module. Imports only sibling domain modules.
  */
 
-import type { DeckDesign, Layout, LayoutMember } from '../../model';
+import type { DeckDesign, Layout, LayoutMember, MaterialRef } from '../../model';
 import { lookupFoundationProduct } from '../../foundation-catalog';
 import type { SpanTable } from '../../spans/span-table';
 import { MM_PER_FOOT, type Mm } from '../../units';
@@ -237,160 +237,245 @@ export const DEFAULT_METHOD_B_BLOCK_SPACING_MM: Mm = 1220;
 export const MAX_METHOD_B_BLOCK_COUNT = 400;
 
 /**
- * fix/joists-on-blocks-flying — Method B grid resolver. Pure —
+ * feat/block-count-per-joist — schema-legal bounds on
+ * `foundation.blockRowsHint` (COUNT — integer). Kept in sync with
+ * `docs/deck-file-schema-v2.json` `FoundationSpecDeckBlocks.blockRowsHint`
+ * / `FoundationSpecTuffBlocks.blockRowsHint`. Re-exported through
+ * the `state` barrel so the UI count field can clamp at the
+ * input boundary WITHOUT crossing `ui → domain/layout` directly.
+ *
+ * ## Values
+ *
+ *   - `MIN = 2` — perimeter-two floor: a rectangular deck cannot
+ *     have fewer than 2 rows of blocks (outer rows anchored at
+ *     ±length/2 by `computeAxisCenters`).
+ *   - `MAX = 100` — a generous fixed ceiling well above any
+ *     physically-sensible grid. The RUNTIME per-design ceiling is
+ *     tighter (see `resolveMethodBGrid` — `min(MAX_METHOD_B_BLOCK_COUNT
+ *     / numJoists, floor(lengthMm / MIN_BLOCK_SPACING_MM) + 1)`);
+ *     the 100 constant is the SCHEMA ceiling, mirroring the JSON
+ *     schema max so a save/reload cannot poison the design.
+ */
+export const MIN_BLOCK_ROWS_HINT = 2;
+export const MAX_BLOCK_ROWS_HINT = 100;
+
+/**
+ * feat/block-count-per-joist — Method B grid resolver. Pure —
  * same input yields same output.
  *
- * ## The fix this docstring supersedes (feat/block-spacing PR #66)
+ * ## Priority (NEW — count-primary)
  *
- * PR #66 modelled Method B as a REGULAR grid at pitch
- * `blockSpacingMm` on BOTH axes, deriving `{cols, rows}` from
- * `blockCountForAxis(spanMm, spacingMm)` per axis and capping both
- * proportionally. That decoupled block columns from joist
- * x-centers: on a 16 × 16 ft deck at 16″ o.c. joists + 1220 mm
- * default spacing, joists sat at 13 x-positions but block columns
- * landed at 5 unrelated grid positions. Most joists had NO block
- * under them anywhere along their length — they "flew." A Method B
- * deck (no beam layer) is only physically sensible if there is a
- * block DIRECTLY under EACH joist.
+ * Method B's row count now derives from a strict priority list:
  *
- * ## The current model — columns pinned to joists, rows at spacing
+ *   1. **`blockRowsHint` (COUNT — PRIMARY control).** When
+ *      present, the user's row count wins. Clamped to
+ *      `[2, min(rowsMaxByCap, rowsMaxByGap)]` where
+ *      `rowsMaxByCap = max(2, floor(MAX_METHOD_B_BLOCK_COUNT /
+ *      numJoists))` (defense against pathological instance
+ *      explosion) and `rowsMaxByGap = floor(lengthMm /
+ *      MIN_BLOCK_SPACING_MM) + 1` (defense against sub-footprint
+ *      row pitch). Non-integer hints are `Math.floor`-rounded
+ *      before clamping.
+ *   2. **`blockSpacingMm` (DISTANCE — LEGACY / superseded).** If
+ *      `blockRowsHint` is absent, the pre-fix spacing path
+ *      still applies for back-compat with designs saved under
+ *      the feat/block-spacing model. The derived row count
+ *      passes through the same cap-and-gap clamp.
+ *   3. **Absent both** — a SPAN-SAFE default. When a `spanTable`
+ *      is threaded through AND the joist material + spacing are
+ *      known, the default row count = `max(legacyDefault,
+ *      ceil(lengthMm / allowableMm) + 1)` where `allowableMm` is
+ *      the joist's IRC allowable at its spacing (Code Review
+ *      Fix #4). This keeps the row pitch ≤ IRC allowable so a
+ *      fresh Method-B deck does NOT start over-spanned. When the
+ *      table is not threaded through (byte-identity path for
+ *      pre-fix consumers) OR the joist material is not in the
+ *      catalog (allowable = 0), falls back to the
+ *      `DEFAULT_METHOD_B_BLOCK_SPACING_MM = 1220 mm` (4 ft)
+ *      derived count. `blockCountForAxis(lengthMm, DEFAULT)` on
+ *      a 12 ft deck yields 4 rows at 1219 mm pitch — well within
+ *      the IRC allowable for 2×8 PT No.2 @ 16″ o.c. joists
+ *      (span-safe for the MVP joist catalog at typical deck
+ *      sizes).
+ *      When the deck is so large that the block-count cap
+ *      prevents reaching the span-safe count, `spanCheck` fires
+ *      the `over-span-joist` warning honestly — correct guidance
+ *      (use beams / smaller deck / bigger joists).
  *
- * `computeMethodB` (the sole non-test caller) supplies `numJoists`
- * from the joist layout and treats it as the FIXED column count
- * (one block per joist × row). The resolver returns:
+ * ## Why the flip? (UAT bug — under-supported / over-spanned)
  *
- *   - `cols = numJoists` (each joist must have a support column).
- *   - `rows` = the row count along +z at the user's block-spacing
- *     pitch, via `blockCountForAxis(lengthMm, effectiveSpacing)`,
- *     then capped by MAX_METHOD_B_BLOCK_COUNT (reducing ROWS only —
- *     columns are load-bearing and cannot be dropped).
+ * The previous model exposed `blockSpacingMm` (DISTANCE) as the
+ * user knob. Users think in "how many blocks under each joist",
+ * not in "how many millimeters between them". Combined with the
+ * perimeter-two default floor, a large deck defaulted to only 2
+ * block rows (at the ends) → every joist over-spanned by ~3× the
+ * IRC allowable → the whole deck went red. The COUNT control
+ * gives the user direct authority over the physical support
+ * density.
  *
- * `blockSpacingMm` now controls ONLY the row pitch (support
- * spacing ALONG each joist — the span-relevant dimension that
- * bounds `over-span-joist` in `span-check.ts::deriveMethodBJoistSpanFromBlockGrid`).
- * The `widthMm` parameter is retained for API symmetry (currently
- * unused since column count is externally supplied) — a future
- * axis-scaled derivation can consume it without a signature change.
+ * ## Columns are still pinned to joists (no flying joists)
  *
- * ## Priority: blockSpacingMm > blockRowsHint / blockColsHint
+ * `cols = numJoists`. Every joist has a block column beneath it —
+ * the fix/joists-on-blocks-flying invariant survives the pivot
+ * unchanged. The `foundation.blockColsHint` model field REMAINS
+ * on the schema for back-compat with pre-flying-joists .deck
+ * files, but has been a genuine NO-OP for Method B since PR #66
+ * (and is not surfaced by any UI control). Code Review Fix #C
+ * (2026-07-05 diff review, Opus LOW) removed the no-op param
+ * from this signature — the field lives on the model, but the
+ * resolver never inspects it.
  *
- * When `blockSpacingMm` is present it wins over the legacy S25
- * `blockRowsHint`. The `blockColsHint` field is a NO-OP for
- * Method B (columns are pinned to the joist count — the number
- * of load-bearing supports per joist is a physical property, not
- * a UI knob). The hint remains in the schema for backwards
- * compatibility.
+ * ## Degenerate corner — `numJoists × 2 > MAX_METHOD_B_BLOCK_COUNT`
  *
- * ## Cap enforcement — closed-form, reduces rows only
- *
- *   - Compute `rowsReq = blockCountForAxis(lengthMm, effectiveSpacing)`.
- *   - `maxRows = max(2, floor(MAX_METHOD_B_BLOCK_COUNT / numJoists))`
- *     — the largest row count that keeps `numJoists × rows ≤ MAX`
- *     while preserving the perimeter-two floor.
- *   - `rows = clamp(rowsReq, 2, maxRows)`.
- *
- * ## Degenerate corner — `numJoists × 2 > MAX`
- *
- * Only reachable with pathological joist spacing on a near-max
- * footprint (e.g. 100 × 100 ft @ 12″ o.c. → ~75 joists → 75 × 2 =
- * 150 ≤ 400, still fine; the degenerate corner needs joist spacing
- * far below any real design). If it happens, rows stay at 2 and
- * `numJoists × 2` is emitted directly — bounded by
- * `MAX_DECK_DIMENSION_MM` (100 ft) × joist-spacing physics
- * (`MIN_JOIST_SPACING`), no OOM. The postcondition assertion
- * expressly allows `cols × rows > MAX_METHOD_B_BLOCK_COUNT` when
- * `rows === 2` (the perimeter-two floor supersedes the cap — you
- * cannot skip a joist).
+ * Unchanged from pre-fix. Only reachable with pathological joist
+ * spacing on a near-max footprint. Rows stay at 2 (perimeter-two
+ * supersedes the cap); the postcondition assertion below allows
+ * the overshoot when `rows === 2`.
  */
 export function resolveMethodBGrid(
   widthMm: Mm,
   lengthMm: Mm,
   requestedSpacingMm: number | undefined,
-  legacyRowsHint: number | undefined,
-  _legacyColsHint: number | undefined,
+  blockRowsHint: number | undefined,
   numJoists: number,
+  spanTable?: SpanTable,
+  joistMaterial?: MaterialRef,
+  joistSpacingMm?: Mm,
 ): { cols: number; rows: number } {
-  // `widthMm` and `_legacyColsHint` are retained for API symmetry
-  // but no longer influence the column count — columns are
-  // externally fixed at `numJoists` (see docstring).
+  // `widthMm` is retained for API symmetry but no longer
+  // influences the column count — columns are externally fixed
+  // at `numJoists` (see docstring). Code Review Fix #C removed
+  // the previously-vestigial `_legacyColsHint` parameter — it
+  // was a genuine no-op that only served to lie about the API.
   void widthMm;
 
   const cols = numJoists;
 
-  // Resolve the row pitch: primary path uses `blockSpacingMm`;
-  // legacy fallback uses `blockRowsHint` under the default
-  // spacing (preserves the pre-#66 S25 add-support-row seam
-  // byte-identically when spacing is unset).
+  // Priority: blockRowsHint (COUNT) > blockSpacingMm (DISTANCE) > default.
   let rowsReq: number;
   if (
+    blockRowsHint !== undefined &&
+    Number.isFinite(blockRowsHint)
+  ) {
+    // Primary: user picked the row count directly. Floor non-int.
+    rowsReq = Math.floor(blockRowsHint);
+  } else if (
     requestedSpacingMm !== undefined &&
     Number.isFinite(requestedSpacingMm)
   ) {
+    // Legacy back-compat: derive row count from spacing (pre-fix
+    // model). Clamp spacing into the schema-legal range first.
     const s =
       clampBlockSpacingMm(requestedSpacingMm) ??
       DEFAULT_METHOD_B_BLOCK_SPACING_MM;
     rowsReq = blockCountForAxis(lengthMm, s);
   } else {
-    const defaultSpacing = DEFAULT_METHOD_B_BLOCK_SPACING_MM;
-    rowsReq =
-      legacyRowsHint !== undefined
-        ? resolveHintCount(legacyRowsHint, lengthMm)
-        : blockCountForAxis(lengthMm, defaultSpacing);
+    // Absent-hint default. Two-step derivation (Code Review Fix #4):
+    //   (1) Start from the 1220 mm-derived fallback count — the
+    //       legacy "sensible pitch" number that was span-safe for
+    //       the QA-verified matrix (≤40 ft decks, common joists).
+    //   (2) If a `spanTable` is threaded through AND the joist
+    //       material + spacing are known, compute the SPAN-SAFE
+    //       minimum row count from the joist's IRC allowable
+    //       (`ceil(lengthMm / allowableMm) + 1`) and take the
+    //       LARGER of the two — so a very large deck (60–75 ft)
+    //       doesn't start over-spanned. When the block-count cap
+    //       later prevents reaching this count (huge deck), the
+    //       span-check fires the over-span-joist warning honestly.
+    //
+    // The fallback path (no table, or catalog miss returning 0)
+    // preserves byte-identity with pre-Code-Review-Fix-#4 layouts
+    // when the pipeline doesn't thread the table through — every
+    // existing golden fixture and layout snapshot stays stable.
+    const legacyDefault = blockCountForAxis(
+      lengthMm,
+      DEFAULT_METHOD_B_BLOCK_SPACING_MM,
+    );
+    let spanSafeRows = legacyDefault;
+    if (
+      spanTable !== undefined &&
+      joistMaterial !== undefined &&
+      joistSpacingMm !== undefined
+    ) {
+      const allowableMm = spanTable.lookupJoistMaxSpan(
+        joistMaterial,
+        joistSpacingMm,
+      );
+      if (allowableMm > 0) {
+        // Row pitch = lengthMm / (rows - 1) ≤ allowableMm
+        //   ⇒ rows ≥ lengthMm / allowableMm + 1.
+        spanSafeRows = Math.max(
+          legacyDefault,
+          Math.ceil(lengthMm / allowableMm) + 1,
+        );
+      }
+    }
+    rowsReq = spanSafeRows;
   }
 
-  // Cap by reducing ROWS only (columns are load-bearing, fixed at
-  // numJoists). Perimeter-two floor (rows ≥ 2) always wins over
-  // the cap — you cannot have a single support line under a
-  // rectangular deck.
-  const maxRows = Math.max(
-    2,
-    Math.floor(MAX_METHOD_B_BLOCK_COUNT / Math.max(1, cols)),
-  );
-  const rows = Math.max(2, Math.min(rowsReq, maxRows));
+  return { cols, rows: clampMethodBRows(rowsReq, numJoists, lengthMm) };
+}
 
-  // Postcondition: the cap must hold WHENEVER the perimeter-two
-  // floor allows it. The `rows === 2` degenerate corner is
-  // exempt (perimeter-two supersedes — see docstring). This
-  // catches a future arithmetic regression (e.g. maxRows
-  // computed without the ≥ 2 floor).
+/**
+ * Clamp a requested Method-B row count into the physically-
+ * realizable range for a given joist count + deck length.
+ *
+ * ## Ceilings
+ *
+ *   - `rowsMaxByCap = max(2, floor(MAX_METHOD_B_BLOCK_COUNT / numJoists))`
+ *     — defense against pathological instance explosion (each
+ *     block is a THREE-render mesh; a runaway grid trashes both
+ *     memory and framerate). The floor at 2 keeps the perimeter-
+ *     two invariant intact even when `numJoists × 2` already
+ *     overshoots the cap (rare — near-max footprint + tight
+ *     joist spacing).
+ *   - `rowsMaxByGap = max(2, floor(lengthMm / MIN_BLOCK_SPACING_MM) + 1)`
+ *     — defense against sub-footprint row pitch (a row denser
+ *     than the block footprint would produce overlapping
+ *     blocks).
+ *
+ * Both callsites — the resolver (`resolveMethodBGrid`) and the
+ * remediation producer (`produceAddSupportRow`) — MUST use this
+ * helper. Duplicating the math risks the remediation proposing
+ * a count the resolver would clamp back (silent no-op, breaks
+ * `wouldClear` — Code Review Fix #5).
+ *
+ * ## Postcondition (assertion)
+ *
+ * When `rows > 2`, `numJoists × rows ≤ MAX_METHOD_B_BLOCK_COUNT`
+ * MUST hold. The `rows === 2` degenerate corner is exempt —
+ * perimeter-two supersedes. A future arithmetic regression that
+ * violates this fails LOUD.
+ */
+export function clampMethodBRows(
+  rowsReq: number,
+  numJoists: number,
+  lengthMm: Mm,
+): number {
+  const cols = Math.max(1, numJoists);
+  const rowsMaxByCap = Math.max(
+    2,
+    Math.floor(MAX_METHOD_B_BLOCK_COUNT / cols),
+  );
+  const rowsMaxByGap = Math.max(
+    2,
+    Math.floor(lengthMm / MIN_BLOCK_SPACING_MM) + 1,
+  );
+  const rows = Math.max(2, Math.min(rowsReq, rowsMaxByCap, rowsMaxByGap));
+
+  // Postcondition — see docstring. `cols` here is `numJoists`
+  // (already ≥ 1 above), so this matches the resolver's original
+  // invariant.
   /* c8 ignore next 5 */
-  if (cols * rows > MAX_METHOD_B_BLOCK_COUNT && rows > 2) {
+  if (numJoists * rows > MAX_METHOD_B_BLOCK_COUNT && rows > 2) {
     throw new LayoutError(
-      `Internal invariant violated: Method B block count ${cols}×${rows} = ` +
-        `${cols * rows} exceeds MAX_METHOD_B_BLOCK_COUNT (${MAX_METHOD_B_BLOCK_COUNT}) ` +
+      `Internal invariant violated: Method B block count ${numJoists}×${rows} = ` +
+        `${numJoists * rows} exceeds MAX_METHOD_B_BLOCK_COUNT (${MAX_METHOD_B_BLOCK_COUNT}) ` +
         `while rows > 2 (perimeter-two floor was not the reason for the overshoot).`,
     );
   }
 
-  return { cols, rows };
-}
-
-/**
- * Legacy S25 hint → integer count, applying the SAME clamp
- * `computeBlockGrid.resolveGridCount` uses. Mirrors that helper
- * verbatim so the Method B fallback path stays byte-identical
- * to the pre-feat/block-spacing behavior for a hint-carrying
- * design.
- *
- *   - Non-finite → treated as "no hint" (caller substitutes the
- *     default derivation, never reaches this branch).
- *   - Clamped to `[2, floor(spanMm / MIN_BLOCK_SPACING_MM) + 1]`.
- *   - Non-integer values rounded DOWN before clamping (`Math.floor`).
- *
- * The `resolveGridCount` export from `block-grid.ts` cannot be
- * reused directly here because its second argument is `spanMm` and
- * its third is `maxSpacingMm` (used for the "no hint" fallback),
- * whereas our fallback here is `DEFAULT_METHOD_B_BLOCK_SPACING_MM`
- * — not the same semantics. Duplicating the ~4 lines of clamp
- * logic is cheaper than complicating the shared helper's contract.
- */
-function resolveHintCount(hint: number, spanMm: Mm): number {
-  if (!Number.isFinite(hint)) {
-    return blockCountForAxis(spanMm, DEFAULT_METHOD_B_BLOCK_SPACING_MM);
-  }
-  const maxCount = Math.floor(spanMm / MIN_BLOCK_SPACING_MM) + 1;
-  const asInt = Math.floor(hint);
-  return Math.max(2, Math.min(asInt, maxCount));
+  return rows;
 }
 
 /**
@@ -453,7 +538,7 @@ export function computeFloatingLayout(
         members = computeMethodA(design);
         break;
       case 'joists-on-blocks':
-        members = computeMethodB(design);
+        members = computeMethodB(design, options?.spanTable);
         break;
       default:
         assertNever(
@@ -536,7 +621,8 @@ function computeMethodA(design: DeckDesign): LayoutMember[] {
 /**
  * Method B layout — joists directly on blocks; NO beam layer.
  *
- * ## Block grid — Method B (fix/joists-on-blocks-flying)
+ * ## Block grid — Method B (fix/joists-on-blocks-flying, count-primary
+ * after feat/block-count-per-joist)
  *
  *   - **Columns pinned to joists.** Block COLUMNS sit at the joist
  *     x-centers (`explicitColXCenters = joists.map(j => j.position.x)`),
@@ -544,22 +630,37 @@ function computeMethodA(design: DeckDesign): LayoutMember[] {
  *     along its full length. `numJoists = numColumns` — one block
  *     column per joist. This is the "no flying joists" invariant
  *     (see `floating-flying-joists.test.ts`).
- *   - **Rows at user pitch.** Block ROWS sit along +z at the
- *     user's `blockSpacingMm` pitch (default
- *     `DEFAULT_METHOD_B_BLOCK_SPACING_MM = 1220 mm ≈ 4 ft`).
- *     `rows = blockCountForAxis(lengthMm, effectiveSpacing)`, then
- *     capped via `resolveMethodBGrid` (reduces rows only). Outer
- *     rows anchored at `±lengthMm/2` (`computeAxisCenters`).
+ *   - **Rows from the user's COUNT knob.** The row count is
+ *     resolved by `resolveMethodBGrid` under COUNT-primary
+ *     precedence:
+ *       1. `foundation.blockRowsHint` (integer) — the primary
+ *          user control.
+ *       2. `foundation.blockSpacingMm` (mm) — LEGACY back-compat
+ *          for designs saved under the pre-feat/block-count-per-
+ *          joist model. Superseded when the count is set.
+ *       3. Absent both — a span-safe default. When a `spanTable`
+ *          is threaded through, the default = the minimum row
+ *          count needed to keep the row pitch ≤ the joist's IRC
+ *          allowable (`ceil(lengthMm / allowableMm) + 1`), so a
+ *          fresh Method-B deck does NOT start over-spanned. When
+ *          the table is not available, falls back to the 1220 mm-
+ *          derived count.
+ *     Outer rows anchored at `±lengthMm/2` (`computeAxisCenters`).
+ *     Rows are then clamped by `clampMethodBRows` — see docstring
+ *     for the two ceilings (block-count cap + adjacent-row gap).
  *   - **Total blocks = numJoists × rows.**
  *
  * ## What `blockSpacingMm` now means
  *
- * `foundation.blockSpacingMm` controls ONLY the row pitch (support
- * spacing ALONG each joist). That is the span-relevant dimension —
- * `span-check.ts::deriveMethodBJoistSpanFromBlockGrid` derives the
- * joist's between-supports span from the block grid's row pitch,
- * and an `over-span-joist` warning fires when the pitch exceeds the
- * IRC allowable for the joist material.
+ * LEGACY. `foundation.blockSpacingMm` used to be the primary user
+ * knob (pre-feat/block-count-per-joist). It now controls the row
+ * count ONLY when `blockRowsHint` is absent (back-compat for
+ * saved designs). The UI no longer exposes it.
+ * `span-check.ts::deriveMethodBJoistSpanFromBlockGrid` still
+ * derives the joist's between-supports span from the RENDERED
+ * block-grid row pitch (irrespective of which knob produced it),
+ * so an `over-span-joist` warning fires whenever the effective
+ * pitch exceeds the IRC allowable for the joist material.
  *
  * ## Why the pre-fix (feat/block-spacing PR #66) model was broken
  *
@@ -583,7 +684,10 @@ function computeMethodA(design: DeckDesign): LayoutMember[] {
  * reading positions off the joist members is one step further from
  * drift than re-calling the helper.
  */
-function computeMethodB(design: DeckDesign): LayoutMember[] {
+function computeMethodB(
+  design: DeckDesign,
+  spanTable?: SpanTable,
+): LayoutMember[] {
   if (design.foundation.type === 'posts-on-footings') {
     throw new LayoutError('unreachable: posts-on-footings in Method B');
   }
@@ -600,16 +704,22 @@ function computeMethodB(design: DeckDesign): LayoutMember[] {
   const joistXCenters = joists.map((j) => j.position.x);
   const numJoists = joistXCenters.length;
 
-  // Resolve the row count — spacing-primary, legacy-hint fallback,
-  // capped by reducing rows only (columns are load-bearing and
-  // cannot be dropped). See `resolveMethodBGrid` docstring.
+  // Resolve the row count — COUNT-primary precedence:
+  //   blockRowsHint > blockSpacingMm > span-safe default.
+  // The span-safe default is derived from the joist's IRC
+  // allowable via the threaded-through `spanTable` (Code Review
+  // Fix #4). Row count is then clamped by `clampMethodBRows` —
+  // reduces rows only (columns are load-bearing and cannot be
+  // dropped). See `resolveMethodBGrid` docstring.
   const { rows } = resolveMethodBGrid(
     widthMm,
     lengthMm,
     design.foundation.blockSpacingMm,
     design.foundation.blockRowsHint,
-    design.foundation.blockColsHint,
     numJoists,
+    spanTable,
+    design.joist.material,
+    design.joist.spacingMm,
   );
 
   // Anchor z-centers via computeAxisCenters — outer rows sit at

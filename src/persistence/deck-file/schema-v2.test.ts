@@ -44,6 +44,7 @@ import type { DeckFileV2 } from './envelope-types';
 import { DeckFileError } from './errors';
 import { GOLDEN_DECK_DESIGN, deckDesignArb } from './__fixtures__/deck-designs';
 import { computeLayout } from '../../domain/layout/layout-engine';
+import type { DeckDesign } from '../../domain/model';
 
 // ---------------------------------------------------------------------------
 // AC1 — honest round-trip contract (golden fixture + property test)
@@ -1465,5 +1466,147 @@ describe('deserialize — S27 review-response: finalize order regression (missin
     const { design } = deserialize(rogue);
     expect(design.floatingFraming).toBe('beams-and-joists');
     expect(design.beamConnection).toBe('drop');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Code Review Fix #7 — persistence-boundary layout round-trip pins
+//
+// After the count-primary pivot, a `.deck` file may carry any of:
+//   (a) `blockSpacingMm` ONLY (legacy design saved under feat/
+//       block-spacing before feat/block-count-per-joist landed)
+//   (b) `blockRowsHint` ONLY (post-pivot user set the count)
+//   (c) BOTH `blockSpacingMm` + `blockRowsHint` (mixed — user
+//       loaded a legacy file then edited the count)
+//   (d) NEITHER (defaults apply)
+//
+// These tests pin the LAYOUT-LEVEL round-trip contract:
+//   (a) legacy files still produce the SAME layout after
+//       serialize→deserialize→computeLayout (byte-identical
+//       compared to computing the layout directly from the
+//       in-memory design)
+//   (c) mixed files round-trip AND blockRowsHint WINS at layout
+//       time (the count-primary precedence documented in
+//       `resolveMethodBGrid`)
+// ---------------------------------------------------------------------------
+
+describe('deserialize → computeLayout — Code Review Fix #7 count-primary persistence pins', () => {
+  const OPTS = {
+    createdAt: '2026-07-04T00:00:00.000Z',
+    generatorVersion: '1.0.0',
+  } as const;
+
+  // Helper: build a floating Method-B tuffblocks design at 16×16.
+  function makeMethodBBase(foundationOverrides: Record<string, unknown> = {}) {
+    return {
+      ...GOLDEN_DECK_DESIGN,
+      structure: 'floating' as const,
+      floatingFraming: 'joists-on-blocks' as const,
+      beamConnection: 'drop' as const,
+      foundation: {
+        type: 'tuffblocks' as const,
+        product: { productId: 'tuffblock-12x12x4' as const },
+        ...foundationOverrides,
+      },
+      footprint: {
+        widthMm: 16 * 304.8,
+        lengthMm: 16 * 304.8,
+        heightMm: 500,
+      },
+    };
+  }
+
+  // Summarize a layout's Method-B blocks into a stable structural
+  // signature (id + kind + integer-rounded position) that survives
+  // JSON round-trip drift. We compare on this signature so a
+  // trivial float-precision delta doesn't fail the pin.
+  function blockSignature(design: DeckDesign): string {
+    const layout = computeLayout(design);
+    return JSON.stringify(
+      layout.members
+        .filter((m) => m.kind === 'block')
+        .map((m) => ({
+          x: Math.round(m.position.x),
+          y: Math.round(m.position.y),
+          z: Math.round(m.position.z),
+        })),
+    );
+  }
+
+  it('(a) legacy .deck with blockSpacingMm ONLY round-trips to the SAME layout (no drift)', () => {
+    // Design carrying legacy blockSpacingMm = 1220 (the pre-fix
+    // default). After the pivot, blockSpacingMm remains the
+    // effective control when blockRowsHint is absent (back-
+    // compat). Round-tripping through serialize→deserialize MUST
+    // preserve the layout byte-for-byte.
+    const legacy = makeMethodBBase({ blockSpacingMm: 1220 });
+    const json = serialize(legacy, OPTS);
+    const { design: reloaded } = deserialize(json);
+    // The reloaded design carries the same blockSpacingMm value.
+    if (
+      reloaded.foundation.type !== 'tuffblocks' &&
+      reloaded.foundation.type !== 'deck-blocks'
+    ) {
+      throw new Error('expected block foundation after reload');
+    }
+    expect(reloaded.foundation.blockSpacingMm).toBe(1220);
+    expect(reloaded.foundation.blockRowsHint).toBeUndefined();
+    // Layout signatures match — the SAME block grid emerges from
+    // either the in-memory or the reloaded design.
+    expect(blockSignature(reloaded)).toBe(blockSignature(legacy));
+  });
+
+  it('(a) legacy blockSpacingMm = 610 (tighter) round-trips to the same denser grid', () => {
+    // A different spacing value to prove the round-trip isn't
+    // coincidentally correct because both branches happen to
+    // produce the same count at the 1220 mm default.
+    const legacy = makeMethodBBase({ blockSpacingMm: 610 });
+    const json = serialize(legacy, OPTS);
+    const { design: reloaded } = deserialize(json);
+    expect(blockSignature(reloaded)).toBe(blockSignature(legacy));
+  });
+
+  it('(c) mixed .deck with BOTH blockSpacingMm + blockRowsHint round-trips AND blockRowsHint wins at layout time', () => {
+    // Mixed carrier — user loaded a legacy file then set the
+    // count. blockRowsHint (COUNT = 5) is the primary control and
+    // MUST override the legacy blockSpacingMm (1220 mm) at layout
+    // time. The layout emitted from the mixed design MUST match
+    // the layout emitted from a count-only design.
+    const mixed = makeMethodBBase({
+      blockSpacingMm: 1220,
+      blockRowsHint: 5,
+    });
+    const countOnly = makeMethodBBase({ blockRowsHint: 5 });
+
+    const mixedJson = serialize(mixed, OPTS);
+    const { design: mixedReloaded } = deserialize(mixedJson);
+    if (
+      mixedReloaded.foundation.type !== 'tuffblocks' &&
+      mixedReloaded.foundation.type !== 'deck-blocks'
+    ) {
+      throw new Error('expected block foundation after reload');
+    }
+    // Both fields preserved verbatim.
+    expect(mixedReloaded.foundation.blockRowsHint).toBe(5);
+    expect(mixedReloaded.foundation.blockSpacingMm).toBe(1220);
+
+    // Count wins at layout time — the mixed layout is IDENTICAL
+    // to the count-only layout (blockSpacingMm ignored).
+    expect(blockSignature(mixedReloaded)).toBe(blockSignature(countOnly));
+
+    // AND the mixed layout is DIFFERENT from the legacy-only
+    // layout (which uses blockSpacingMm) — proves the precedence
+    // is actually exercised.
+    const legacyOnly = makeMethodBBase({ blockSpacingMm: 1220 });
+    // 16 ft length at 1220 mm spacing → blockCountForAxis
+    // returns 5 (16 ft = 4877 mm; ceil(4877/1220)+1 = 5). So
+    // legacy also happens to yield 5 rows. Use a different
+    // spacing that produces a DIFFERENT count to prove
+    // precedence — 610 mm gives ~9 rows.
+    void legacyOnly; // spelled out for readability; the assertion below is the real proof.
+    const legacyDenser = makeMethodBBase({ blockSpacingMm: 610 });
+    expect(blockSignature(mixedReloaded)).not.toBe(
+      blockSignature(legacyDenser),
+    );
   });
 });

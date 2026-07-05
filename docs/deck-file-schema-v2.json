@@ -135,19 +135,19 @@
         "type": { "type": "string", "const": "deck-blocks" },
         "product": { "$ref": "#/$defs/FoundationBlockRef" },
         "blockRowsHint": {
-          "description": "S25 (ticket #47) — OPTIONAL override for the derived block-row count under a floating deck. Dimensionless positive integer; the runtime layout clamps to [2, floor(lengthMm / MIN_BLOCK_SPACING_MM) + 1]. minimum=2 mirrors the perimeter-two AC4 lower bound; maximum=100 is a generous fixed ceiling well above any physically-sensible grid (a 100-row grid on a 40 ft deck yields ~120 mm block spacing, below the 300 mm runtime density cap — the runtime clamp will reject it further). Omit for the S19 derivation (byte-identical to pre-S25).",
+          "description": "feat/block-count-per-joist — PRIMARY user control for Method B (floating 'joists-on-blocks') support density: the NUMBER of block ROWS along each joist (spread evenly end-to-end at layout time). Dimensionless positive integer. When set, blockRowsHint WINS over the legacy blockSpacingMm (which is superseded and now only consulted when this field is absent). Runtime clamp = min(rowsMaxByCap=floor(MAX_METHOD_B_BLOCK_COUNT/numJoists), rowsMaxByGap=floor(lengthMm/MIN_BLOCK_SPACING_MM)+1); both floored at 2 (perimeter-two invariant). minimum=2 mirrors that lower bound; maximum=100 is a generous fixed ceiling well above any physically-sensible grid. Omit for the span-safe absent-hint default (row count derived from the joist's IRC allowable when the pipeline threads a SpanTable through; falls back to a 1220 mm-derived count otherwise — byte-identical to pre-fix layouts).",
           "type": "integer",
           "minimum": 2,
           "maximum": 100
         },
         "blockColsHint": {
-          "description": "S25 (ticket #47) — OPTIONAL override for the derived block-column count under a floating deck. Dimensionless positive integer; the runtime layout clamps to [2, floor(widthMm / MIN_BLOCK_SPACING_MM) + 1]. See blockRowsHint for the bounds rationale. Omit for the S19 derivation.",
+          "description": "S25 (ticket #47) — OPTIONAL override for the derived block-column count under a floating deck. Dimensionless positive integer; the runtime layout clamps to [2, floor(widthMm / MIN_BLOCK_SPACING_MM) + 1]. See blockRowsHint for the bounds rationale. NO-OP under feat/joists-on-blocks-flying (block columns are pinned to joist x-centers — one column per joist).",
           "type": "integer",
           "minimum": 2,
           "maximum": 100
         },
         "blockSpacingMm": {
-          "description": "feat/block-spacing — OPTIONAL user-controlled distance between adjacent foundation blocks (grid PITCH, mm) for FLOATING 'joists-on-blocks' (Method B) framing; IGNORED for Method A ('beams-and-joists') and for elevated designs. Runtime layout clamps to [MIN_BLOCK_SPACING_MM (300), MAX_BLOCK_SPACING_MM (2438.4 ≈ 8 ft)] and further caps the total block count. minimum=300 mirrors the runtime density cap; maximum=2438.4 mirrors the practical DIY beam-column bound (an 8-ft block gap is at the edge of a sensible 2× lumber layout). Omit to apply the DEFAULT_METHOD_B_BLOCK_SPACING_MM (1220 mm ≈ 4 ft) at layout time.",
+          "description": "LEGACY (superseded by blockRowsHint in feat/block-count-per-joist). feat/block-spacing — OPTIONAL user-controlled distance between adjacent foundation blocks (grid PITCH, mm) for FLOATING 'joists-on-blocks' (Method B) framing; IGNORED for Method A ('beams-and-joists') and for elevated designs. Runtime layout clamps to [MIN_BLOCK_SPACING_MM (300), MAX_BLOCK_SPACING_MM (2438.4 ≈ 8 ft)] and further caps the total block count. minimum=300 mirrors the runtime density cap; maximum=2438.4 mirrors the practical DIY beam-column bound. When blockRowsHint is ALSO set, blockRowsHint wins and this field is ignored at layout time (kept in the schema for back-compat with designs saved under the pre-feat/block-count-per-joist model). Omit to apply the DEFAULT_METHOD_B_BLOCK_SPACING_MM (1220 mm ≈ 4 ft) at layout time.",
           "type": "number",
           "minimum": 300,
           "maximum": 2438.4
@@ -162,19 +162,19 @@
         "type": { "type": "string", "const": "tuffblocks" },
         "product": { "$ref": "#/$defs/FoundationBlockRef" },
         "blockRowsHint": {
-          "description": "S25 (ticket #47) — OPTIONAL override for the derived block-row count under a floating deck. Dimensionless positive integer; the runtime layout clamps to [2, floor(lengthMm / MIN_BLOCK_SPACING_MM) + 1]. minimum=2 mirrors the perimeter-two AC4 lower bound; maximum=100 is a generous fixed ceiling well above any physically-sensible grid. Omit for the S19 derivation (byte-identical to pre-S25).",
+          "description": "feat/block-count-per-joist — PRIMARY user control for Method B (floating 'joists-on-blocks') support density: the NUMBER of block ROWS along each joist (spread evenly end-to-end at layout time). Dimensionless positive integer. When set, blockRowsHint WINS over the legacy blockSpacingMm (which is superseded and now only consulted when this field is absent). Runtime clamp = min(rowsMaxByCap=floor(MAX_METHOD_B_BLOCK_COUNT/numJoists), rowsMaxByGap=floor(lengthMm/MIN_BLOCK_SPACING_MM)+1); both floored at 2 (perimeter-two invariant). minimum=2 mirrors that lower bound; maximum=100 is a generous fixed ceiling well above any physically-sensible grid. Omit for the span-safe absent-hint default (row count derived from the joist's IRC allowable when the pipeline threads a SpanTable through; falls back to a 1220 mm-derived count otherwise — byte-identical to pre-fix layouts).",
           "type": "integer",
           "minimum": 2,
           "maximum": 100
         },
         "blockColsHint": {
-          "description": "S25 (ticket #47) — OPTIONAL override for the derived block-column count under a floating deck. Dimensionless positive integer; the runtime layout clamps to [2, floor(widthMm / MIN_BLOCK_SPACING_MM) + 1]. See blockRowsHint for the bounds rationale. Omit for the S19 derivation.",
+          "description": "S25 (ticket #47) — OPTIONAL override for the derived block-column count under a floating deck. Dimensionless positive integer; the runtime layout clamps to [2, floor(widthMm / MIN_BLOCK_SPACING_MM) + 1]. See blockRowsHint for the bounds rationale. NO-OP under feat/joists-on-blocks-flying (block columns are pinned to joist x-centers — one column per joist).",
           "type": "integer",
           "minimum": 2,
           "maximum": 100
         },
         "blockSpacingMm": {
-          "description": "feat/block-spacing — OPTIONAL user-controlled distance between adjacent foundation blocks (grid PITCH, mm) for FLOATING 'joists-on-blocks' (Method B) framing; IGNORED for Method A ('beams-and-joists') and for elevated designs. Runtime layout clamps to [MIN_BLOCK_SPACING_MM (300), MAX_BLOCK_SPACING_MM (2438.4 ≈ 8 ft)] and further caps the total block count. See FoundationSpecDeckBlocks.blockSpacingMm for the bounds rationale. Omit to apply the DEFAULT_METHOD_B_BLOCK_SPACING_MM (1220 mm ≈ 4 ft) at layout time.",
+          "description": "LEGACY (superseded by blockRowsHint in feat/block-count-per-joist). feat/block-spacing — OPTIONAL user-controlled distance between adjacent foundation blocks (grid PITCH, mm) for FLOATING 'joists-on-blocks' (Method B) framing; IGNORED for Method A ('beams-and-joists') and for elevated designs. Runtime layout clamps to [MIN_BLOCK_SPACING_MM (300), MAX_BLOCK_SPACING_MM (2438.4 ≈ 8 ft)] and further caps the total block count. See FoundationSpecDeckBlocks.blockSpacingMm for the bounds rationale. When blockRowsHint is ALSO set, blockRowsHint wins and this field is ignored at layout time. Omit to apply the DEFAULT_METHOD_B_BLOCK_SPACING_MM (1220 mm ≈ 4 ft) at layout time.",
           "type": "number",
           "minimum": 300,
           "maximum": 2438.4
