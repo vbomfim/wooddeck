@@ -707,3 +707,268 @@ describe('<ParameterPanel /> — FIX 2 post edits flow through foundation.post (
     expect((design as { post?: unknown }).post).toBeUndefined();
   });
 });
+
+// --------------------------------------------------------------------------
+// S23 issue #45 — foundation-shape integration (AC1 + AC4)
+// --------------------------------------------------------------------------
+//
+// These tests exercise the three new selectors THROUGH the mounted
+// ParameterPanel — the "integration" surface. The unit-scope
+// selector tests live alongside the components; here we lock in
+// the panel-level invariants:
+//
+//   AC1: switching Structure to "floating" ATOMICALLY re-stamps
+//        `foundation` to a compat-valid tuffblocks variant in ONE
+//        store write. The Post-size SelectField DISAPPEARS on the
+//        same tick, replaced by the Block-product SelectField.
+//   AC4: a hand-crafted invalid combo (structure=elevated +
+//        foundation.type=tuffblocks) applied directly via the
+//        store surfaces the compat-matrix reason inline through
+//        the existing `wd-parameter-panel__error` region.
+
+describe('ParameterPanel — S23 issue #45 AC1 (atomic structure switch)', () => {
+  it('clicking Floating re-stamps foundation to tuffblocks in ONE store write and hides Post size', async () => {
+    const user = userEvent.setup();
+    render(<ParameterPanel />);
+
+    // Baseline: elevated + posts-on-footings.
+    expect(useDesignStore.getState().bundle.design.structure).toBe('elevated');
+    expect(useDesignStore.getState().bundle.design.foundation.type).toBe(
+      'posts-on-footings',
+    );
+    // Post size renders.
+    expect(screen.getByLabelText(/^post size/i)).toBeInTheDocument();
+    // Block product does NOT render on posts-on-footings.
+    expect(screen.queryByLabelText(/^block product/i)).toBeNull();
+
+    // Flip to Floating via the StructureSelector radio.
+    await user.click(screen.getByRole('radio', { name: /floating/i }));
+
+    const design = useDesignStore.getState().bundle.design;
+    expect(design.structure).toBe('floating');
+    if (design.foundation.type !== 'tuffblocks') {
+      throw new Error(
+        `expected foundation.type='tuffblocks', got '${design.foundation.type}'`,
+      );
+    }
+    expect(design.foundation.product.productId).toBe('tuffblock-12x12x4');
+
+    // Post size vanishes; Block product appears.
+    expect(screen.queryByLabelText(/^post size/i)).toBeNull();
+    expect(screen.getByLabelText(/^block product/i)).toBeInTheDocument();
+    // Status stays idle — the atomic re-stamp produced a valid
+    // combo (no LayoutError, no ApplyParametersError).
+    expect(useDesignStore.getState().status).toBe('idle');
+  });
+
+  it('clicking Elevated on a floating design re-stamps posts-on-footings and shows Post size again', async () => {
+    // Seed floating state.
+    act(() => {
+      useDesignStore.getState().applyParameters({
+        structure: 'floating',
+        foundation: {
+          type: 'tuffblocks',
+          product: { productId: 'tuffblock-12x12x4' },
+        },
+      });
+    });
+
+    const user = userEvent.setup();
+    render(<ParameterPanel />);
+
+    // Sanity — Post size hidden, Block product visible.
+    expect(screen.queryByLabelText(/^post size/i)).toBeNull();
+    expect(screen.getByLabelText(/^block product/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('radio', { name: /elevated/i }));
+
+    const design = useDesignStore.getState().bundle.design;
+    expect(design.structure).toBe('elevated');
+    if (design.foundation.type !== 'posts-on-footings') {
+      throw new Error(
+        `expected foundation.type='posts-on-footings', got '${design.foundation.type}'`,
+      );
+    }
+    // Post size reappears.
+    expect(screen.getByLabelText(/^post size/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^block product/i)).toBeNull();
+    expect(useDesignStore.getState().status).toBe('idle');
+  });
+});
+
+describe('ParameterPanel — S23 issue #45 AC4 (compat rejection inline banner)', () => {
+  it('a hand-crafted invalid combo surfaces the compat-matrix reason inline via the error region', () => {
+    // Circumvent the UI by applying an invalid combo directly. The
+    // store MUST reject it via `computeLayoutAndCheck` (S17 compat
+    // guard) → status='error' → lastError.message rendered inline.
+    // NOTE: we build the patch to STRUCTURALLY carry an incompatible
+    // pair (elevated + tuffblocks). The S23 discriminator-switch
+    // REPLACE semantics kick in, so the patch is materially applied
+    // before compat-check runs — which is the whole point.
+    act(() => {
+      useDesignStore.getState().applyParameters({
+        structure: 'elevated',
+        foundation: {
+          type: 'tuffblocks',
+          product: { productId: 'tuffblock-12x12x4' },
+        },
+      });
+    });
+
+    render(<ParameterPanel />);
+
+    // The store must be in the error state and the panel must
+    // surface the LayoutError message via role="status".
+    expect(useDesignStore.getState().status).toBe('error');
+    const banner = screen.getByRole('status');
+    // The message is domain-worded ("tuffblock is designed for
+    // ground-level…"). We match a stable substring rather than the
+    // full string so a copy-edit in `compat-matrix.ts` doesn't
+    // break this test — the FULL string is pinned by the compat-
+    // matrix.test.ts test.
+    expect(banner.textContent?.toLowerCase()).toContain('tuffblock');
+  });
+});
+
+// --------------------------------------------------------------------------
+// S23 pair-fix — QA Guardian gap-fills G1 & G2
+// (fail-loud → user-recovers-via-UI flow; previous-bundle-intact
+// invariant on the error branch.)
+// --------------------------------------------------------------------------
+
+describe('ParameterPanel — S23 QA G1 (compat-error → fix via FoundationTypeSelector → recover)', () => {
+  it('an incompatible combo shows an error banner; selecting a compat variant clears it', async () => {
+    // Arrange — force the store into the compat-error state by
+    // applying an elevated+tuffblocks patch (the same seed the
+    // AC4 test uses). This exercises the S23 discriminator-switch
+    // REPLACE path AND the S17 compat-matrix guard together.
+    act(() => {
+      useDesignStore.getState().applyParameters({
+        structure: 'elevated',
+        foundation: {
+          type: 'tuffblocks',
+          product: { productId: 'tuffblock-12x12x4' },
+        },
+      });
+    });
+    expect(useDesignStore.getState().status).toBe('error');
+    expect(useDesignStore.getState().lastError).not.toBeNull();
+
+    const user = userEvent.setup();
+    render(<ParameterPanel />);
+
+    // Sanity — the banner is visible (role="status" carries the
+    // compat reason).
+    const banner = screen.getByRole('status');
+    expect(banner.textContent?.toLowerCase()).toContain('tuffblock');
+
+    // Act — the user picks a compat-valid variant (deck-blocks is
+    // legal for elevated) via FoundationTypeSelector. The atomic
+    // re-stamp yields elevated+deck-blocks+oldcastle-11x11x7, which
+    // clears the compat error.
+    const foundationTypeSelect = screen.getByRole('combobox', {
+      name: /foundation type/i,
+    });
+    await user.selectOptions(foundationTypeSelect, 'deck-blocks');
+
+    // Assert — status back to idle, lastError null, banner gone.
+    expect(useDesignStore.getState().status).toBe('idle');
+    expect(useDesignStore.getState().lastError).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+
+    // Assert the design lands where we expect (deck-blocks with
+    // its default product stamped by `defaultFoundationFor`).
+    const design = useDesignStore.getState().bundle.design;
+    expect(design.structure).toBe('elevated');
+    if (design.foundation.type !== 'deck-blocks') {
+      throw new Error(
+        `expected foundation.type='deck-blocks', got '${design.foundation.type}'`,
+      );
+    }
+    expect(design.foundation.product.productId).toBe('oldcastle-11x11x7');
+  });
+});
+
+describe('ParameterPanel — S23 QA G2 (LayoutError on structure-switch → prev bundle intact → beam-fix recover)', () => {
+  it('elevated+posts+2x10 → click Floating → LayoutError; prev bundle intact; fixing beam to 2x8 recovers', async () => {
+    // Arrange — start elevated + posts-on-footings (default) and
+    // upgrade the beam to a 2x10 (legal on elevated: no per-block
+    // acceptsLumber constraint for posts-on-footings).
+    act(() => {
+      useDesignStore.getState().applyParameters({
+        beam: { material: { nominal: '2x10' } },
+      });
+    });
+    // Sanity — the applyParameters landed cleanly.
+    expect(useDesignStore.getState().status).toBe('idle');
+    expect(useDesignStore.getState().bundle.design.beam.material.nominal).toBe(
+      '2x10',
+    );
+
+    const user = userEvent.setup();
+    render(<ParameterPanel />);
+
+    // Act 1 — click Floating. Under the S23 atomic re-stamp this
+    // fires a single applyParameters with {structure:'floating',
+    // foundation: defaultFoundationFor('tuffblocks')}. The result
+    // (floating + tuffblocks + 2x10 beam) trips computeFloatingLayout's
+    // FR-028 acceptsLumber guard: tuffblock accepts 2x6/2x8 only,
+    // rejects 2x10. LayoutError propagates → status='error'.
+    await user.click(screen.getByRole('radio', { name: /floating/i }));
+
+    // Assert — store is in error state; LayoutError message names
+    // the offending combo (beam nominal + product name).
+    expect(useDesignStore.getState().status).toBe('error');
+    const err1 = useDesignStore.getState().lastError;
+    expect(err1).not.toBeNull();
+    const msg1 = (err1 as Error).message.toLowerCase();
+    expect(msg1).toContain('2x10');
+    expect(msg1).toContain('tuffblock');
+
+    // Assert — the PREVIOUS bundle is intact per the design-store
+    // error-preservation contract (see design-store.ts §"error
+    // path preserves prior bundle"). The user's elevated+posts
+    // design + 2x10 beam is still what's stored; the failed
+    // structure-switch did NOT half-apply.
+    const design = useDesignStore.getState().bundle.design;
+    expect(design.structure).toBe('elevated');
+    expect(design.foundation.type).toBe('posts-on-footings');
+    expect(design.beam.material.nominal).toBe('2x10');
+
+    // Banner is on screen.
+    expect(screen.queryByRole('status')).not.toBeNull();
+
+    // Act 2 — the user fixes the beam to 2x8 (accepted by
+    // tuffblock). This is applied against the CURRENT (elevated)
+    // bundle, so it lands cleanly: elevated + posts + 2x8. The
+    // banner clears (no LayoutError on elevated).
+    // The Beam Size field label is "Beam size" — matches
+    // ParameterPanel's LumberSizeField for beam.
+    const beamField = screen.getByLabelText(/beam size/i);
+    await user.selectOptions(beamField, '2x8');
+
+    // Assert — banner is gone and status is idle.
+    expect(useDesignStore.getState().status).toBe('idle');
+    expect(useDesignStore.getState().lastError).toBeNull();
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(useDesignStore.getState().bundle.design.beam.material.nominal).toBe(
+      '2x8',
+    );
+
+    // Act 3 — with beam=2x8 the user retries the structure switch.
+    // Now floating+tuffblocks+2x8 is a legal combo, so the re-stamp
+    // succeeds.
+    await user.click(screen.getByRole('radio', { name: /floating/i }));
+
+    // Assert — structure now 'floating' and status idle.
+    expect(useDesignStore.getState().status).toBe('idle');
+    const final = useDesignStore.getState().bundle.design;
+    expect(final.structure).toBe('floating');
+    if (final.foundation.type !== 'tuffblocks') {
+      throw new Error(
+        `expected foundation.type='tuffblocks', got '${final.foundation.type}'`,
+      );
+    }
+    expect(final.beam.material.nominal).toBe('2x8');
+  });
+});

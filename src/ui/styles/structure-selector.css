@@ -1,0 +1,46 @@
+/*
+ * `src/ui/styles/structure-selector.css` — S23 issue #45 AC1.
+ *
+ * Segmented radio-group. Two radios side-by-side, with the
+ * currently-checked option visibly indicated via border-color +
+ * background swap (native `<input>` keeps the actual radio dot for
+ * cross-browser accessibility). Focus-visible outline uses the
+ * tokens.css palette.
+ */
+.wd-structure-selector {
+  display: flex;
+  gap: var(--wd-space-2);
+  align-items: center;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.wd-structure-selector__legend {
+  font-weight: 600;
+  padding: 0 var(--wd-space-2) 0 0;
+  color: var(--wd-color-text);
+}
+
+.wd-structure-selector__option {
+  display: inline-flex;
+  gap: var(--wd-space-2);
+  align-items: center;
+  padding: var(--wd-space-1) var(--wd-space-3);
+  border: 1px solid var(--wd-color-border);
+  border-radius: 4px;
+  cursor: pointer;
+  background: var(--wd-color-surface);
+  color: var(--wd-color-text);
+  font: inherit;
+}
+
+.wd-structure-selector__option:has(input:checked) {
+  background: var(--wd-color-surface-alt);
+  border-color: var(--wd-color-text);
+}
+
+.wd-structure-selector__option:has(input:focus-visible) {
+  outline: var(--wd-focus-outline-width) solid var(--wd-focus-outline-color);
+  outline-offset: 2px;
+}

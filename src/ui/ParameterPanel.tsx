@@ -92,8 +92,11 @@ import {
   type DeepPartial,
 } from '../state';
 
+import { BlockProductSelector } from './fields/BlockProductSelector';
+import { FoundationTypeSelector } from './fields/FoundationTypeSelector';
 import { LengthField } from './fields/LengthField';
 import { SelectField, type SelectOption } from './fields/SelectField';
+import { StructureSelector } from './fields/StructureSelector';
 import { UnitSwitcher } from './UnitSwitcher';
 import './styles/parameter-panel.css';
 
@@ -233,24 +236,25 @@ export function ParameterPanel(): JSX.Element {
   const units = useUiUnits();
   const { status, lastError } = useDesignStatus();
 
-  // Review-gate FIX 2 (Epic 2): `foundation.post` (inside the
-  // posts-on-footings variant) is the SINGLE source of truth for
-  // the post material — the pre-S17 top-level `design.post` field
-  // was removed to eliminate a dual-SoT drift bug (see model.ts
-  // FoundationSpec doc). The MVP UI is elevated + posts-on-footings
-  // only (S23 owns the floating variants), so we throw a defensive
-  // error rather than render an invalid state when the discriminant
-  // is anything else. Every default and every v1-migrated design
-  // guarantees `foundation.type === 'posts-on-footings'`.
-  if (design.foundation.type !== 'posts-on-footings') {
-    throw new Error(
-      `ParameterPanel: expected foundation.type === 'posts-on-footings' ` +
-        `(got '${design.foundation.type}'). The MVP UI supports only the ` +
-        `elevated / posts-on-footings combo; floating / deck-block designs ` +
-        `are Epic 2 / S23 scope.`,
-    );
-  }
-  const postMaterialRef = design.foundation.post;
+  // S23 issue #45 — `foundation.post` (inside the posts-on-footings
+  // variant) is the SINGLE source of truth for post material — the
+  // pre-S17 top-level `design.post` field was removed to eliminate
+  // a dual-SoT drift bug (see model.ts FoundationSpec doc). S17
+  // originally threw defensively when `foundation.type !==
+  // 'posts-on-footings'`; S23 replaces that throw with conditional
+  // rendering of the post-related controls so the block-carrying
+  // variants (deck-blocks / tuffblocks) can be selected in the UI.
+  //
+  // `hasPostFoundation` narrows the `foundation` union so downstream
+  // reads on `design.foundation.post` compile without any casts.
+  const hasPostFoundation =
+    design.foundation.type === 'posts-on-footings';
+  // Non-null only when hasPostFoundation is true — TypeScript
+  // narrows the discriminated union through the ternary.
+  const postMaterialRef =
+    design.foundation.type === 'posts-on-footings'
+      ? design.foundation.post
+      : null;
 
   // Catalog-filtered option lists. Each SelectField's options list
   // reflects that member's OWN species, not a shared "panel species"
@@ -265,7 +269,12 @@ export function ParameterPanel(): JSX.Element {
   // mutates.
   const joistSpecies = design.joist.material.species;
   const beamSpecies = design.beam.material.species;
-  const postSpecies = postMaterialRef.species;
+  // FIX (S23): When the foundation carries no post (deck-blocks /
+  // tuffblocks), fall back to the joist species for the (unused)
+  // Post-size options list. The Post-size SelectField itself is
+  // gated on `hasPostFoundation` so the options never render — but
+  // the useMemo still needs a defined species argument.
+  const postSpecies = postMaterialRef?.species ?? joistSpecies;
   const deckingSpecies = design.decking.material.species;
 
   const joistSizeOptions = useMemo(
@@ -365,10 +374,11 @@ export function ParameterPanel(): JSX.Element {
     if (canStock(design.beam.material.nominal)) {
       draft.beam = { material: { species: nextSpecies, grade: nextGrade } };
     }
-    if (canStock(postMaterialRef.nominal)) {
+    if (postMaterialRef !== null && canStock(postMaterialRef.nominal)) {
       // FIX 2 — post material lives at `foundation.post` (SoT).
       // deep-merge preserves the discriminant `type` and the
-      // `nominal` / `footing` siblings.
+      // `nominal` / `footing` siblings. S23: skipped entirely when
+      // the foundation is a block variant (no `post` field).
       draft.foundation = { post: { species: nextSpecies, grade: nextGrade } };
     }
     apply(draft);
@@ -379,11 +389,26 @@ export function ParameterPanel(): JSX.Element {
     // control for framing members. Decking grade is independent
     // (mirrors species behaviour). FIX 2 — post grade patch goes to
     // `foundation.post`, not the removed top-level `post`.
-    apply({
+    // S23: only include the foundation post patch when the current
+    // foundation actually HAS a post (posts-on-footings). For
+    // block variants (deck-blocks / tuffblocks) the patch would
+    // fail — the `foundation.post` key is not in that variant.
+    interface FoundationPostPatch {
+      post?: { grade?: Grade };
+    }
+    interface GradePatch {
+      joist: { material: { grade: Grade } };
+      beam: { material: { grade: Grade } };
+      foundation?: FoundationPostPatch;
+    }
+    const patch: GradePatch = {
       joist: { material: { grade: nextGrade } },
       beam: { material: { grade: nextGrade } },
-      foundation: { post: { grade: nextGrade } },
-    });
+    };
+    if (postMaterialRef !== null) {
+      patch.foundation = { post: { grade: nextGrade } };
+    }
+    apply(patch);
   }
 
   // Errors surfaced by the store's applyParameters catch. LayoutError
@@ -397,6 +422,19 @@ export function ParameterPanel(): JSX.Element {
       <h2 id="wd-parameter-panel__title">Parameters</h2>
 
       <UnitSwitcher />
+
+      {/*
+        S23 issue #45 — the three foundation-shape selectors. Placed
+        at the TOP of the panel because a change to Structure or
+        Foundation type CASCADES through the design (foundation
+        atomically re-stamps, post fields appear/disappear). Users
+        pick the shape first, then dial in dimensions and materials.
+      */}
+      <div className="wd-parameter-panel__foundation">
+        <StructureSelector />
+        <FoundationTypeSelector />
+        <BlockProductSelector />
+      </div>
 
       {errorMessage !== null && (
         // FIX 7 (S13 review gate) — passive summary. `role="alert"`
@@ -471,13 +509,19 @@ export function ParameterPanel(): JSX.Element {
           options={beamSizeOptions}
           onChange={(nominal): void => apply({ beam: { material: { nominal } } })}
         />
-        <SelectField<LumberNominal>
-          label="Post size"
-          value={postMaterialRef.nominal}
-          options={postSizeOptions}
-          // FIX 2 — post nominal patch goes to `foundation.post` (SoT).
-          onChange={(nominal): void => apply({ foundation: { post: { nominal } } })}
-        />
+        {hasPostFoundation && postMaterialRef !== null && (
+          <SelectField<LumberNominal>
+            label="Post size"
+            value={postMaterialRef.nominal}
+            options={postSizeOptions}
+            // FIX 2 — post nominal patch goes to `foundation.post` (SoT).
+            // S23: only rendered when the foundation is the
+            // posts-on-footings variant.
+            onChange={(nominal): void =>
+              apply({ foundation: { post: { nominal } } })
+            }
+          />
+        )}
         <SelectField<LumberNominal>
           label="Decking board size"
           value={design.decking.material.nominal}

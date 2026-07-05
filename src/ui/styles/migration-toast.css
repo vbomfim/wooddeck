@@ -1,0 +1,63 @@
+/*
+ * `src/ui/styles/migration-toast.css` — S23 issue #45 AC5.
+ *
+ * The v1→v2 migration info-toast. Uses the "recompute" (muted
+ * amber) palette from tokens.css because the surface is
+ * INFORMATIONAL (a successful recovery), not urgent — the same
+ * discipline applied to the `load-recompute-failed` banner.
+ *
+ * Fixed-position bottom-right so the toast sits outside the
+ * primary content flow (no layout shift on show / dismiss). A
+ * z-index above the panels keeps the toast readable even when a
+ * dropdown or dialog is open behind it.
+ *
+ * `role="status"` + `aria-live="polite"` handled in the component;
+ * this file is presentational only.
+ */
+.wd-migration-toast {
+  position: fixed;
+  right: var(--wd-space-4);
+  bottom: var(--wd-space-4);
+  z-index: var(--wd-z-banner);
+  max-width: 22rem;
+  padding: var(--wd-space-3) var(--wd-space-4);
+  background: var(--wd-color-banner-recompute-bg);
+  color: var(--wd-color-banner-recompute-text);
+  border: 1px solid var(--wd-color-banner-recompute-border);
+  border-radius: 6px;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  display: flex;
+  gap: var(--wd-space-3);
+  align-items: center;
+  /*
+   * S23 pair-fix (Opus MED #6 — WCAG 2.1.1): the wrapper is no
+   * longer clickable — the dedicated Dismiss button is the sole
+   * interactive surface. No cursor:pointer on the wrapper.
+   */
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.wd-migration-toast__message {
+  flex: 1 1 auto;
+}
+
+.wd-migration-toast__dismiss {
+  flex: 0 0 auto;
+  padding: var(--wd-space-1) var(--wd-space-3);
+  background: var(--wd-color-surface);
+  color: var(--wd-color-text);
+  border: 1px solid var(--wd-color-border);
+  border-radius: 4px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.wd-migration-toast__dismiss:hover {
+  background: var(--wd-color-surface-alt);
+}
+
+.wd-migration-toast__dismiss:focus-visible {
+  outline: var(--wd-focus-outline-width) solid var(--wd-focus-outline-color);
+  outline-offset: 2px;
+}

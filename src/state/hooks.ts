@@ -183,6 +183,29 @@ export function useWebglContextLost(): boolean {
   return useUiStore((s) => s.webglContextLost);
 }
 
+/**
+ * S23 — the current migration event id. Monotonic counter that
+ * increments each time the design-store's `loadFromFile` /
+ * `loadFromLocalStorage` receives `{migrated: true}` from the
+ * application layer. Consumed by `<MigrationToast>`, which pairs
+ * the id with `dismissedMigrationEventId` (via a second hook) to
+ * decide whether the toast is visible and keys its 8 s auto-dismiss
+ * `useEffect` on the id so a NEW migration during a still-visible
+ * toast restarts the timer (S23 pair-fix — GPT MED #2).
+ */
+export function useMigrationEventId(): number {
+  return useUiStore((s) => s.migrationEventId);
+}
+
+/**
+ * S23 — the last-dismissed migration event id. Paired with
+ * `useMigrationEventId` by `<MigrationToast>`; visibility is
+ * `useMigrationEventId() > useDismissedMigrationEventId()`.
+ */
+export function useDismissedMigrationEventId(): number {
+  return useUiStore((s) => s.dismissedMigrationEventId);
+}
+
 // ---- S16 issue #38 — remediation options -----------------------------------
 
 /**

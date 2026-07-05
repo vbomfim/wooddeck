@@ -87,6 +87,11 @@ describe('useUiStore — initial state', () => {
   it('starts with webglContextLost=false (Fix C — no crash on first paint)', () => {
     expect(useUiStore.getState().webglContextLost).toBe(false);
   });
+
+  it('starts with migrationEventId=0 and dismissedMigrationEventId=0 (S23 pair-fix — no event on cold boot)', () => {
+    expect(useUiStore.getState().migrationEventId).toBe(0);
+    expect(useUiStore.getState().dismissedMigrationEventId).toBe(0);
+  });
 });
 
 describe('useUiStore — setUnits (AC7: UI-only)', () => {
@@ -237,5 +242,110 @@ describe('useUiStore — vanilla subscribe', () => {
     useUiStore.getState().setUnits('metric');
     expect(latest).toBe('metric');
     unsubscribe();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S23 — migration EVENT counters (v1→v2 upgrade toast surface)
+// ---------------------------------------------------------------------------
+//
+// The design store's `loadFromFile` / `loadFromLocalStorage`
+// receive `{bundle, migrated}` from the application layer (S18).
+// When `migrated === true` the on-disk file was a v1 envelope that
+// was upgraded to v2 in-flight — the S23 UI needs to surface a
+// one-time toast so the user learns the upgrade happened.
+//
+// ## Pair-fix discrete-event model (GPT MED #2 / Opus INFO)
+//
+// The pre-pair-fix design used `migrationJustHappened: boolean`.
+// Zustand's default `Object.is` equality made a re-set of `true`
+// while ALREADY `true` a NO-OP — so a fresh migration during a
+// still-visible toast failed to restart the 8 s timer.
+//
+// The channel is now two monotonic counters:
+//   - `migrationEventId: number`         — bumped on each migration
+//   - `dismissedMigrationEventId: number` — bumped on each dismiss
+// Toast is visible iff `migrationEventId > dismissedMigrationEventId`.
+
+describe('useUiStore — migration event counters (S23 pair-fix v1→v2)', () => {
+  it('starts at 0/0 on a fresh boot (no event has occurred)', () => {
+    expect(useUiStore.getState().migrationEventId).toBe(0);
+    expect(useUiStore.getState().dismissedMigrationEventId).toBe(0);
+  });
+
+  it('notifyMigrationHappened() bumps migrationEventId by 1 and leaves every other slice reference intact', () => {
+    const before = useUiStore.getState();
+    act(() => {
+      useUiStore.getState().notifyMigrationHappened();
+    });
+    const after = useUiStore.getState();
+    expect(after.migrationEventId).toBe(before.migrationEventId + 1);
+    // Every other slice reference is preserved — the action must
+    // NOT respray the whole state (anti-bloat guard, same
+    // discipline as setUnits).
+    expect(after.units).toBe(before.units);
+    expect(after.cameraPreset).toBe(before.cameraPreset);
+    expect(after.layerVisibility).toBe(before.layerVisibility);
+    expect(after.storageBanner).toBe(before.storageBanner);
+    expect(after.webglContextLost).toBe(before.webglContextLost);
+    expect(after.dismissedMigrationEventId).toBe(before.dismissedMigrationEventId);
+  });
+
+  it('successive notifyMigrationHappened() calls are strictly monotonic (fresh event each time)', () => {
+    // The KEY property. Two back-to-back migrations must produce
+    // TWO distinguishable event ids so the MigrationToast's
+    // useEffect fires twice (restarting the 8 s timer on the
+    // second event).
+    act(() => {
+      useUiStore.getState().notifyMigrationHappened();
+    });
+    const first = useUiStore.getState().migrationEventId;
+    act(() => {
+      useUiStore.getState().notifyMigrationHappened();
+    });
+    const second = useUiStore.getState().migrationEventId;
+    expect(second).toBeGreaterThan(first);
+  });
+
+  it('dismissMigration() sets dismissedMigrationEventId to current migrationEventId (toast hides)', () => {
+    act(() => {
+      useUiStore.getState().notifyMigrationHappened();
+    });
+    const before = useUiStore.getState();
+    expect(before.migrationEventId > before.dismissedMigrationEventId).toBe(true);
+    act(() => {
+      useUiStore.getState().dismissMigration();
+    });
+    const after = useUiStore.getState();
+    expect(after.dismissedMigrationEventId).toBe(after.migrationEventId);
+    // The visibility predicate the toast uses is now false.
+    expect(after.migrationEventId > after.dismissedMigrationEventId).toBe(false);
+  });
+
+  it('a new notifyMigrationHappened() AFTER a dismiss re-opens the toast (fresh event > dismissed)', () => {
+    act(() => {
+      useUiStore.getState().notifyMigrationHappened();
+      useUiStore.getState().dismissMigration();
+    });
+    expect(useUiStore.getState().migrationEventId).toBe(
+      useUiStore.getState().dismissedMigrationEventId,
+    );
+    // Second migration — same-session, another v1 file loaded.
+    act(() => {
+      useUiStore.getState().notifyMigrationHappened();
+    });
+    const after = useUiStore.getState();
+    expect(after.migrationEventId).toBeGreaterThan(after.dismissedMigrationEventId);
+  });
+
+  it('dismissMigration() with no outstanding event is a no-op (already-dismissed pointer stays put)', () => {
+    // No prior notify — dismissed pointer stays at 0. The toast
+    // predicate 0 > 0 is already false, so a stray dismiss must
+    // not corrupt the counter (e.g. by decrementing).
+    act(() => {
+      useUiStore.getState().dismissMigration();
+    });
+    expect(useUiStore.getState().migrationEventId).toBe(0);
+    expect(useUiStore.getState().dismissedMigrationEventId).toBe(0);
   });
 });

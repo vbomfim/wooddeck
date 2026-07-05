@@ -386,14 +386,26 @@ export const useDesignStore = create(
       async loadFromFile(file): Promise<void> {
         set({ status: 'loading', lastError: null });
         try {
-          // S18: the application loader now returns
-          // `{ bundle, migrated }` — `migrated: true` means the
-          // uploaded file was a v1 envelope that we upgraded to v2
-          // in-flight. S23 will surface a toast from this seam; for
-          // now we destructure and ignore the flag so the visible
-          // UX is unchanged from pre-S18.
-          const { bundle } = await appLoadDesignFromFile(file, spanTable);
+          // S18: the application loader returns `{bundle, migrated}`.
+          // S23 wires `migrated` through to the ui-store so the
+          // `<MigrationToast>` renders once when the on-disk file
+          // was a v1 envelope that we upgraded in-flight. This is
+          // an ACTION-to-ACTION cross-store call (design → ui via
+          // `.getState()`) — the two stores' STATE stays disjoint.
+          // Mirrors the AC6 `setStorageBanner` precedent for save
+          // failures.
+          const { bundle, migrated } = await appLoadDesignFromFile(file, spanTable);
           set({ bundle, status: 'idle', lastError: null });
+          if (migrated) {
+            // S23 pair-fix (GPT MED #2) — discrete-event model.
+            // The pre-fix code called `setMigrationJustHappened(true)`.
+            // Setting a boolean to `true` while ALREADY `true` was a
+            // Zustand no-op, so a v1→v2 load while a prior toast
+            // was still visible failed to restart the 8 s timer.
+            // The monotonic `notifyMigrationHappened()` bump is
+            // what makes each migration a fresh event.
+            useUiStore.getState().notifyMigrationHappened();
+          }
           // Undo across a load-file boundary is a distinct workflow
           // (the user chose to REPLACE the design) — clear history
           // per issue #9 §4 Edge cases.
@@ -416,17 +428,22 @@ export const useDesignStore = create(
 
       loadFromLocalStorage(): void {
         try {
-          // S18: same `{ bundle, migrated }` seam as loadFromFile.
-          // The migration boolean is stashed for S23; for now we
-          // destructure and drop it.
+          // S18: same `{bundle, migrated}` seam as loadFromFile.
+          // S23 wires `migrated` through to the ui-store toast
+          // channel — see the loadFromFile branch above for the
+          // rationale.
           const loaded = appLoadDesignFromLocalStorage(spanTable);
           if (loaded === null) {
             // No stored design — keep the current default. Do NOT
             // reset (that would clear undo history for no reason).
             return;
           }
-          const { bundle } = loaded;
+          const { bundle, migrated } = loaded;
           set({ bundle, status: 'idle', lastError: null });
+          if (migrated) {
+            // S23 pair-fix — see the same-shape call in loadFromFile.
+            useUiStore.getState().notifyMigrationHappened();
+          }
           // Pair-fix Review MEDIUM (B): the successful storage-load
           // branch REPLACES the design, so any prior undo history
           // (built up before the load) would rewind to a design the
