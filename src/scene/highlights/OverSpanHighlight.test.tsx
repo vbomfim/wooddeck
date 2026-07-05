@@ -33,6 +33,7 @@ import { makeMember } from '../layers/__testing__/fixtures';
 
 import {
   HIGHLIGHT_BOX_GEOMETRY,
+  HIGHLIGHT_INFLATE_MM,
   HIGHLIGHT_MATERIAL,
   HIGHLIGHT_RENDER_ORDER,
 } from './highlight-primitives';
@@ -69,7 +70,11 @@ describe('<OverSpanHighlight /> — mesh construction (mm → three units)', () 
     await renderer.unmount();
   });
 
-  it('mesh scale matches member.size (unit-box × full extent)', async () => {
+  it('mesh scale is the member size INFLATED by HIGHLIGHT_INFLATE_MM (encloses member, no z-fight)', async () => {
+    // Opaque-box redesign: the highlight box is slightly LARGER
+    // than the member on every axis so it fully encloses the
+    // member and no faces are coincident. Coincident faces on an
+    // opaque coincident box would z-fight badly.
     const member = makeMember({
       id: 'beam-hl',
       kind: 'beam',
@@ -79,9 +84,9 @@ describe('<OverSpanHighlight /> — mesh construction (mm → three units)', () 
       <OverSpanHighlight member={member} />,
     );
     const mesh = renderer.scene.findByType('Mesh').instance as Mesh;
-    expect(mesh.scale.x).toBe(3600);
-    expect(mesh.scale.y).toBe(240);
-    expect(mesh.scale.z).toBe(45);
+    expect(mesh.scale.x).toBe(3600 + HIGHLIGHT_INFLATE_MM);
+    expect(mesh.scale.y).toBe(240 + HIGHLIGHT_INFLATE_MM);
+    expect(mesh.scale.z).toBe(45 + HIGHLIGHT_INFLATE_MM);
     await renderer.unmount();
   });
 
@@ -102,7 +107,7 @@ describe('<OverSpanHighlight /> — mesh construction (mm → three units)', () 
   });
 });
 
-describe('<OverSpanHighlight /> — AC3 always-on-top red decoration', () => {
+describe('<OverSpanHighlight /> — AC3 opaque red decoration (depth-correct)', () => {
   it('mesh geometry IS the shared HIGHLIGHT_BOX_GEOMETRY singleton', async () => {
     // Every highlight in the scene binds the same geometry buffer
     // (module-level singleton) — matches the S10 shared-geometry
@@ -130,10 +135,11 @@ describe('<OverSpanHighlight /> — AC3 always-on-top red decoration', () => {
     await renderer.unmount();
   });
 
-  it('mesh renderOrder is the pinned HIGHLIGHT_RENDER_ORDER (draws last)', async () => {
-    // Combined with depthTest=false in the material, this forces
-    // the highlight to render on top of every opaque member —
-    // AC3 "renders on top so it isn't occluded".
+  it('mesh renderOrder is the pinned HIGHLIGHT_RENDER_ORDER (depth-correct, no forced top)', async () => {
+    // Opaque-box redesign: the highlight is depth-correct and no
+    // longer force-drawn on top. HIGHLIGHT_RENDER_ORDER is 0 so
+    // the highlight sorts with other opaque scene primitives and
+    // real z-depth decides visibility.
     const member = makeMember({ id: 'joist-top', kind: 'joist' });
     const renderer = await ReactThreeTestRenderer.create(
       <OverSpanHighlight member={member} />,

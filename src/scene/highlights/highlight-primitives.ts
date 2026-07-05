@@ -20,59 +20,76 @@
  *
  *   - ONE module-level `BoxGeometry(1, 1, 1)` singleton
  *     ({@link HIGHLIGHT_BOX_GEOMETRY}) — every highlight scales
- *     it by `member.size` via the mesh `scale` prop. Full-extent
- *     matches `THREE.BoxGeometry`'s (width, height, depth)
- *     constructor convention.
+ *     it via {@link inflateHighlightScale}(member.size). Passing
+ *     the size through the helper (instead of raw) inflates by
+ *     {@link HIGHLIGHT_INFLATE_MM} on every axis so the opaque
+ *     highlight fully encloses the coincident member and no
+ *     faces are shared (no z-fight).
  *   - ONE module-level `MeshBasicMaterial` singleton
  *     ({@link HIGHLIGHT_MATERIAL}) — every highlight binds the
  *     same material. Cheap GPU state.
  *
- * ## AC3 material choice — translucent red, always on top
+ * ## AC3 material choice — opaque red, depth-correct
  *
  * The S11 ticket §17 open question listed three highlight-style
  * options: (a) translucent bounding box, (b) wireframe outline,
- * (c) glow shader. We picked (a) — a translucent RED
- * `MeshBasicMaterial` with:
+ * (c) glow shader. We originally shipped (a) with 35% opacity;
+ * the follow-up "remove transparency" request replaced it with a
+ * SOLID red opaque box that fully encloses the member. Property
+ * choices for the opaque redesign:
  *
  *   - `color: 0xff0000`         — pure red, WCAG-adjacent contrast
  *                                 against typical wood tones (PT
  *                                 olive, Cedar cinnamon) + composite
  *                                 grey per §10.
- *   - `transparent: true`       — user can still see the member
- *                                 through the highlight (an opaque
- *                                 red box would hide it entirely).
- *   - `opacity: 0.35`           — visible but not dominating; the
- *                                 warned member's silhouette shows
- *                                 through the tint.
- *   - `depthTest: false`        — the highlight renders regardless
- *                                 of what's in front of it. Combined
- *                                 with the high renderOrder below,
- *                                 this guarantees AC3's "renders on
- *                                 top so it isn't occluded".
- *   - `depthWrite: false`       — the highlight is an overlay, not
- *                                 a depth-buffer participant.
- *                                 Without this, the translucent
- *                                 box would still write its z-values
- *                                 and occlude subsequent transparent
- *                                 primitives behind it.
+ *   - `transparent: false`      — a SOLID red box, no member tint
+ *                                 bleeding through. The user
+ *                                 unambiguously sees a red slab
+ *                                 where the over-span member is.
+ *   - `opacity: 1.0`            — fully opaque. Pinned via the
+ *                                 HIGHLIGHT_OPACITY constant so
+ *                                 tests can assert it symbolically.
+ *   - `depthTest: true`         — depth-correct: the highlight is
+ *                                 occluded by nearer geometry the
+ *                                 same way any other opaque scene
+ *                                 primitive is. Combined with the
+ *                                 inflated box that fully encloses
+ *                                 the member, this yields correct
+ *                                 3D occlusion without z-fighting.
+ *   - `depthWrite: true`        — the highlight participates in
+ *                                 the z-buffer (an opaque scene
+ *                                 primitive should always write
+ *                                 depth so subsequent draws sort
+ *                                 correctly against it).
  *   - `side: DoubleSide`        — draws the inside faces too, so
  *                                 a camera inside the box (unusual
  *                                 but possible during a close-in
- *                                 orbit) still sees the tint.
+ *                                 orbit) still sees the red tint
+ *                                 instead of a hollow shell.
  *
- * The chosen style is documented in `docs/ARCHITECTURE.md`.
  * `MeshBasicMaterial` (unlit) is deliberate — a
  * `MeshStandardMaterial` in a shadowed corner would go nearly
  * black, defeating AC3 "distinctly visible".
  *
- * ## AC3 render order
+ * ## AC3 render order (depth-correct, no forced top-most)
  *
- * three.js draws opaque objects first (typically `renderOrder=0`),
- * then transparent objects in reverse-depth order. A
- * `renderOrder=999` on the highlight mesh forces it to the END of
- * the transparent pass — so it draws over every other primitive
- * regardless of camera angle. Combined with `depthTest=false`,
- * this pins the highlight visually on top.
+ * The translucent design had `renderOrder=999` + `depthTest=false`
+ * to force the highlight to draw over every other primitive. The
+ * opaque redesign does NOT need that: a depth-correct opaque box
+ * sorts naturally with other opaque scene primitives, and real
+ * z-buffer values determine visibility. HIGHLIGHT_RENDER_ORDER is
+ * pinned at 0 (same as untagged opaque geometry).
+ *
+ * ## Avoiding z-fighting with the coincident member
+ *
+ * Every OverSpanHighlight is placed at the exact same
+ * position/rotation as the warned member. If the highlight box
+ * were sized identically to the member, the two would share
+ * every face and z-fight badly (flickering coplanar surfaces).
+ * The fix: inflate the highlight box by {@link HIGHLIGHT_INFLATE_MM}
+ * on every axis so it FULLY ENCLOSES the member with a small
+ * margin. No shared faces → no z-fighting → depth-correct
+ * occlusion works cleanly.
  *
  * ## Disposal
  *
@@ -108,48 +125,98 @@ import { BoxGeometry, DoubleSide, MeshBasicMaterial } from 'three';
 export const HIGHLIGHT_COLOR_HEX = 0xff0000;
 
 /**
- * Translucency amount — 35% opacity picks up the "obvious tint"
- * requirement (AC3) while keeping the warned member visible
- * through it. Higher (e.g. 0.6) hides the member; lower (e.g.
- * 0.15) risks being missed on a small/thin member.
+ * Highlight material opacity. Pinned at 1.0 (fully opaque) since
+ * the "remove transparency" follow-up replaced the translucent
+ * design with a SOLID red enclosing box. Kept as a named export
+ * for symbolic assertions in tests + future style variants.
  */
-export const HIGHLIGHT_OPACITY = 0.35;
+export const HIGHLIGHT_OPACITY = 1.0;
 
 /**
- * Mesh `renderOrder` for every highlight. High enough (999) that
- * every opaque scene primitive (renderOrder=0) sorts before it
- * and the highlight draws LAST — visually on top. See module
- * header for the depthTest+renderOrder coupling.
+ * Mesh `renderOrder` for every highlight. The opaque + depth-correct
+ * design does NOT need to force itself to the end of the render
+ * pass; 0 sorts it with other opaque scene primitives, and real
+ * z-depth decides visibility. See module header for the removal
+ * of the old `999` forced-top-most pattern.
  */
-export const HIGHLIGHT_RENDER_ORDER = 999;
+export const HIGHLIGHT_RENDER_ORDER = 0;
+
+/**
+ * Per-axis inflation (in mm) applied to the highlight box so it
+ * fully encloses the coincident warned member. Without inflation
+ * the highlight and member would share every face and z-fight
+ * badly (the underlying issue an opaque coincident box would
+ * introduce). Chosen small enough (8 mm ≈ 0.3") to be visually
+ * indistinguishable from the member's silhouette but large enough
+ * to give the z-buffer a decisive difference at real-world
+ * (metre-scale) camera distances.
+ */
+export const HIGHLIGHT_INFLATE_MM = 8;
 
 /**
  * The single unit-cube BoxGeometry every {@link OverSpanHighlight}
- * shares. Scaling by `member.size` produces the correct
- * full-extent bounding box (matches THREE.BoxGeometry's
+ * shares. Scaling by {@link inflateHighlightScale}(member.size)
+ * produces the enclosing bounding box (matches THREE.BoxGeometry's
  * (width, height, depth) convention). See module header for the
  * shared-singleton rationale.
  */
 export const HIGHLIGHT_BOX_GEOMETRY: BoxGeometry = new BoxGeometry(1, 1, 1);
 
 /**
- * The single translucent red MeshBasicMaterial every
+ * The single opaque red MeshBasicMaterial every
  * {@link OverSpanHighlight} shares. See module header for AC3
- * property choices and the depthTest/depthWrite/renderOrder
- * combination.
+ * property choices and the depth-correct opaque box rationale.
  */
 export const HIGHLIGHT_MATERIAL: MeshBasicMaterial = new MeshBasicMaterial({
   color: HIGHLIGHT_COLOR_HEX,
-  transparent: true,
+  transparent: false,
   opacity: HIGHLIGHT_OPACITY,
-  depthTest: false,
-  depthWrite: false,
+  depthTest: true,
+  depthWrite: true,
   side: DoubleSide,
 });
 
 /**
+ * A `{x, y, z}` size triple — matches the shape of `LayoutMember.size`
+ * without importing the domain type here (this file is a pure
+ * three.js primitives module, no domain deps). The helper is
+ * intentionally structurally typed so any `{x,y,z}` object works.
+ */
+export interface HighlightSize {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+}
+
+/**
+ * Compute the mesh `scale` prop tuple for an OverSpanHighlight —
+ * the member's size inflated by {@link HIGHLIGHT_INFLATE_MM} on
+ * every axis so the opaque highlight box fully encloses the
+ * warned member (no coincident faces, no z-fight).
+ *
+ * Kept HERE (not inside OverSpanHighlight.tsx) so the arithmetic
+ * lives in a primitives helper and NOT in the leaf decorator —
+ * that preserves the OverSpanHighlight "zero geometry math" pledge
+ * enforced by the sibling `no-geometry-math.test.ts` grep guard,
+ * which scans for `member.<field>.<axis>` arithmetic in the
+ * highlights/ source (this helper operates on a generic
+ * {@link HighlightSize}, never on a `member.*` expression).
+ *
+ * Pure — returns a fresh tuple; never mutates the input.
+ */
+export function inflateHighlightScale(
+  size: HighlightSize,
+): [number, number, number] {
+  return [
+    size.x + HIGHLIGHT_INFLATE_MM,
+    size.y + HIGHLIGHT_INFLATE_MM,
+    size.z + HIGHLIGHT_INFLATE_MM,
+  ];
+}
+
+/**
  * HMR / tooling helper — releases the GPU handles held by the
- * two module-level singletons. Parity with the layers-shared
+ * two module-level singletons. Parity with the layers' shared
  * `disposeSharedMaterials` + `disposeSharedGeometry` helpers.
  *
  * ## When to call this
