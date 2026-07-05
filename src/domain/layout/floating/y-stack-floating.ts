@@ -1,7 +1,7 @@
 /**
  * `src/domain/layout/floating/y-stack-floating.ts` — the single
  * source-of-truth for the VERTICAL (y-axis) stack of a **floating**
- * wooddeck layout (S19).
+ * wooddeck layout.
  *
  * ## Why a separate y-stack for floating
  *
@@ -13,40 +13,43 @@
  * the ground.
  *
  * In the floating model there are NO posts. Blocks sit directly on
- * grade; beams sit on the blocks; decking sits on the beams. The
- * stack builds UPWARD from y=0, and `heightMm` is a derived value
- * (min = `beam.height + decking.thickness`), not the anchor.
+ * grade; framing sits on the blocks; decking sits on top of the
+ * framing. The stack builds UPWARD from y=0.
  *
- * Sharing the elevated helper would either:
+ * ## S26 — two framing methods
  *
- *   1. Silently produce nonsense (posts of zero height, beams
- *      floating in mid-air), or
- *   2. Force the caller to pre-compute `heightMm` from the block
- *      product and lumber dims — leaking the y-stack derivation into
- *      every caller. A dual-SoT drift trap the S18 review-gate FIX 2
- *      pattern specifically warns against.
+ * The pre-S26 floating pipeline had ONE stack: block → beam →
+ * decking (no joist layer). S26 (fix/floating-framing-joists) adds
+ * a joist layer for BOTH methods and lets the user pick:
  *
- * Instead this module owns the entire vertical stack for floating
- * layouts. Consumers call `computeYStackFloating(design)` and get
- * ready-to-use anchor y-positions.
+ *   - Method A (`'beams-and-joists'`, DEFAULT):
  *
- * ## The stack (bottom-up, y increasing)
+ *         y = deckingTop
+ *           ↑ decking thickness
+ *           ↑ joist depth
+ *           ↑ beam depth        ← beam bottom flush with block top
+ *         y = 0                  ← ground plane / block top
+ *           ↓ block height
  *
- *   1. Block BOTTOM   at y = -blockHeightMm             (block extends into -y)
- *   2. Block CENTER   at y = -blockHeightMm / 2
- *   3. Block TOP      at y = 0                          (= ground plane / beam BOTTOM)
- *   4. Beam BOTTOM    at y = 0
- *   5. Beam CENTER    at y = beamDepthMm / 2
- *   6. Beam TOP       at y = beamDepthMm                (= decking BOTTOM)
- *   7. Decking BOTTOM at y = beamDepthMm
- *   8. Decking CENTER at y = beamDepthMm + deckingThicknessMm / 2
- *   9. Decking TOP    at y = beamDepthMm + deckingThicknessMm
+ *     Above-ground min height = beam.depth + joist.depth +
+ *     decking.thickness.
  *
- * The block "extends" into -y from the ground plane because the
- * origin is the ground-level CENTER of the deck footprint (see
- * `model.ts` LAYOUT COORDINATE FRAME). This mirrors how footings
- * live in -y in the elevated stack — a familiar convention for
- * downstream consumers.
+ *   - Method B (`'joists-on-blocks'`):
+ *
+ *         y = deckingTop
+ *           ↑ decking thickness
+ *           ↑ joist depth      ← joist bottom flush with block top
+ *         y = 0
+ *           ↓ block height
+ *
+ *     Above-ground min height = joist.depth + decking.thickness.
+ *
+ * The `beamDepthMm` field is 0 for Method B (there is no beam
+ * layer) so downstream consumers switching on `design.floatingFraming`
+ * don't have to special-case a missing field. When both methods
+ * are simultaneously needed (e.g. UI preview), read the anchor
+ * fields (`joistCenterY`, `beamCenterY`, `deckingCenterY`) and let
+ * the y-value tell the truth.
  *
  * ## `blockHeightMm` is derived from the design's foundation product
  *
@@ -58,8 +61,8 @@
  *
  * ## Framework/DOM ban
  *
- * Pure `src/domain/**` module. Imports only `./units`, `./model`
- * (type-only), `./materials-catalog`, `./foundation-catalog` —
+ * Pure `src/domain/**` module. Imports only `../units`, `../model`
+ * (type-only), `../materials-catalog`, `../foundation-catalog` —
  * every one under `src/domain/**`. No runtime DOM / framework
  * dependency.
  */
@@ -90,24 +93,47 @@ export interface FloatingYStack {
   /** Block product's actual heightMm (from `foundation-catalog`). */
   readonly blockHeightMm: Mm;
 
-  /** Beam bottom face — sits on the block top at y=0. */
+  /**
+   * Beam bottom face. Method A: 0 (sits on block top). Method B:
+   * equal to `beamTopY` — the layer collapses to zero-thickness
+   * because there is no beam.
+   */
   readonly beamBottomY: Mm;
-  /** Beam geometric center — `beamDepthMm / 2`. */
+  /**
+   * Beam geometric center — the y a beam member would use if the
+   * method produced beams. Method B: same as `joistCenterY` (the
+   * beam layer has zero extent — see `beamDepthMm`).
+   */
   readonly beamCenterY: Mm;
-  /** Beam top face — where decking rests. */
+  /**
+   * Beam top face — where the joist bottom rests in Method A.
+   * Method B: equal to `beamBottomY` (zero-thickness layer).
+   */
   readonly beamTopY: Mm;
-  /** Beam actual heightMm (larger dressed dimension, on-edge). */
+  /**
+   * Beam depth on +y. Method A: beam material's actual heightMm
+   * (on-edge). Method B: 0 — the stack skips the beam layer.
+   */
   readonly beamDepthMm: Mm;
 
-  /** Decking bottom face — flush with the beam top. */
+  /** Joist bottom face — flush with the beam top (Method A) or the block top (Method B). */
+  readonly joistBottomY: Mm;
+  /** Joist geometric center. */
+  readonly joistCenterY: Mm;
+  /** Joist top face — where the decking rests. */
+  readonly joistTopY: Mm;
+  /** Joist actual heightMm (larger dressed dimension, on-edge). */
+  readonly joistDepthMm: Mm;
+
+  /** Decking bottom face — flush with the joist top. */
   readonly deckingBottomY: Mm;
   /** Decking geometric center. */
   readonly deckingCenterY: Mm;
   /**
    * Decking top face — the walking surface of the finished deck.
    * ALSO the minimum legal `footprint.heightMm` for a floating
-   * design (see `computeMinFloatingHeightMm` below — same value,
-   * different lookup path).
+   * design of this method (see `computeMinFloatingHeightMm` — same
+   * value, different lookup path).
    */
   readonly deckingTopY: Mm;
   /**
@@ -122,6 +148,11 @@ export interface FloatingYStack {
  * Compute every anchor position in the floating y-stack for a
  * given design. Pure function; results are byte-stable for a given
  * input (no clock, no RNG, no I/O).
+ *
+ * Dispatches on `design.floatingFraming`:
+ *
+ *   - `'beams-and-joists'` (Method A) — full stack, joists on beams.
+ *   - `'joists-on-blocks'` (Method B) — collapsed stack, joists on blocks.
  *
  * @throws {Error} if `design.foundation.type === 'posts-on-footings'`
  *   — caller-contract violation (this helper is only valid for
@@ -153,26 +184,42 @@ export function computeYStackFloating(design: DeckDesign): FloatingYStack {
     design.beam.material.species,
     design.beam.material.grade,
   );
-  const beamDepthMm = beam.actual.heightMm; // larger dressed dim, on-edge
-
+  const joist = lookupMaterial(
+    design.joist.material.nominal,
+    design.joist.material.species,
+    design.joist.material.grade,
+  );
   const decking = lookupMaterial(
     design.decking.material.nominal,
     design.decking.material.species,
     design.decking.material.grade,
   );
-  const deckingThicknessMm = decking.actual.widthMm; // smaller dressed dim, laid flat
+
+  // Method A includes a beam layer between blocks and joists.
+  // Method B skips the beam layer — `beamDepthMm = 0` collapses
+  // the stack.
+  const beamDepthMm =
+    design.floatingFraming === 'beams-and-joists'
+      ? beam.actual.heightMm
+      : 0;
+  const joistDepthMm = joist.actual.heightMm;
+  const deckingThicknessMm = decking.actual.widthMm;
 
   const blockBottomY = -blockHeightMm;
   const blockCenterY = -blockHeightMm / 2;
   const blockTopY = 0;
 
   const beamBottomY = 0;
-  const beamCenterY = beamDepthMm / 2;
   const beamTopY = beamDepthMm;
+  const beamCenterY = beamDepthMm / 2;
 
-  const deckingBottomY = beamTopY;
-  const deckingCenterY = beamTopY + deckingThicknessMm / 2;
-  const deckingTopY = beamTopY + deckingThicknessMm;
+  const joistBottomY = beamTopY;
+  const joistTopY = joistBottomY + joistDepthMm;
+  const joistCenterY = joistBottomY + joistDepthMm / 2;
+
+  const deckingBottomY = joistTopY;
+  const deckingCenterY = joistTopY + deckingThicknessMm / 2;
+  const deckingTopY = joistTopY + deckingThicknessMm;
 
   return {
     blockBottomY,
@@ -183,6 +230,10 @@ export function computeYStackFloating(design: DeckDesign): FloatingYStack {
     beamCenterY,
     beamTopY,
     beamDepthMm,
+    joistBottomY,
+    joistCenterY,
+    joistTopY,
+    joistDepthMm,
     deckingBottomY,
     deckingCenterY,
     deckingTopY,
@@ -191,14 +242,14 @@ export function computeYStackFloating(design: DeckDesign): FloatingYStack {
 }
 
 /**
- * The minimum legal `footprint.heightMm` for a floating design —
- * AC9. The above-ground stack is exactly:
+ * The minimum legal `footprint.heightMm` for a floating design.
  *
- *     MIN = beam.actual.heightMm + decking.actual.widthMm
+ * Method A: `beam.height + joist.height + decking.thickness`
+ * Method B: `joist.height + decking.thickness`
  *
- * NO `MIN_POST_HEIGHT_MM` component (floating decks have no posts;
- * see module header). Blocks live BELOW y=0 and do NOT contribute
- * to the visible above-ground height.
+ * NO `MIN_POST_HEIGHT_MM` component (floating decks have no posts).
+ * Blocks live BELOW y=0 and do NOT contribute to the visible
+ * above-ground height.
  *
  * The layout-engine's floating-path validator calls this to
  * reject designs whose `heightMm` is set below the physical stack
@@ -209,15 +260,6 @@ export function computeYStackFloating(design: DeckDesign): FloatingYStack {
  *   an unknown material triple.
  */
 export function computeMinFloatingHeightMm(design: DeckDesign): Mm {
-  const beam = lookupMaterial(
-    design.beam.material.nominal,
-    design.beam.material.species,
-    design.beam.material.grade,
-  );
-  const decking = lookupMaterial(
-    design.decking.material.nominal,
-    design.decking.material.species,
-    design.decking.material.grade,
-  );
-  return beam.actual.heightMm + decking.actual.widthMm;
+  const stack = computeYStackFloating(design);
+  return stack.beamDepthMm + stack.joistDepthMm + stack.deckingThicknessMm;
 }

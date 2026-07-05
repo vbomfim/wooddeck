@@ -105,6 +105,12 @@ function design(args: {
     layout: {
       bayRemainderStrategy: args.bayRemainderStrategy ?? 'extra-bay-at-end',
     },
+    // S26 (fix/floating-framing-joists) — the fixture designs
+    // constructed via this helper are ALL elevated (see the field
+    // above), so the value is IGNORED by the layout engine. Stamped
+    // to the default so every fixture satisfies the required
+    // `DeckDesign.floatingFraming` invariant.
+    floatingFraming: 'beams-and-joists',
   };
 }
 
@@ -197,6 +203,7 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       beam: { material: PT_2X10 },
       decking: { material: PT_54, orientation: 'parallel-to-width' },
       layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+      floatingFraming: 'beams-and-joists',
     },
   },
   {
@@ -212,6 +219,7 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       beam: { material: PT_2X10 },
       decking: { material: PT_54, orientation: 'parallel-to-width' },
       layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+      floatingFraming: 'beams-and-joists',
     },
   },
   {
@@ -271,6 +279,7 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       beam: { material: PT_2X10 },
       decking: { material: PT_54, orientation: 'parallel-to-width' },
       layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+      floatingFraming: 'beams-and-joists',
     },
   },
   {
@@ -331,7 +340,7 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       footprint: {
         widthMm: 16 * MM_PER_FOOT,
         lengthMm: 14 * MM_PER_FOOT,
-        heightMm: 209, // MIN legal for 2×8 beam + 5/4×6 decking
+        heightMm: 393, // MIN legal for Method A 2×8 beam + 2×8 joist + 5/4×6 decking
       },
       structure: 'floating',
       foundation: FIXTURE_TUFFBLOCK_FOUNDATION,
@@ -339,20 +348,22 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       beam: { material: PT_2X8 },
       decking: { material: PT_54, orientation: 'parallel-to-width' },
       layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+      floatingFraming: 'beams-and-joists',
     },
   },
   {
     name: 'floating-8x8-deckblocks',
     // AC1 — smaller floating deck on the Oldcastle deck-block product.
     // Uses a heavier 2×10 beam so the block layout is exercised with
-    // a different beam-depth / min-height combination (235 + 25 = 260).
+    // a different beam-depth / min-height combination
+    // (235 beam + 235 joist + 25 decking = 495 mm — S26 Method A).
     design: {
       id: '22222222-2222-4222-8222-000000000019',
       createdAt: '2026-07-04T00:00:01.000Z',
       footprint: {
         widthMm: 8 * MM_PER_FOOT,
         lengthMm: 8 * MM_PER_FOOT,
-        heightMm: 260, // MIN legal for 2×10 beam + 5/4×6 decking
+        heightMm: 495, // MIN legal for Method A 2×10 beam + 2×10 joist + 5/4×6 decking
       },
       structure: 'floating',
       foundation: FIXTURE_OLDCASTLE_FOUNDATION,
@@ -360,6 +371,7 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       beam: { material: PT_2X10 },
       decking: { material: PT_54, orientation: 'parallel-to-width' },
       layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+      floatingFraming: 'beams-and-joists',
     },
   },
   {
@@ -367,7 +379,8 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
     // MIN_DECK_DIMENSION_MM boundary — floating variant. Every
     // dimension at the smallest legal value:
     //   - widthMm / lengthMm = MIN_DECK_DIMENSION_MM (4 ft)
-    //   - heightMm = computeMinFloatingHeightMm (2×8 + 5/4×6 = 209 mm)
+    //   - heightMm = computeMinFloatingHeightMm (S26 Method A =
+    //     184 beam + 184 joist + 25 decking = 393 mm)
     // One millimetre less on ANY dim throws a LayoutError. This
     // fixture is the "yes it's still valid at the boundary" proof.
     design: {
@@ -376,7 +389,7 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       footprint: {
         widthMm: 4 * MM_PER_FOOT,
         lengthMm: 4 * MM_PER_FOOT,
-        heightMm: 209,
+        heightMm: 393,
       },
       structure: 'floating',
       foundation: FIXTURE_TUFFBLOCK_FOUNDATION,
@@ -384,6 +397,7 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       beam: { material: PT_2X8 },
       decking: { material: PT_54, orientation: 'parallel-to-width' },
       layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+      floatingFraming: 'beams-and-joists',
     },
   },
   {
@@ -401,7 +415,7 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       footprint: {
         widthMm: 8 * MM_PER_FOOT,
         lengthMm: 40 * MM_PER_FOOT,
-        heightMm: 209, // MIN legal for 2×8 beam + 5/4×6 decking
+        heightMm: 393, // MIN legal for Method A 2×8 beam + 2×8 joist + 5/4×6 decking
       },
       structure: 'floating',
       foundation: FIXTURE_OLDCASTLE_FOUNDATION,
@@ -409,6 +423,7 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       beam: { material: PT_2X8 },
       decking: { material: PT_54, orientation: 'parallel-to-width' },
       layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+      floatingFraming: 'beams-and-joists',
     },
   },
   // -----------------------------------------------------------------
@@ -449,6 +464,7 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       beam: { material: PT_2X10 },
       decking: { material: PT_54, orientation: 'parallel-to-width' },
       layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+      floatingFraming: 'beams-and-joists',
     },
   },
 ];

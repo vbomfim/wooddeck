@@ -727,6 +727,7 @@ describe('applyParameters — discriminator switch REPLACES the subtree (S23)', 
     // land in a valid single-action design.
     const patch: DeepPartial<DeckDesign> = {
       structure: 'floating',
+      floatingFraming: 'beams-and-joists',
       foundation: {
         type: 'tuffblocks',
         product: { productId: 'tuffblock-12x12x4' },
@@ -978,6 +979,7 @@ describe('applyParameters — S23 pair-fix #1: orphan variant keys (FR-026 shape
     // blockColsHint are legitimate leaves on the block variants.
     const patch: DeepPartial<DeckDesign> = {
       structure: 'floating',
+      floatingFraming: 'beams-and-joists',
       foundation: {
         type: 'tuffblocks',
         product: { productId: 'tuffblock-12x12x4' },
@@ -1246,6 +1248,7 @@ describe('applyParameters — S23 pair-fix iter-2 #2: nested shape validation on
     // level (NOT nested inside product) per FoundationSpec.
     const patch: DeepPartial<DeckDesign> = {
       structure: 'floating',
+      floatingFraming: 'beams-and-joists',
       foundation: {
         type: 'tuffblocks',
         product: { productId: 'tuffblock-12x12x4' },
@@ -1274,6 +1277,7 @@ describe('applyParameters — S23 pair-fix iter-2 #2: nested shape validation on
     )!.design;
     const patch: DeepPartial<DeckDesign> = {
       structure: 'elevated',
+      floatingFraming: 'beams-and-joists',
       // floating fixture's footprint.heightMm is minimal for a
       // ground-level deck; the elevated variant needs a taller
       // stack (posts extent > 0), so bump the height to a safe

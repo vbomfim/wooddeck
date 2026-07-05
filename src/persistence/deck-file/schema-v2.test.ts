@@ -497,6 +497,7 @@ describe('deserialize — AC4 v2 schema rejects malformed Epic-2 fields', () => 
   it('rejects an unknown foundation.productId under deck-blocks', () => {
     const rogue = envelopeWithDesignPatch({
       structure: 'floating',
+      floatingFraming: 'beams-and-joists',
       foundation: {
         type: 'deck-blocks',
         product: { productId: 'unknown-sku-999' },

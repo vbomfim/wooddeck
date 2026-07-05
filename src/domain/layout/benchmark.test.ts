@@ -40,6 +40,7 @@ function deckDesign(widthFt: number, lengthFt: number): DeckDesign {
       heightMm: 3 * MM_PER_FOOT,
     },
     structure: 'elevated',
+    floatingFraming: 'beams-and-joists',
     foundation: {
       type: 'posts-on-footings',
       post: { nominal: '6x6', species: 'PT', grade: 'No2' },

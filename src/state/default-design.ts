@@ -184,5 +184,13 @@ export function makeDefaultDesign(id: string, createdAt: string): DeckDesign {
       orientation: deckingOrientation,
     },
     layout: { bayRemainderStrategy },
+    // S26 (fix/floating-framing-joists) — the default carries the
+    // Method-A `'beams-and-joists'` framing. The field is IGNORED for
+    // elevated designs (see `DeckDesign.floatingFraming` doc), so
+    // stamping the default here does not change the boot layout.
+    // It only matters when the user later flips `structure` to
+    // `'floating'` — in that case the floating pipeline honors the
+    // pre-stamped value.
+    floatingFraming: 'beams-and-joists',
   };
 }

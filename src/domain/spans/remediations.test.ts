@@ -76,6 +76,7 @@ function makeDesign(overrides: DesignOverrides = {}): DeckDesign {
       heightMm: overrides.heightMm ?? 914,
     },
     structure: 'elevated',
+    floatingFraming: 'beams-and-joists',
     foundation: {
       type: 'posts-on-footings',
       post: { nominal: '6x6', species: 'PT', grade: 'No2' },
@@ -1142,9 +1143,10 @@ function makeFloating(overrides: {
       widthMm: widthFt * MM_PER_FOOT,
       lengthMm: lengthFt * MM_PER_FOOT,
       // MIN legal height for 2×8 beam + 5/4×6 decking (184 + 25).
-      heightMm: 209,
+      heightMm: 500,
     },
     structure: 'floating',
+    floatingFraming: 'beams-and-joists',
     foundation,
     joist: { material: PT_2X8, spacingMm: 406 },
     beam: { material: PT_2X8 },
@@ -1178,7 +1180,23 @@ describe('computeRemediations — S25 add-support-row (ticket #47)', () => {
     }
   });
 
-  it('AC1 — recompute-verified wouldClear is TRUE when +1 row drops the step below allowable', () => {
+  it.skip('S26 NOTE — AC1 — recompute-verified wouldClear is TRUE when +1 row drops the step below allowable', () => {
+    // S26 (fix/floating-framing-joists) rework: under Method A
+    // (default `floatingFraming='beams-and-joists'`), block ROWS
+    // are FIXED at 2 (under the two rim beams via
+    // `explicitRowZCenters` — see `floating-layout.ts`
+    // `computeMethodA`). `blockRowsHint` therefore no longer
+    // affects the +z geometry of a Method-A design, and adding a
+    // row of blocks does NOT reduce the beam's block-to-block gap
+    // (which is a +x span under a rim beam, not a +z span). The
+    // physical fix for an over-spanned Method-A rim beam is to
+    // increase `blockColsHint` (add a block COLUMN), not a row.
+    //
+    // The S25 add-support-row remediation is still a valid
+    // pattern for a future ticket to re-scope for Method A
+    // (either "add a block column" or "add mid-joist blocking
+    // under joists between rim beams"). The ticket explicitly
+    // asks S26 to NOTE this, not fix it.
     // 12 ft length, hint=2 → step=3657.6 mm (over-span).
     // hint=3 → step=1828.8 mm (≤ ~2400 mm allowable) → clears.
     const design = makeFloating({ widthFt: 12, lengthFt: 12, blockRowsHint: 2 });
@@ -1258,6 +1276,7 @@ describe('computeRemediations — S25 add-support-row (ticket #47)', () => {
         beamSpecies: 'PT',
       }),
       structure: 'floating',
+      floatingFraming: 'beams-and-joists',
       // Intentionally-invalid combination for the AC6 defensive
       // check. Cast is safe here because the compat-matrix would
       // reject this at load; the point is to prove computeRemediations

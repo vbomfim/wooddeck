@@ -268,7 +268,18 @@ export function deserialize(json: string): DeserializeResult {
         generatorVersion: envelope.generatorVersion,
         createdAt: envelope.createdAt,
       };
-      return { design: envelope.design, meta, migrated: false };
+      return {
+        // S26 (fix/floating-framing-joists) — the schema makes
+        // `design.floatingFraming` OPTIONAL so pre-S26 v2 files
+        // continue to load; the loader stamps the default here so
+        // downstream consumers see a fully-populated required
+        // field. Round-tripping a v2 file that OMITTED the field
+        // will now serialize it — that's an INTENTIONAL upgrade,
+        // not a compat break (the on-disk value is byte-additive).
+        design: withFloatingFramingDefault(envelope.design),
+        meta,
+        migrated: false,
+      };
     }
     default: {
       // Fall through to Ajv v2 validation — its `const: 2` will
@@ -319,4 +330,44 @@ function knownSchemasList(): string {
   return Array.from(KNOWN_SCHEMA_VERSIONS)
     .sort((a, b) => a - b)
     .join(', ');
+}
+
+/**
+ * S26 (fix/floating-framing-joists) — coerce a validated v2 design
+ * to guarantee `floatingFraming` is present. The v2 schema declares
+ * the field OPTIONAL so a pre-S26 v2 file remains load-compatible,
+ * but the domain `DeckDesign` type requires it — this helper is the
+ * seam that reconciles the two.
+ *
+ * Missing → `'beams-and-joists'` (the Method-A default; see
+ * `DeckDesign.floatingFraming` doc in `src/domain/model.ts`).
+ *
+ * Present → returned unchanged (Ajv already validated the enum).
+ *
+ * The helper is a NARROW function on purpose: it does not mutate
+ * the input, and it does not attempt to fix other missing fields
+ * — the schema `required` list is the authoritative shape check,
+ * and we only exempt the one field we deliberately made optional
+ * for backward compat.
+ */
+function withFloatingFramingDefault(design: DeckDesign): DeckDesign {
+  // `design` is typed as `DeckDesign` (required field) but Ajv
+  // validated the payload against a schema that treats
+  // `floatingFraming` as optional — the field may in fact be
+  // missing at runtime. The runtime check below is intentionally
+  // structural (`in`) so an EXPLICIT `undefined` value is treated
+  // the same as an absent key.
+  const record = design as unknown as Record<string, unknown>;
+  const value = record['floatingFraming'];
+  if (
+    value === 'beams-and-joists' ||
+    value === 'joists-on-blocks'
+  ) {
+    // Field is present + valid. Return as-is (no clone — Ajv gave
+    // us a fresh JSON.parse object with no aliased state).
+    return design;
+  }
+  // Field is absent or explicitly undefined. Stamp the default.
+  // Fresh spread so we never mutate the input.
+  return { ...design, floatingFraming: 'beams-and-joists' };
 }

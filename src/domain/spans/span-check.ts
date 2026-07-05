@@ -390,10 +390,19 @@ function deriveFloatingBeamTributaryMm(
   beams: readonly LayoutMember[],
 ): Mm | null {
   if (beams.length < 2) return null;
-  const xs = beams.map((b) => b.position.x).sort((a, b) => a - b);
+  // Detect beam orientation. Pre-S26: beams ran along +z, spaced
+  // along +x — tributary = max +x gap. S26 Method-A: rim beams run
+  // along +x, spaced along +z — tributary = max +z gap. Detect
+  // via the FIRST beam's long-axis. All floating beams in a given
+  // layout share the same orientation by construction.
+  const first = beams[0]!;
+  const runsAlongX = first.size.x >= first.size.z;
+  const coords = beams
+    .map((b) => (runsAlongX ? b.position.z : b.position.x))
+    .sort((a, b) => a - b);
   let maxGap = 0;
-  for (let i = 1; i < xs.length; i++) {
-    const gap = xs[i]! - xs[i - 1]!;
+  for (let i = 1; i < coords.length; i++) {
+    const gap = coords[i]! - coords[i - 1]!;
     if (gap > maxGap) maxGap = gap;
   }
   return maxGap;
@@ -444,15 +453,32 @@ function deriveBeamBlockToBlockSpanMm(
   beam: LayoutMember,
   blocks: readonly LayoutMember[],
 ): Mm | null {
-  const beamBlocks = blocks.filter(
-    (b) => Math.abs(b.position.x - beam.position.x) < POST_Z_TOLERANCE_MM,
-  );
+  // Beam orientation — S26 rework:
+  //   - pre-S26 floating beams ran along +z (long axis = z), and
+  //     their supporting blocks shared beam.position.x.
+  //   - S26 Method-A rim beams run along +x (long axis = x), and
+  //     their supporting blocks share beam.position.z.
+  //
+  // Detect the long-axis from `beam.size` (the model's canonical
+  // orientation carrier — see model.ts LAYOUT COORDINATE FRAME).
+  // The block-gap axis is the beam's LONG axis (the direction the
+  // beam spans, i.e. the direction adjacent supports are spaced).
+  const beamRunsAlongX = beam.size.x >= beam.size.z;
+
+  const beamBlocks = blocks.filter((b) => {
+    const matchCoord = beamRunsAlongX
+      ? b.position.z - beam.position.z
+      : b.position.x - beam.position.x;
+    return Math.abs(matchCoord) < POST_Z_TOLERANCE_MM;
+  });
   if (beamBlocks.length < 2) return null;
 
-  const zs = beamBlocks.map((b) => b.position.z).sort((a, b) => a - b);
+  const coords = beamBlocks
+    .map((b) => (beamRunsAlongX ? b.position.x : b.position.z))
+    .sort((a, b) => a - b);
   let maxGap = 0;
-  for (let i = 1; i < zs.length; i++) {
-    const gap = zs[i]! - zs[i - 1]!;
+  for (let i = 1; i < coords.length; i++) {
+    const gap = coords[i]! - coords[i - 1]!;
     if (gap > maxGap) maxGap = gap;
   }
   return maxGap;

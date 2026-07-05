@@ -179,5 +179,11 @@ export const deckDesignArb: fc.Arbitrary<DeckDesign> = fc
       beam: { material: r.beamMaterial },
       decking: { material: r.deckingMaterial, orientation: r.orientation },
       layout: { bayRemainderStrategy: r.bayRemainderStrategy },
+      // S26 (fix/floating-framing-joists) — generator seeds
+      // Method-A default `'beams-and-joists'`. Elevated ignores the
+      // field so the byte-for-byte round-trip property still holds
+      // for every generated design. Method-B path is generated
+      // separately by targeted fixtures.
+      floatingFraming: 'beams-and-joists' as const,
     };
   });

@@ -451,7 +451,62 @@ export interface DeckDesign {
   readonly layout: {
     readonly bayRemainderStrategy: 'extra-bay-at-end' | 'centered';
   };
+  /**
+   * Floating-framing method (S26 — the fix/floating-framing-joists
+   * ticket). Selects HOW a floating deck is framed on top of its
+   * block grid. Only meaningful when `structure === 'floating'` —
+   * the elevated pipeline IGNORES this field entirely (elevated
+   * framing is fixed: joists on rim beams on posts).
+   *
+   * ## Method A — `'beams-and-joists'` (default)
+   *
+   * Elevated-style framing resting on blocks. The framing plane
+   * carries EXACTLY 2 rim beams (near/far) running along +x at
+   * each z-end, mirrored from the elevated `layoutBeams`. Joists
+   * run along +z on top of the beams, spaced across +x at
+   * `design.joist.spacingMm` — identical count/pitch to the
+   * elevated `layoutJoists`. Blocks sit under the two rim beams.
+   *
+   * y-stack (bottom-up): block → beam → joist → decking.
+   *
+   * This is the DEFAULT because it is the framing method every
+   * DIY floating-deck tutorial (Simpson, Home Depot, TuffBlock
+   * install guide) describes — rim beams distribute load laterally
+   * across the block grid, joists at the user's chosen o.c.
+   * spacing support the decking.
+   *
+   * ## Method B — `'joists-on-blocks'`
+   *
+   * Beam-less framing. Joists run along +z at
+   * `design.joist.spacingMm` DIRECTLY on top of the block grid.
+   * No beams. Blocks are arranged in rows along the joist length
+   * (bounded by the joist's allowable span) with columns aligned
+   * to the joist x-positions — each joist bears on a column of
+   * blocks. Lower profile than Method A (saves one lumber layer).
+   *
+   * y-stack (bottom-up): block → joist → decking.
+   *
+   * Both methods honor `design.joist.spacingMm` (the pre-S26 bug
+   * ignored spacing entirely — decking rested directly on widely-
+   * spaced beams). Both use the shared `computeJoistXCenters`
+   * helper so floating joist pitch is byte-identical to elevated
+   * joist pitch for a given width + spacing.
+   *
+   * See `src/domain/layout/floating/floating-layout.ts` for the
+   * dispatch site and `src/ui/fields/FloatingFramingSelector.tsx`
+   * for the user-facing selector.
+   */
+  readonly floatingFraming: FloatingFraming;
 }
+
+/**
+ * The two S26 floating-framing methods. Exported as a named type
+ * alias so the UI selector, application-layer patch handlers,
+ * persistence schemas, and property-based test arbitraries can
+ * refer to the union by name (never inline the literal union — a
+ * future third method would require re-fanning-out otherwise).
+ */
+export type FloatingFraming = 'beams-and-joists' | 'joists-on-blocks';
 
 // ==========================================================
 // LAYOUT COORDINATE FRAME — the binding contract for S4 & S10

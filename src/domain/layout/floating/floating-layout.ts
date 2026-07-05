@@ -1,130 +1,141 @@
 /**
  * `src/domain/layout/floating/floating-layout.ts` — orchestrator for
- * the FLOATING deck layout pipeline (S19).
+ * the FLOATING deck layout pipeline (S19 + S26 rework).
  *
- * ## Pipeline
+ * ## S26 rework (fix/floating-framing-joists)
  *
- *   1. `validateFloatingDesign` — mirror the elevated-path defensive
+ * Pre-S26 the floating pipeline had ONE model: an N×M block grid
+ * carrying one beam per block column (beams running along +z), with
+ * decking laid directly on beams. That model produced NO joists,
+ * IGNORED `design.joist.spacingMm`, and had NO beam at the two z-
+ * ends (rim beams).
+ *
+ * S26 replaces that single model with a dispatch on the new
+ * `design.floatingFraming` discriminator:
+ *
+ *   - `'beams-and-joists'` (DEFAULT — Method A): the elevated
+ *     framing (2 rim beams along +x, N joists along +z at
+ *     `design.joist.spacingMm`) resting on a block grid sized to
+ *     carry the rim beams. Same joist x-center formula as the
+ *     elevated pipeline (`computeJoistXCenters`).
+ *   - `'joists-on-blocks'` (Method B): joists rest DIRECTLY on
+ *     blocks; NO beam layer. Block grid has one row per beam
+ *     stand-in position along +z (bounded by joist span) and one
+ *     column per joist x-center (a block under every joist for
+ *     the honest MVP model — reversible per §PR body).
+ *
+ * ## Pipeline (Method A)
+ *
+ *   1. `validateFloatingDesign` — mirror the elevated defensive
  *      checks (`MIN_DECK_DIMENSION_MM`, `computeMinFloatingHeightMm`)
- *      + a caller-contract guard (must be a `floating` design with
- *      a block-based foundation).
- *   2. `computeBlockGrid` → readonly LayoutMember[] (`block`)
- *   3. `computeFloatingBeams(design, blocks)` → readonly LayoutMember[] (`beam`)
- *   4. `computeBlocking({ beams, joistNominal, species, grade, maxSpacingMm })`
- *      → readonly LayoutMember[] (`blocking`)
- *   5. `layoutFloatingDecking(design)` → readonly LayoutMember[] (`board`)
- *   6. Assemble a `Layout` with `members = [...boards, ...blocking, ...beams, ...blocks]`
- *      — top-down order (matches the y-stack, consistent with the
- *      elevated `[boards, joists, beams, posts, footings]` convention).
+ *      + a caller-contract guard on structure + foundation type +
+ *      FR-028 `acceptsLumber` compat.
+ *   2. `computeFloatingRimBeams(design)` → 2 beams (near/far)
+ *      along +x at z-ends (inset by `FOOTING_WIDTH_MM/2`).
+ *   3. `layoutFloatingJoists(design)` → N joists at
+ *      `design.joist.spacingMm` (reuses `computeJoistXCenters`
+ *      from the elevated joist layer — byte-identical spacing).
+ *   4. `computeBlockGrid` with `explicitRowZCenters = beam z's`
+ *      and derived column count → M blocks under each rim beam.
+ *   5. `layoutFloatingDecking(design)` → decking on joist top.
+ *   6. Assemble in top-down order: `[boards, joists, beams, blocks]`.
  *
- * ## Parameters — parametric per user directive
+ * ## Pipeline (Method B)
  *
- *   - `BEAM_TO_BEAM_MAX_SPACING_MM = MAX_BEAM_SPAN_MM = 2438.4 mm` (8′)
- *   - `BLOCK_ROW_MAX_SPACING_MM = 610 mm` (24″, DIY residential norm)
- *   - `MAX_BLOCKING_SPACING_MM = 1220 mm` (48″, IRC blocking rule)
+ *   1. `validateFloatingDesign` — same as Method A (min-height
+ *      guard uses the lower Method-B stack).
+ *   2. `layoutFloatingJoists(design)` → N joists at spacing.
+ *   3. `computeBlockGrid` with `explicitColXCenters = joist x's`
+ *      and `joistSpanMaxMm` for the row count → M rows × N cols
+ *      supporting each joist along its length.
+ *   4. `layoutFloatingDecking(design)` → decking on joist top.
+ *   5. Assemble in top-down order: `[boards, joists, blocks]`.
  *
- * All three are MODULE-LEVEL constants (not hardcoded literals in
- * the pipeline), so a future ticket that surfaces them per-material
- * or in the UI is a one-line replacement. NONE are consulted from
- * the elevated span tables — the S19 MVP treats them as fixed DIY
- * defaults matching the user's hand-drawn example.
- *
- * See the S19 handoff "Autonomous Decisions" table for the
- * rationale and reversibility of each value.
+ * Blocking (between-beam bracing) was a Method-A-of-old artifact
+ * predicated on beams running along +z. Rim beams along +x + real
+ * joists along +z do not need the same lateral bracing (joists
+ * self-brace at each rim beam). The S26 rework OMITS the blocking
+ * layer from both methods and DELETES the `blocking-layout.ts`
+ * module + its tests — a future ticket adding mid-joist blocking
+ * per IRC R502.7.1 will reintroduce a re-scoped module rather
+ * than resurrect the deleted one.
  *
  * ## Error contract
  *
  * `computeFloatingLayout` throws `LayoutError` for every failure
- * mode — mirrors the elevated orchestrator (`computeElevatedPostsOnFootingsLayout`).
- * Downstream helpers throw plain `Error` (for boundary / catalog
- * failures); this orchestrator wraps them as `LayoutError` with
- * `cause` so the state layer's `catch (err instanceof LayoutError)`
- * pattern works uniformly across structures.
+ * mode — mirrors the elevated orchestrator. Downstream helpers
+ * throw plain `Error` (for boundary / catalog failures); this
+ * orchestrator wraps them as `LayoutError` with `cause`.
  *
  * ## Framework/DOM ban
  *
  * Pure `src/domain/**` module. Imports only sibling domain modules.
  */
 
-import type { DeckDesign, Layout, LayoutMember, MaterialRef } from '../../model';
+import type { DeckDesign, Layout, LayoutMember } from '../../model';
 import { lookupFoundationProduct } from '../../foundation-catalog';
-import { IrcSpanTable } from '../../spans/irc-2018-tables';
 import type { SpanTable } from '../../spans/span-table';
 import { MM_PER_FOOT, type Mm } from '../../units';
 import { LayoutError, MIN_DECK_DIMENSION_MM } from '../layout-shared';
+import { FOOTING_WIDTH_MM } from '../y-stack';
 
 import { computeBlockGrid } from './block-grid';
-import { computeBlocking } from './blocking-layout';
-import { computeFloatingBeams } from './floating-beam-layout';
+import { computeFloatingRimBeams } from './floating-beam-layout';
 import { layoutFloatingDecking } from './floating-decking';
+import { layoutFloatingJoists } from './floating-joist-layout';
 import { computeMinFloatingHeightMm } from './y-stack-floating';
 
 /**
- * Max cross-width spacing between adjacent BEAMS in a floating deck.
- * 8′ (2438.4 mm) matches the elevated `MAX_BEAM_SPAN_MM` and the
- * user's hand-drawn 16′-wide-3-beam example (16/8 = 2 spans → 3 beams).
+ * Max cross-width spacing between adjacent BLOCKS in the same row.
+ * Method A: this bounds the column count under a rim beam so the
+ * beam is well-supported (matches the elevated `MAX_BEAM_SPAN_MM`
+ * DIY default; 8′ = 2438.4 mm).
  *
- * Autonomous decision — see S19 handoff. Reversible with a
- * one-value change once a span-table-derived value is available.
+ * Kept as a module-level constant so a future ticket surfacing the
+ * value in the UI / deriving it per-material is a one-line change.
  */
-export const BEAM_TO_BEAM_MAX_SPACING_MM: Mm = 8 * MM_PER_FOOT;
+export const BLOCK_COL_MAX_SPACING_MM: Mm = 8 * MM_PER_FOOT;
 
 /**
- * PRACTICAL max along-length spacing between adjacent BLOCKS under a
- * single beam. 24″ (610 mm) is the DIY residential norm for closely-
- * spaced block foundations on 2× lumber. Matches the user's hand-
- * drawn 14′-long-8-blocks-per-beam example
- * (14 × 305 / 24 ≈ 7 spans → 8 blocks).
+ * Legacy re-export — pre-S26 code used this name for the same 8′
+ * bound (rationalized then as "beam-to-beam max"; the S26 model
+ * has only two rim beams so the same 8′ is repurposed as the
+ * block-column bound). Alias preserved for downstream imports
+ * (e.g. the S25 remediation module reads this constant).
+ */
+export const BEAM_TO_BEAM_MAX_SPACING_MM: Mm = BLOCK_COL_MAX_SPACING_MM;
+
+/**
+ * PRACTICAL max along-length spacing between adjacent BLOCK ROWS
+ * (Method B — bounds the row count supporting each joist).
+ * 24″ (610 mm) is the DIY residential norm for closely-spaced
+ * block foundations under 2× lumber.
  *
- * Review-gate FIX 1 (FR-029(a) reconciliation): the ACTUAL block-
- * row spacing is `min(BLOCK_ROW_MAX_SPACING_MM_PRACTICAL, allowable)`
- * where `allowable = IrcSpanTable.lookupBeamMaxSpan(beam.material,
- * tributary, 2)` and `tributary = beam-to-beam +x delta`. The
- * practical constant CAPS the derived value so a very-permissive
- * table (e.g., a 2×12 beam with 6-ft tributary → ~11 ft allowable)
- * does not spawn a sparse block grid that would look wrong to a
- * DIY carpenter. For every MVP material combo the allowable
- * exceeds 610 mm, so the practical cap wins in the default path;
- * the derived branch is a defensive future-proof.
- *
- * Autonomous decision — see S19 handoff. Reversible.
+ * Autonomous decision — see S26 handoff. Reversible with a single
+ * value change.
  */
 export const BLOCK_ROW_MAX_SPACING_MM_PRACTICAL: Mm = 610;
 
 /**
- * Legacy re-export — pre-FIX-1 code and tests referenced this name.
- * Kept as an alias so downstream code that imported the constant
- * (e.g., blocking span checks in QA probes) still resolves. New
- * code should reference `BLOCK_ROW_MAX_SPACING_MM_PRACTICAL` to
- * make the "practical DIY minimum, not span-derived" nature
- * explicit.
+ * Legacy re-export — pre-FIX-1 code referenced this name.
  */
 export const BLOCK_ROW_MAX_SPACING_MM: Mm = BLOCK_ROW_MAX_SPACING_MM_PRACTICAL;
 
 /**
- * Default ply-count assumed for the auto-derived block-row spacing
- * bound. Matches the MVP's 2-ply beam convention (see
- * `span-check.ts` `DEFAULT_BEAM_PLY_COUNT`). Kept module-local
- * because floating-layout does not currently expose a per-design
- * ply-count override.
- */
-const DEFAULT_BEAM_PLY_COUNT = 2;
-
-/**
- * Max on-center spacing between blocking pieces between adjacent
- * beams. 48″ (1220 mm) matches IRC R502.7 blocking recommendations
- * for joists ≥ 2×8. User Q2 (ticket §17) confirmed this value is
- * NOT UI-configurable in the MVP.
+ * Retired constant (kept as a legacy export for source-compat).
+ * Blocking is OMITTED from both S26 methods; this value has no
+ * runtime consumer left in `floating-layout.ts`. It is preserved
+ * here so a future ticket that resurrects between-joist blocking
+ * has a stable import name to use.
  */
 export const MAX_BLOCKING_SPACING_MM: Mm = 1220;
 
 /**
  * Options for `computeFloatingLayout` — extends the elevated
  * `ComputeLayoutOptions` shape with an OPTIONAL `spanTable` seam so
- * the auto-derived block-row spacing (Review-gate FIX 1) can be
- * unit-tested against either the real `IrcSpanTable` or a mock. If
- * omitted, a fresh `IrcSpanTable` is instantiated — the layout is
- * always genuinely IRC-bounded.
+ * a future span-derived row spacing can be unit-tested against
+ * either the real `IrcSpanTable` or a mock. Currently only used
+ * for the FR-028 catalog lookup guard.
  */
 export interface ComputeFloatingLayoutOptions {
   readonly now?: () => string;
@@ -132,30 +143,8 @@ export interface ComputeFloatingLayoutOptions {
 }
 
 /**
- * Derive the max block-row spacing to place under a beam. Reads the
- * span table for `(beam.material, tributary, 2 plies)` and caps at
- * the practical DIY minimum. Fail-safe: if the table returns 0
- * (unrated material / row not covered), fall back to the practical
- * minimum — the auto-layout stays conservative and the span-check
- * loop separately surfaces a fail-safe warning for the same design.
- */
-function deriveBlockRowMaxSpacingMm(
-  beamMaterial: MaterialRef,
-  tributaryMm: Mm,
-  spanTable: SpanTable,
-): Mm {
-  const allowable = spanTable.lookupBeamMaxSpan(
-    beamMaterial,
-    tributaryMm,
-    DEFAULT_BEAM_PLY_COUNT,
-  );
-  if (allowable <= 0) return BLOCK_ROW_MAX_SPACING_MM_PRACTICAL;
-  return Math.min(BLOCK_ROW_MAX_SPACING_MM_PRACTICAL, allowable);
-}
-
-/**
- * Turn a FLOATING `DeckDesign` into a complete `Layout` render
- * contract. See module header for the pipeline and error contract.
+ * Turn a FLOATING `DeckDesign` into a complete `Layout`. Dispatches
+ * on `design.floatingFraming` — see module header.
  *
  * ## Caller expectations
  *
@@ -164,7 +153,7 @@ function deriveBlockRowMaxSpacingMm(
  *
  * The layout-engine dispatcher enforces both via the compat matrix
  * BEFORE calling here; this function ALSO checks (fail-loud) so a
- * test / future caller that skips the dispatcher does not silently
+ * test or future caller that skips the dispatcher does not silently
  * produce nonsense.
  *
  * @throws {LayoutError} on any validation failure or downstream
@@ -177,13 +166,8 @@ export function computeFloatingLayout(
 ): Layout {
   validateFloatingDesign(design);
   const now = options?.now ?? defaultNow;
-  const spanTable = options?.spanTable ?? new IrcSpanTable();
 
   try {
-    // TypeScript narrowing — after `validateFloatingDesign` we know
-    // `foundation.type !== 'posts-on-footings'`, so the extract is
-    // safe. Assert via a local const so the compiler propagates the
-    // narrowed type into `computeBlockGrid`'s `foundation` param.
     if (design.foundation.type === 'posts-on-footings') {
       // Belt-and-suspenders — the validator already threw. Kept so
       // TypeScript's control-flow narrowing knows `foundation` is
@@ -194,62 +178,10 @@ export function computeFloatingLayout(
       );
     }
 
-    // Review-gate FIX 1 (FR-029(a)): the block-row spacing along a
-    // beam MUST be bounded by the tributary-aware IRC allowable so
-    // the auto-layout is span-compliant by construction. Tributary
-    // for a floating beam is the beam-to-beam +x spacing. For N
-    // beams evenly distributed across `widthMm`,
-    // `tributary = widthMm / (numBeams − 1)` where
-    // `numBeams = ceil(widthMm / BEAM_TO_BEAM_MAX_SPACING_MM) + 1`.
-    // A degenerate single-beam case (`numBeams === 1`, tributary
-    // undefined) uses the practical minimum unchanged — the span
-    // table can't sensibly bound zero neighbors.
-    const widthMm = design.footprint.widthMm;
-    const numBeams =
-      Math.ceil(widthMm / BEAM_TO_BEAM_MAX_SPACING_MM) + 1;
-    const beamTributaryMm: Mm =
-      numBeams >= 2 ? widthMm / (numBeams - 1) : widthMm;
-    const blockRowMaxSpacingMm = deriveBlockRowMaxSpacingMm(
-      design.beam.material,
-      beamTributaryMm,
-      spanTable,
-    );
-
-    const blocks = computeBlockGrid({
-      footprintMm: {
-        widthMm: design.footprint.widthMm,
-        lengthMm: design.footprint.lengthMm,
-      },
-      foundation: design.foundation,
-      beamSpanMaxMm: BEAM_TO_BEAM_MAX_SPACING_MM,
-      joistSpanMaxMm: blockRowMaxSpacingMm,
-    });
-
-    const beams = computeFloatingBeams(design, blocks);
-
-    // Blocking uses the SAME material as the beam (per AC6). Pull
-    // the triple off the design's beam spec — the material lookup
-    // inside `computeBlocking` re-validates the triple is catalog-
-    // known.
-    const blocking = computeBlocking({
-      beams,
-      joistNominal: design.beam.material.nominal,
-      species: design.beam.material.species,
-      grade: design.beam.material.grade,
-      maxSpacingMm: MAX_BLOCKING_SPACING_MM,
-    });
-
-    const boards = layoutFloatingDecking(design);
-
-    // Order matches the y-stack top-to-bottom (boards on top,
-    // blocks on bottom). AC7's determinism assertion is deep-equal
-    // on the array, so keeping the order stable here is important.
-    const members: LayoutMember[] = [
-      ...boards,
-      ...blocking,
-      ...beams,
-      ...blocks,
-    ];
+    const members: LayoutMember[] =
+      design.floatingFraming === 'beams-and-joists'
+        ? computeMethodA(design)
+        : computeMethodB(design);
 
     return {
       designId: design.id,
@@ -267,22 +199,121 @@ export function computeFloatingLayout(
 }
 
 /**
+ * Method A layout — beams + joists on a supporting block grid.
+ *
+ * ## Block grid — Method A
+ *
+ *   - **Rows (along +z):** exactly 2, at the rim-beam z-centers
+ *     (`±(lengthMm/2 − FOOTING_WIDTH_MM/2)`). Passed as
+ *     `explicitRowZCenters` so `computeBlockGrid` bypasses the
+ *     derived row-count formula and places blocks directly under
+ *     the two rim beams.
+ *   - **Columns (along +x):** derived from
+ *     `ceil(widthMm / BLOCK_COL_MAX_SPACING_MM) + 1` (subject to
+ *     `blockColsHint`) — bounds the block-to-block +x gap to keep
+ *     each rim beam well-supported.
+ *
+ * The `explicitRowZCenters` override does not force the column
+ * count — a user's `blockColsHint` still applies exactly as it did
+ * pre-S26 (the S25 UI seam is unchanged).
+ */
+function computeMethodA(design: DeckDesign): LayoutMember[] {
+  if (design.foundation.type === 'posts-on-footings') {
+    // Narrowing shim — unreachable in practice (validated above).
+    throw new LayoutError('unreachable: posts-on-footings in Method A');
+  }
+  const halfLengthMm = design.footprint.lengthMm / 2;
+  // Rim beams inset by half a footing/block width from each z-end
+  // (mirrors elevated `layoutBeams`). Rows of blocks sit UNDER
+  // each rim beam so the beam-to-block bearing is direct.
+  const beamInset = FOOTING_WIDTH_MM / 2;
+  const nearZ = -halfLengthMm + beamInset;
+  const farZ = +halfLengthMm - beamInset;
+
+  const blocks = computeBlockGrid({
+    footprintMm: {
+      widthMm: design.footprint.widthMm,
+      lengthMm: design.footprint.lengthMm,
+    },
+    foundation: design.foundation,
+    beamSpanMaxMm: BLOCK_COL_MAX_SPACING_MM,
+    // `joistSpanMaxMm` is unused when `explicitRowZCenters` is
+    // supplied, but the validator still requires it > 0. Pass the
+    // same block-col cap defensively.
+    joistSpanMaxMm: BLOCK_COL_MAX_SPACING_MM,
+    explicitRowZCenters: [nearZ, farZ],
+  });
+
+  const beams = computeFloatingRimBeams(design);
+  const joists = layoutFloatingJoists(design);
+  const boards = layoutFloatingDecking(design);
+
+  // Top-down order (mirrors the y-stack): boards on top, blocks
+  // on bottom. AC7's determinism assertion is deep-equal on the
+  // array, so keeping the order stable here is important.
+  return [...boards, ...joists, ...beams, ...blocks];
+}
+
+/**
+ * Method B layout — joists directly on blocks; NO beam layer.
+ *
+ * ## Block grid — Method B
+ *
+ *   - **Columns (along +x):** one block per joist x-center.
+ *     Passed as `explicitColXCenters` so every joist has direct
+ *     block-bearing along its length. Reversible: a coarser
+ *     "col under every other joist" variant would still be
+ *     span-legal for tighter joist spacings but the honest
+ *     one-block-per-joist model matches the ticket's guidance to
+ *     "pick the simplest honest model." Documented in the PR body.
+ *   - **Rows (along +z):** derived from
+ *     `ceil(lengthMm / BLOCK_ROW_MAX_SPACING_MM_PRACTICAL) + 1`
+ *     (subject to `blockRowsHint`). Bounds the along-joist block
+ *     gap to keep each joist well-supported.
+ */
+function computeMethodB(design: DeckDesign): LayoutMember[] {
+  if (design.foundation.type === 'posts-on-footings') {
+    throw new LayoutError('unreachable: posts-on-footings in Method B');
+  }
+  const joists = layoutFloatingJoists(design);
+  // One block per joist x-center — see Method B docstring for
+  // reversibility rationale.
+  const explicitColXCenters = joists.map((j) => j.position.x);
+
+  const blocks = computeBlockGrid({
+    footprintMm: {
+      widthMm: design.footprint.widthMm,
+      lengthMm: design.footprint.lengthMm,
+    },
+    foundation: design.foundation,
+    // `beamSpanMaxMm` is unused when `explicitColXCenters` is
+    // supplied; validator requires > 0.
+    beamSpanMaxMm: BLOCK_ROW_MAX_SPACING_MM_PRACTICAL,
+    joistSpanMaxMm: BLOCK_ROW_MAX_SPACING_MM_PRACTICAL,
+    explicitColXCenters,
+  });
+
+  const boards = layoutFloatingDecking(design);
+  // Order: boards → joists → blocks. No beam layer.
+  return [...boards, ...joists, ...blocks];
+}
+
+/**
  * Compute `Layout.bounds` for a floating layout as the axis-aligned
- * bounding box of every produced member (S19 review-gate FIX 3).
+ * bounding box of every produced member.
  *
  * Rationale — the elevated pipeline sets `bounds = design.footprint`
  * because posts + footings sit within the footprint on x/z and
  * above/below-grade y is bounded by `heightMm`. Floating designs
  * violate both: outer blocks overhang the footprint by ~½ block on
  * each side (`block-grid.ts` module header AC4), and blocks extend
- * BELOW y=0 by `product.actual.heightMm`. If `Layout.bounds` still
- * reported `design.footprint` for floating layouts, S22's camera
- * (`scene/CameraRig.tsx`) would frame from the deck footprint and
- * clip the outer blocks + subgrade extent out of view.
+ * BELOW y=0 by `product.actual.heightMm`. Reporting
+ * `design.footprint` would clip outer blocks + subgrade extent out
+ * of the S22 camera framing.
  *
  * Fallback — a member-less layout is impossible for a valid design
- * (every code path in this file emits ≥1 block + beam + board), but
- * as a defensive guard we fall back to `design.footprint` so the
+ * (every method emits ≥1 block + joist + board), but as a
+ * defensive guard we fall back to `design.footprint` so the
  * function never returns `NaN`/`-Infinity` fields.
  */
 function computeFloatingBoundsFromMembers(
@@ -323,14 +354,8 @@ function computeFloatingBoundsFromMembers(
 /**
  * Validate a floating design at the orchestrator boundary. Reuses
  * `MIN_DECK_DIMENSION_MM` (shared with the elevated path) and adds
- * the floating-specific `computeMinFloatingHeightMm` check.
- *
- * Explicitly does NOT re-run the elevated `validateDesign` — the
- * elevated validator checks joist spacing against joist thickness,
- * which is meaningful only for the elevated pipeline (floating has
- * no joist layer; the `design.joist` field is still present in the
- * shared `DeckDesign` type but its spacing is not honored by the
- * floating pipeline).
+ * the floating-specific `computeMinFloatingHeightMm` check (which
+ * now varies by `floatingFraming`).
  *
  * See Developer Guardian Rules → Pre-compliance → Trust boundaries.
  */
@@ -382,24 +407,26 @@ function validateFloatingDesign(design: DeckDesign): void {
   if (!Number.isFinite(heightMm) || heightMm < minHeightMm) {
     throw new LayoutError(
       `Invalid deck height: heightMm=${heightMm} must be ≥ ${minHeightMm} mm ` +
-        `(beam depth + decking thickness) for a floating design with the ` +
-        `chosen beam/decking materials. Below this, decking or beams would ` +
-        `land below the deck surface. S13's UI height input MUST clamp its ` +
-        `lower bound to computeMinFloatingHeightMm(design) for floating ` +
-        `designs.`,
+        `(the ${design.floatingFraming === 'beams-and-joists' ? 'beam + joist + decking' : 'joist + decking'} stack) ` +
+        `for a floating design with the chosen materials. Below this, decking ` +
+        `or framing would land below the deck surface. S13's UI height input ` +
+        `MUST clamp its lower bound to computeMinFloatingHeightMm(design) for ` +
+        `floating designs.`,
     );
   }
 
-  // ---- FR-028 acceptsLumber compat (review-gate FIX 2) --------------------
+  // ---- FR-028 acceptsLumber compat -------------------------------------
   // Each foundation-block product declares the lumber nominals it is
   // rated to bear (see `foundation-catalog.ts` `acceptsLumber`). Pairing
-  // a block with an unsupported beam nominal is physically invalid — the
-  // manufacturer has not sized the block for that load path. Fail-loud
-  // here BEFORE the block-grid + beam layout math consume the pair.
+  // a block with an unsupported beam / joist nominal is physically
+  // invalid — the manufacturer has not sized the block for that load
+  // path. Fail-loud here BEFORE the block-grid + framing math consume
+  // the pair.
   //
-  // `lookupFoundationProduct` throws on unknown ids; that surfaces as a
-  // LayoutError with the catalog-error message (mirrors the material
-  // catalog lookup pattern in `computeMinStructuralHeightMm`).
+  // Method B has NO beam layer, so the compat check falls to the joist
+  // nominal (the joist is what the block bears directly). Method A
+  // still checks the beam nominal (the block bears the beam, not the
+  // joist).
   let product;
   try {
     product = lookupFoundationProduct(design.foundation.product.productId);
@@ -411,15 +438,20 @@ function validateFloatingDesign(design: DeckDesign): void {
       { cause: err },
     );
   }
-  const beamNominal = design.beam.material.nominal;
-  if (!product.acceptsLumber.includes(beamNominal)) {
+  const loadNominal =
+    design.floatingFraming === 'beams-and-joists'
+      ? design.beam.material.nominal
+      : design.joist.material.nominal;
+  const loadLabel =
+    design.floatingFraming === 'beams-and-joists' ? 'beam' : 'joist';
+  if (!product.acceptsLumber.includes(loadNominal)) {
     throw new LayoutError(
-      `Foundation-block × beam-nominal mismatch (FR-028): ` +
+      `Foundation-block × ${loadLabel}-nominal mismatch (FR-028): ` +
         `${product.displayName} (${product.productId}) accepts ` +
         `${product.acceptsLumber.join(', ')} lumber, ` +
-        `but design.beam is ${beamNominal}. Choose a beam nominal the ` +
-        `block is rated to bear, or select a foundation-block product ` +
-        `whose acceptsLumber includes ${beamNominal}.`,
+        `but design.${loadLabel} is ${loadNominal}. Choose a ${loadLabel} ` +
+        `nominal the block is rated to bear, or select a foundation-block ` +
+        `product whose acceptsLumber includes ${loadNominal}.`,
     );
   }
 }

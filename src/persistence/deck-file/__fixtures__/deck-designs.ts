@@ -71,6 +71,7 @@ export const GOLDEN_DECK_DESIGN: DeckDesign = {
     orientation: 'parallel-to-width',
   },
   layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+  floatingFraming: 'beams-and-joists',
 };
 
 /**
@@ -104,6 +105,7 @@ export const SECOND_GOLDEN_DECK_DESIGN: DeckDesign = {
     orientation: 'parallel-to-length',
   },
   layout: { bayRemainderStrategy: 'centered' },
+  floatingFraming: 'beams-and-joists',
 };
 
 /**

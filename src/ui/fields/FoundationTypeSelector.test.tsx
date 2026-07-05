@@ -45,6 +45,7 @@ function seedFloatingTuffblocks(): void {
   act(() => {
     useDesignStore.getState().applyParameters({
       structure: 'floating',
+      floatingFraming: 'beams-and-joists',
       foundation: {
         type: 'tuffblocks',
         product: { productId: 'tuffblock-12x12x4' },

@@ -149,6 +149,14 @@ function migrateDesign(v1Design: V1LegacyDesign): DeckDesign {
       orientation: v1Design.decking.orientation,
     },
     layout: { ...v1Design.layout },
+    // S26 (fix/floating-framing-joists) — every migrated v1 design
+    // is elevated by definition (see FR-027 default) and the floating
+    // framing field is IGNORED for elevated. We stamp
+    // `'beams-and-joists'` (the schema default) so downstream
+    // consumers can rely on the field being present. Choosing the
+    // default value here matches the on-disk schema-v2's default
+    // for the missing case — see `deck-file-schema-v2.json`.
+    floatingFraming: 'beams-and-joists',
   };
   return v2Design;
 }

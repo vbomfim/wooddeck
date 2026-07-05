@@ -150,6 +150,9 @@ function makeFixture(
       orientation: design.decking.orientation,
     },
     layout: { ...design.layout },
+    // S26 (fix/floating-framing-joists) — v1→v2 migration stamps
+    // the default framing method (see `migrateV1ToV2`).
+    floatingFraming: 'beams-and-joists',
   };
   return { label, v1Envelope, rawJson, expectedV2Design };
 }

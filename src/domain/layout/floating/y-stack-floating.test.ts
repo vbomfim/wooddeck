@@ -1,33 +1,28 @@
 /**
- * `src/domain/layout/floating/y-stack-floating.test.ts` — TDD RED
- * phase for the floating-model y-stack helper (S19, AC9).
+ * `src/domain/layout/floating/y-stack-floating.test.ts` — the
+ * y-stack unit tests, S26 (fix/floating-framing-joists).
  *
  * ## Contract under test
  *
  * `computeYStackFloating(design)` returns every y-anchor a floating
- * layout consumer needs:
+ * layout consumer needs. The stack VARIES by `design.floatingFraming`:
  *
- *   1. Block top face at y=0 (i.e. block CENTER at y = -blockHeight/2)
- *   2. Beam bottom face at y=0 (beams rest ON blocks), beam CENTER at
- *      y = beamHeight/2, beam top at y = beamHeight
- *   3. Decking bottom face at y = beamHeight (decking rests ON beams),
- *      decking CENTER at y = beamHeight + deckingThickness/2, decking
- *      top at y = beamHeight + deckingThickness
+ *   - Method A (`'beams-and-joists'`, default): block → beam →
+ *     joist → decking.
+ *   - Method B (`'joists-on-blocks'`): block → joist → decking
+ *     (beam layer collapses to zero-thickness).
  *
  * `computeMinFloatingHeightMm(design)` returns the minimum legal
- * `footprint.heightMm` for a floating deck (AC9). This is the ABOVE-
- * GROUND stack height — blocks live BELOW y=0 and do NOT contribute
- * to visible deck height:
+ * `footprint.heightMm` for a floating deck (S26 rework). This is
+ * the ABOVE-GROUND stack height — blocks live BELOW y=0 and do NOT
+ * contribute to visible deck height:
  *
- *     MIN = beam.actual.heightMm + decking.actual.widthMm
- *
- * (where `decking.actual.widthMm` is the decking board's THICKNESS —
- * boards laid flat, so the smaller dressed dimension is vertical; see
- * `decking-layout.ts` module header for the convention.)
+ *   - Method A: `beam.height + joist.height + decking.thickness`
+ *   - Method B: `joist.height + decking.thickness`
  *
  * NO minimum-post-height component (unlike the elevated y-stack —
  * see `y-stack.ts`'s `MIN_POST_HEIGHT_MM`). Floating decks have no
- * posts by definition (AC1 zero-post invariant).
+ * posts by definition.
  */
 import { describe, expect, it } from 'vitest';
 
@@ -41,6 +36,7 @@ import {
 } from './y-stack-floating';
 
 const PT_2X8: MaterialRef = { nominal: '2x8', species: 'PT', grade: 'No2' };
+const PT_2X10: MaterialRef = { nominal: '2x10', species: 'PT', grade: 'No2' };
 const PT_54: MaterialRef = { nominal: '5/4x6', species: 'PT', grade: 'No2' };
 
 const TUFFBLOCK_FOUNDATION: FoundationSpec = {
@@ -48,17 +44,13 @@ const TUFFBLOCK_FOUNDATION: FoundationSpec = {
   product: { productId: 'tuffblock-12x12x4' },
 };
 
-/**
- * Build a minimal floating `DeckDesign` for y-stack testing. Any
- * dimension that y-stack doesn't consume (footprint width/length,
- * joist spacing, orientation) uses a benign default so the test's
- * intent is clear at the call-site.
- */
 function makeFloating(overrides: Partial<{
   beam: MaterialRef;
+  joist: MaterialRef;
   decking: MaterialRef;
   heightMm: number;
   foundation: FoundationSpec;
+  floatingFraming: 'beams-and-joists' | 'joists-on-blocks';
 }> = {}): DeckDesign {
   return {
     id: '00000000-0000-4000-8000-000000000019',
@@ -66,11 +58,12 @@ function makeFloating(overrides: Partial<{
     footprint: {
       widthMm: 16 * MM_PER_FOOT,
       lengthMm: 14 * MM_PER_FOOT,
-      heightMm: overrides.heightMm ?? 300,
+      heightMm: overrides.heightMm ?? 500,
     },
     structure: 'floating',
+    floatingFraming: overrides.floatingFraming ?? 'beams-and-joists',
     foundation: overrides.foundation ?? TUFFBLOCK_FOUNDATION,
-    joist: { material: overrides.beam ?? PT_2X8, spacingMm: 406 },
+    joist: { material: overrides.joist ?? PT_2X8, spacingMm: 406 },
     beam: { material: overrides.beam ?? PT_2X8 },
     decking: {
       material: overrides.decking ?? PT_54,
@@ -81,58 +74,71 @@ function makeFloating(overrides: Partial<{
 }
 
 // ---------------------------------------------------------------------------
-// computeMinFloatingHeightMm — AC9
+// computeMinFloatingHeightMm — Method A
 // ---------------------------------------------------------------------------
 
-describe('computeMinFloatingHeightMm — AC9 (no post extent)', () => {
-  it('2x8 PT beam + 5/4x6 PT decking → beam.height + decking.thickness', () => {
-    const design = makeFloating();
-    const beam = lookupMaterial('2x8', 'PT', 'No2'); // actual heightMm=184
-    const decking = lookupMaterial('5/4x6', 'PT', 'No2'); // actual widthMm=25
+describe('computeMinFloatingHeightMm — Method A (beams + joists)', () => {
+  it('2x8 beam + 2x8 joist + 5/4x6 decking → 184 + 184 + 25 = 393 mm', () => {
+    const design = makeFloating({ floatingFraming: 'beams-and-joists' });
+    const beam = lookupMaterial('2x8', 'PT', 'No2');
+    const joist = lookupMaterial('2x8', 'PT', 'No2');
+    const decking = lookupMaterial('5/4x6', 'PT', 'No2');
     expect(computeMinFloatingHeightMm(design)).toBe(
-      beam.actual.heightMm + decking.actual.widthMm,
+      beam.actual.heightMm + joist.actual.heightMm + decking.actual.widthMm,
     );
   });
 
-  it('does NOT include MIN_POST_HEIGHT_MM (no posts in floating)', () => {
-    const design = makeFloating();
-    const beam = lookupMaterial('2x8', 'PT', 'No2');
-    const decking = lookupMaterial('5/4x6', 'PT', 'No2');
-    // If the implementation accidentally reused the elevated helper's
-    // MIN_POST_HEIGHT_MM (25 mm), the minimum would be 25 mm larger.
-    // Guard against that regression here.
-    const bareStack = beam.actual.heightMm + decking.actual.widthMm;
-    expect(computeMinFloatingHeightMm(design)).toBe(bareStack);
-    expect(computeMinFloatingHeightMm(design)).toBeLessThan(bareStack + 25);
-  });
-
-  it('scales with a thicker beam (2x10 → 235 + 25 = 260 mm)', () => {
+  it('scales with a thicker beam (2x10 beam) — the JOIST + decking are unchanged', () => {
     const design = makeFloating({
-      beam: { nominal: '2x10', species: 'PT', grade: 'No2' },
+      beam: PT_2X10,
+      floatingFraming: 'beams-and-joists',
     });
     const beam = lookupMaterial('2x10', 'PT', 'No2');
+    const joist = lookupMaterial('2x8', 'PT', 'No2');
     const decking = lookupMaterial('5/4x6', 'PT', 'No2');
     expect(computeMinFloatingHeightMm(design)).toBe(
-      beam.actual.heightMm + decking.actual.widthMm,
+      beam.actual.heightMm + joist.actual.heightMm + decking.actual.widthMm,
     );
   });
 });
 
 // ---------------------------------------------------------------------------
-// computeYStackFloating — the six anchor positions
+// computeMinFloatingHeightMm — Method B
 // ---------------------------------------------------------------------------
 
-describe('computeYStackFloating — anchor positions', () => {
+describe('computeMinFloatingHeightMm — Method B (joists on blocks)', () => {
+  it('2x8 joist + 5/4x6 decking → 184 + 25 = 209 mm (NO beam)', () => {
+    const design = makeFloating({ floatingFraming: 'joists-on-blocks' });
+    const joist = lookupMaterial('2x8', 'PT', 'No2');
+    const decking = lookupMaterial('5/4x6', 'PT', 'No2');
+    expect(computeMinFloatingHeightMm(design)).toBe(
+      joist.actual.heightMm + decking.actual.widthMm,
+    );
+  });
+
+  it('Method B height is STRICTLY LESS than Method A height for the same joist + decking (beam layer omitted)', () => {
+    const a = makeFloating({ floatingFraming: 'beams-and-joists' });
+    const b = makeFloating({ floatingFraming: 'joists-on-blocks' });
+    expect(computeMinFloatingHeightMm(b)).toBeLessThan(
+      computeMinFloatingHeightMm(a),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeYStackFloating — anchor positions (Method A)
+// ---------------------------------------------------------------------------
+
+describe('computeYStackFloating — anchors (Method A)', () => {
   it('block top at y=0, block center at y = -blockHeight/2', () => {
     const design = makeFloating();
     const stack = computeYStackFloating(design);
-    // TuffBlock actual heightMm = 102 mm (see foundation-catalog).
-    expect(stack.blockHeightMm).toBe(102);
+    expect(stack.blockHeightMm).toBe(102); // TuffBlock 12x12x4
     expect(stack.blockTopY).toBe(0);
     expect(stack.blockCenterY).toBe(-51);
   });
 
-  it('beam bottom at y=0 (on top of block), beam center at beam.height/2, beam top at beam.height', () => {
+  it('beam bottom at y=0 (on block), beam center at beam.height/2, beam top at beam.height', () => {
     const design = makeFloating();
     const stack = computeYStackFloating(design);
     const beam = lookupMaterial('2x8', 'PT', 'No2');
@@ -142,18 +148,75 @@ describe('computeYStackFloating — anchor positions', () => {
     expect(stack.beamDepthMm).toBe(beam.actual.heightMm);
   });
 
-  it('decking bottom at beam top, decking center = beamTop + deckingThickness/2, decking top = beamTop + deckingThickness', () => {
+  it('joist bottom at beam top, joist center at beam.top + joist.height/2, joist top at beam.top + joist.height', () => {
     const design = makeFloating();
     const stack = computeYStackFloating(design);
     const beam = lookupMaterial('2x8', 'PT', 'No2');
-    const decking = lookupMaterial('5/4x6', 'PT', 'No2');
-    expect(stack.deckingBottomY).toBe(beam.actual.heightMm);
-    expect(stack.deckingCenterY).toBe(beam.actual.heightMm + decking.actual.widthMm / 2);
-    expect(stack.deckingTopY).toBe(beam.actual.heightMm + decking.actual.widthMm);
-    expect(stack.deckingThicknessMm).toBe(decking.actual.widthMm);
+    const joist = lookupMaterial('2x8', 'PT', 'No2');
+    expect(stack.joistBottomY).toBe(beam.actual.heightMm);
+    expect(stack.joistCenterY).toBe(
+      beam.actual.heightMm + joist.actual.heightMm / 2,
+    );
+    expect(stack.joistTopY).toBe(beam.actual.heightMm + joist.actual.heightMm);
+    expect(stack.joistDepthMm).toBe(joist.actual.heightMm);
   });
 
-  it('Oldcastle block foundation produces the correct blockHeightMm (178 mm)', () => {
+  it('decking bottom at joist top, decking center = joistTop + deckingThickness/2', () => {
+    const design = makeFloating();
+    const stack = computeYStackFloating(design);
+    const beam = lookupMaterial('2x8', 'PT', 'No2');
+    const joist = lookupMaterial('2x8', 'PT', 'No2');
+    const decking = lookupMaterial('5/4x6', 'PT', 'No2');
+    const joistTopY = beam.actual.heightMm + joist.actual.heightMm;
+    expect(stack.deckingBottomY).toBe(joistTopY);
+    expect(stack.deckingCenterY).toBe(joistTopY + decking.actual.widthMm / 2);
+    expect(stack.deckingTopY).toBe(joistTopY + decking.actual.widthMm);
+    expect(stack.deckingThicknessMm).toBe(decking.actual.widthMm);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// computeYStackFloating — anchor positions (Method B)
+// ---------------------------------------------------------------------------
+
+describe('computeYStackFloating — anchors (Method B, joists-on-blocks)', () => {
+  it('beam layer collapses (beamDepthMm=0; beamTopY = beamBottomY = 0)', () => {
+    const design = makeFloating({ floatingFraming: 'joists-on-blocks' });
+    const stack = computeYStackFloating(design);
+    expect(stack.beamDepthMm).toBe(0);
+    expect(stack.beamBottomY).toBe(0);
+    expect(stack.beamTopY).toBe(0);
+    expect(stack.beamCenterY).toBe(0);
+  });
+
+  it('joist bottom flush with block top (y=0); joist center at joist.height/2', () => {
+    const design = makeFloating({ floatingFraming: 'joists-on-blocks' });
+    const stack = computeYStackFloating(design);
+    const joist = lookupMaterial('2x8', 'PT', 'No2');
+    expect(stack.joistBottomY).toBe(0);
+    expect(stack.joistCenterY).toBe(joist.actual.heightMm / 2);
+    expect(stack.joistTopY).toBe(joist.actual.heightMm);
+  });
+
+  it('decking bottom at joist top; decking rests DIRECTLY on joists (no beam layer)', () => {
+    const design = makeFloating({ floatingFraming: 'joists-on-blocks' });
+    const stack = computeYStackFloating(design);
+    const joist = lookupMaterial('2x8', 'PT', 'No2');
+    const decking = lookupMaterial('5/4x6', 'PT', 'No2');
+    expect(stack.deckingBottomY).toBe(joist.actual.heightMm);
+    expect(stack.deckingCenterY).toBe(
+      joist.actual.heightMm + decking.actual.widthMm / 2,
+    );
+    expect(stack.deckingTopY).toBe(joist.actual.heightMm + decking.actual.widthMm);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Oldcastle foundation still resolves correctly
+// ---------------------------------------------------------------------------
+
+describe('computeYStackFloating — other foundations', () => {
+  it('Oldcastle deck-blocks foundation → blockHeightMm=178 mm', () => {
     const design = makeFloating({
       foundation: {
         type: 'deck-blocks',
@@ -167,7 +230,7 @@ describe('computeYStackFloating — anchor positions', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Error contract — unknown material triple
+// Error contract
 // ---------------------------------------------------------------------------
 
 describe('computeYStackFloating — error contract', () => {
@@ -176,21 +239,13 @@ describe('computeYStackFloating — error contract', () => {
     const bad: DeckDesign = {
       ...design,
       beam: {
-        material: {
-          nominal: '2x8',
-          species: 'Cedar',
-          // Grade='Select' is not in the catalog for 2x8 Cedar.
-          grade: 'Select',
-        },
+        material: { nominal: '2x8', species: 'Cedar', grade: 'Select' },
       },
     };
     expect(() => computeYStackFloating(bad)).toThrow(/Unknown material/i);
   });
 
   it('throws when the foundation is posts-on-footings (floating helper misuse)', () => {
-    // Guard: y-stack-floating expects a block-based foundation. Calling
-    // it with posts-on-footings is a caller bug — fail loudly, not
-    // silently. Mirrors the defensive throw in `layoutPostsAndFootings`.
     const bad: DeckDesign = {
       ...makeFloating(),
       foundation: {
