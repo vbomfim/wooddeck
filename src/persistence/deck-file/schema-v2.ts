@@ -411,7 +411,7 @@ function finalizeFloatingFraming(design: DeckDesign): DeckDesign {
   // stamp is byte-equivalent at layout time — pick the canonical
   // default.
   if (design.structure !== 'floating') {
-    return { ...design, floatingFraming: 'beams-and-joists' };
+    return stampFloatingFraming(design, 'beams-and-joists');
   }
 
   // Floating + missing → height-aware default. Compute BOTH
@@ -432,7 +432,7 @@ function finalizeFloatingFraming(design: DeckDesign): DeckDesign {
       floatingFraming: 'joists-on-blocks',
     });
   } catch {
-    return { ...design, floatingFraming: 'beams-and-joists' };
+    return stampFloatingFraming(design, 'beams-and-joists');
   }
   const heightMm = design.footprint.heightMm;
 
@@ -442,7 +442,51 @@ function finalizeFloatingFraming(design: DeckDesign): DeckDesign {
   // is unbuildable and the loader stamps the canonical default so
   // `computeLayout` produces the specific "too short" error.
   if (heightMm >= methodBMin && heightMm < methodAMin) {
-    return { ...design, floatingFraming: 'joists-on-blocks' };
+    return stampFloatingFraming(design, 'joists-on-blocks');
   }
-  return { ...design, floatingFraming: 'beams-and-joists' };
+  return stampFloatingFraming(design, 'beams-and-joists');
+}
+
+/**
+ * S26 FIX #7 residual — stamp `floatingFraming` at the CANONICAL
+ * property position (immediately after `structure`), NOT at the end
+ * of the object.
+ *
+ * The naive form `{ ...design, floatingFraming: X }` appends the
+ * field to the END of the key order because JS spread preserves
+ * source order and then appends explicit keys. That violates the
+ * canonical `DeckDesign` order established in FIX #7 (Opus#6):
+ * `floatingFraming` MUST land immediately after `structure` to
+ * match `model.ts`, `default-design.ts`, the `model.test` golden,
+ * and every persistence fixture.
+ *
+ * Why the order matters here specifically: `JSON.stringify` emits
+ * insertion order, so a design loaded via the stamp path and then
+ * re-saved would produce a byte-DIFFERENT `.deck` file from the
+ * same design constructed via the default factory. That silently
+ * breaks the byte-for-byte round-trip property (`model.test` AC4)
+ * and any external diff tool pointed at two `.deck` files.
+ *
+ * This helper reconstructs the design by copying every field in
+ * the canonical order (as defined by the `DeckDesign` interface in
+ * `model.ts`), inserting `floatingFraming` at the correct slot. Any
+ * future addition to `DeckDesign` MUST be added here in the same
+ * position it appears in the interface.
+ */
+function stampFloatingFraming(
+  design: DeckDesign,
+  value: 'beams-and-joists' | 'joists-on-blocks',
+): DeckDesign {
+  return {
+    id: design.id,
+    createdAt: design.createdAt,
+    footprint: design.footprint,
+    structure: design.structure,
+    floatingFraming: value,
+    foundation: design.foundation,
+    joist: design.joist,
+    beam: design.beam,
+    decking: design.decking,
+    layout: design.layout,
+  };
 }

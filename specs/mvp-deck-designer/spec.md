@@ -6,7 +6,7 @@
 **Input**: User description: "A browser-only, client-side app that lets a DIY homeowner visualize a freestanding rectangular wood deck in 3D. Enter width × length × height, joist spacing, board size, and species/material; the app auto-lays out framing (joists, beams, posts, footings) and decking, renders it in 3D with orbit/zoom/pan, and lets the user toggle individual layers to 'see underneath.' Includes IRC-style span-table warnings. Save/load locally, download `.deck` JSON, PNG screenshot. No backend, no auth."
 
 **Owner**: @vbomfim
-**Last updated**: 2026-07-05 (S26 review-gate — floating framing split)
+**Last updated**: 2026-07-05 (S26 review-gate — floating framing split + residuals)
 **Issue tracker**: (populated when the epic issue is created — see Decomposition)
 **Tickets**: Epic #1 · Stories #2–#16 (S1–S15) · #38 (S16) · **Epic 2 (Phase F): #39 (S17), #40 (S18), #41 (S19), #42 (S20), #43 (S21), #44 (S22), #45 (S23), #46 (S24), #47 (S25), #48 (S26)** — see Decomposition
 
@@ -25,7 +25,7 @@
 > **2026-07-04 amendment (Epic 2 — Foundations, Floating Model & Cut-List BOM):** MVP scope has been expanded — additively — before the umbrella `feat/mvp-deck-designer → main` PR. Three additions land under this spec:
 >
 > 1. **Foundation TYPE options** — the user picks one of three foundation systems: (a) the existing posts-on-poured-concrete-footings model, (b) precast concrete deck blocks (Oldcastle 11″×11″×7″), or (c) TuffBlock instant foundation blocks (12″×12″×4″ plastic pyramids). The existing model is preserved as the default; the two block products are added, each with its own dimensions, on-grade placement, and lumber-slot geometry.
-> 2. **Construction MODEL** — the user picks one of two structural approaches: (a) `elevated` (the existing posts→beams→joists→decking stack) or (b) `floating` (a ground-level deck sitting on a grid of foundation blocks with beams + short blocking pieces + decking, no posts). Both models coexist; the user chooses per design.
+> 2. **Construction MODEL** — the user picks one of two structural approaches: (a) `elevated` (the existing posts→beams→joists→decking stack) or (b) `floating` (a ground-level deck sitting on a grid of foundation blocks with a user-selectable framing method — beams+joists OR joists-on-blocks — and decking; no posts). Both models coexist; the user chooses per design. See the 2026-07-05 amendment (FR-033) for the per-method framing details; the pre-2026-07-05 "short blocking pieces between beams" behavior was removed and `MemberKind = 'blocking'` is now RESERVED for a future feature.
 > 3. **Cut-list-optimized BOM** — the Bill of Materials packs member cut-lengths into stock lumber lengths (a 1-D cutting-stock / first-fit-decreasing bin-pack) and reports total stock boards. Blocks are counted separately, as fixed-dimension precast products.
 >
 > The additions require a **`.deck` schema v2** (additive discriminated union for `foundation`, new `structure` enum, extended `MemberMaterialRef` for lumber-vs-block on `LayoutMember`, two new `MemberKind` values `block` + `blocking`) with a **v1→v2 migration** so old `.deck` files continue to load. New FRs FR-026 through FR-032 codify the behavior; new user stories US6 and US7 codify the value; the Decomposition tree adds ten new stories (S17–S26) shipping before the umbrella PR. This amendment supersedes S16's Open Question Q1 — "add support" is now modelable through the new foundation model. See the Decomposition and System Impact sections for the full delta.
@@ -373,18 +373,18 @@ Epic 2 (added 2026-07-04) — Foundations, Floating Model & Cut-List BOM
 │   ├── S18 story/18-deck-file-schema-v2          Persistence: .deck schema v2 + v1→v2 migration
 │   │
 │   │  Sub-phase F.2 — layout paths (parallel; both depend on S17)
-│   ├── S19 story/19-floating-layout-engine       Domain: floating-deck layout engine (block grid + beams + blocking)
+│   ├── S19 story/19-floating-layout-engine       Domain: floating-deck layout engine (block grid + rim beams + joists at spacing [Method A] / joists on blocks [Method B]; S26 review-gate rescope — blocking-between-beams removed)
 │   ├── S20 story/20-elevated-with-blocks         Domain: elevated-with-blocks adaptation (posts rest on deck-blocks)
 │   │
 │   │  Sub-phase F.3 — BOM (parallel with F.2; depends on S17)
 │   ├── S21 story/21-cutlist-bom                  Domain: cut-list BOM (bin-pack) + stock-lengths in lumber catalog
 │   │
 │   │  Sub-phase F.4 — scene + UI (depend on F.2 + F.3)
-│   ├── S22 story/22-blocks-blocking-scene        Scene: BlocksLayer + BlockingLayer + block geometries
+│   ├── S22 story/22-blocks-blocking-scene        Scene: BlocksLayer + BlockingLayer + block geometries (S26 review-gate: BlockingLayer is now dormant `() => null` — no path emits `blocking` members)
 │   ├── S23 story/23-foundation-ui                UI: StructureSelector + FoundationTypeSelector in ParameterPanel
 │   ├── S24 story/24-bom-cutlist-ui               UI: BomPanel cut-list rendering (stock-boards + expandable offcuts)
 │   ├── S25 story/25-add-support-remediation      Domain + UI: extend remediations with add-support-row (supersedes #38 Q1)
-│   └── S26 story/26-layer-toggle-blocks          UI: LayerTogglePanel adds Blocks + Blocking toggles
+│   └── S26 story/26-layer-toggle-blocks          UI: LayerTogglePanel adds Blocks toggle (S26 review-gate: initially added a Blocking toggle too; that toggle was REMOVED before merge because no layout emits `blocking` members — the `blocking` MemberKind + `BlockingLayer` remain dormant)
 ```
 
 ### Sequencing and dependencies
@@ -424,8 +424,8 @@ Epic 2 (added 2026-07-04) — Foundations, Floating Model & Cut-List BOM
   - **S23 (foundation UI)** adds a StructureSelector + FoundationTypeSelector to the ParameterPanel, wires them to `applyParameters`, and surfaces the FR-030 compat-matrix errors inline. Depends on S17, S18, S22.
   - **S24 (BomPanel cut-list rendering)** extends `BomPanel` to render per-SKU stock-board totals + an expandable per-board offcut breakdown. Depends on S21.
   - **S25 (add-support-row remediation)** extends `computeRemediations` + `applyRemediation` with the FR-032 `add-support-row` option. Also PATCHES issue #38 to note that Q1 is resolved. Depends on S17, S19, S20 (needs the new layout paths so the applied remediation produces a valid re-layout). Ships alongside or after S23 so the UI surface exists.
-  - **S26 (LayerTogglePanel + ui-store)** adds `blocks` + `blocking` visibility keys to `useUiStore.layerVisibility` and two new toggles in the LayerTogglePanel. Depends on S22.
-- **S15 (2D plan view — pre-existing, issue #16)** is NOT blocked by Epic 2 and MAY ship in parallel; however, when Epic 2 lands S15 SHOULD be extended to render the new `block` + `blocking` member kinds in the 2D plan (a small follow-up either inside S15 or as a small addendum). This spec does not add a new story for that — the S15 ticket incorporates the extension when the developer picks it up post-Epic-2.
+  - **S26 (LayerTogglePanel + ui-store)** adds a `blocks` visibility key to `useUiStore.layerVisibility` and one new toggle in the LayerTogglePanel. Depends on S22. **S26 review-gate rescope (2026-07-05):** the initial S26 scope also added a `blocking` visibility key + toggle; both were REMOVED before merge because no layout path emits `blocking` members after the floating-framing rework (FR-033). The `blocking` `MemberKind` and the `BlockingLayer` component remain in the codebase DORMANT for a cheap future re-attachment. `LayerVisibility` is now a 7-key type.
+- **S15 (2D plan view — pre-existing, issue #16)** is NOT blocked by Epic 2 and MAY ship in parallel; however, when Epic 2 lands S15 SHOULD be extended to render the new `block` member kind in the 2D plan (a small follow-up either inside S15 or as a small addendum). This spec does not add a new story for that — the S15 ticket incorporates the extension when the developer picks it up post-Epic-2. The `blocking` `MemberKind` is RESERVED post-review-gate (no layout emits it); the plan-view branch for it is kept dormant.
 - **Umbrella PR (`feat/mvp-deck-designer → main`)** opens only after S15 + S16 + S17..S26 all land. The umbrella is the MVP release.
 
 ### Decomposition rationale
@@ -500,7 +500,7 @@ Boundary-enforcement lint (`eslint-plugin-boundaries` or `dependency-cruiser`) a
 | `src/domain/model.ts` | Modified | Adds `foundation` discriminated union + `structure` enum on `DeckDesign`. Adds `MemberMaterialRef = LumberRef \| BlockRef` (tagged union) on `LayoutMember`. Adds `MemberKind = ... \| 'block' \| 'blocking'`. |
 | `src/domain/foundation-catalog.ts` | New | Fixed-dimension precast/manufactured on-grade product catalog. Two initial SKUs: `oldcastle-11x11x7`, `tuffblock-12x12x4`. |
 | `src/domain/materials-catalog.ts` | Modified | Adds `stockLengthsMm: readonly Mm[]` per SKU (e.g. `2x8: [8, 10, 12, 14, 16, 20] ft`). |
-| `src/domain/layout/floating-layout.ts` | New | The floating-model layout path — block grid + beams + blocking. |
+| `src/domain/layout/floating-layout.ts` | New | The floating-model layout path — two-method dispatch on `design.floatingFraming`: Method A (`beams-and-joists`) emits block grid + 2 rim beams + joists at `design.joist.spacingMm`; Method B (`joists-on-blocks`) emits block grid + joists directly (no beams). The `blocking` `MemberKind` is reserved/dormant — no path emits `blocking` members post-S26 review-gate. |
 | `src/domain/layout/layout-engine.ts` | Modified | `computeLayout` dispatches on `design.structure` to the elevated (existing) or floating (S19) path. Compat-matrix validation added to `validateDesign`. |
 | `src/domain/layout/post-layout.ts` | Modified | When `foundation.type === 'deck-blocks'` under elevated, footings are replaced by blocks (posts still present). `foundation.type = 'tuffblocks'` under elevated stays rejected by the FR-030 compat matrix. |
 | `src/domain/bom/pack-cut-list.ts` | New | Pure `packCutList({cuts, stockLengthsMm, kerfMm})` — first-fit-decreasing bin-pack. |

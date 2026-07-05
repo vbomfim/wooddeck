@@ -848,4 +848,95 @@ describe('deserialize — S26 FIX #3: pre-S26 floating decks default to Method B
       expect.objectContaining({ code: 'schema-validation-failed' }),
     );
   });
+
+  // S26 FIX #7 residual (property-order slip in `finalizeFloatingFraming`).
+  //
+  // Regression: the pre-fix helper stamped the field via
+  // `{ ...design, floatingFraming: X }`, which appends `floatingFraming`
+  // AFTER `layout` in JS spread key order — violating the canonical
+  // `DeckDesign` property order established in FIX #7 (Opus#6):
+  // `floatingFraming` MUST land immediately after `structure`, matching
+  // `model.ts`, `default-design.ts`, the `model.test` golden, and every
+  // persistence fixture.
+  //
+  // Why key order matters even for read-only load: `JSON.stringify` emits
+  // insertion order, so a design loaded via the stamp path and re-serialized
+  // would produce a byte-DIFFERENT `.deck` file from the same design
+  // constructed via the default factory. That silently breaks the byte-for-
+  // byte round-trip property (`model.test` AC4) and any external diff tool
+  // pointed at two `.deck` files.
+
+  it('stamps floatingFraming in the CANONICAL property order (immediately after `structure`)', () => {
+    // Loading a pre-S26 floating file that hits the height-corridor
+    // stamps Method B. The resulting design's key order must place
+    // `floatingFraming` right after `structure`, NOT at the end.
+    const rogue = makeV2EnvelopeMissingFraming({
+      structure: 'floating',
+      foundation: {
+        type: 'tuffblocks',
+        product: { productId: 'tuffblock-12x12x4' },
+      },
+      footprint: {
+        widthMm: 4 * 304.8,
+        lengthMm: 4 * 304.8,
+        heightMm: 209, // → Method B stamp path
+      },
+    });
+    const { design } = deserialize(rogue);
+    const keys = Object.keys(design);
+    const structureIdx = keys.indexOf('structure');
+    const framingIdx = keys.indexOf('floatingFraming');
+    // Field must be present AND lie exactly one slot after `structure`.
+    expect(structureIdx).toBeGreaterThanOrEqual(0);
+    expect(framingIdx).toBe(structureIdx + 1);
+    // And it must NOT be the last key (which is where a naive
+    // `{ ...design, floatingFraming: X }` spread would put it).
+    expect(framingIdx).not.toBe(keys.length - 1);
+  });
+
+  it('elevated stamp path also produces canonical property order', () => {
+    // Same guard on the OTHER stamp path — elevated + missing field
+    // hits `if (design.structure !== 'floating')` and returns early.
+    const rogue = makeV2EnvelopeMissingFraming({}); // elevated GOLDEN default
+    const { design } = deserialize(rogue);
+    const keys = Object.keys(design);
+    expect(keys.indexOf('floatingFraming')).toBe(
+      keys.indexOf('structure') + 1,
+    );
+  });
+
+  it('height-comfortable floating stamp path also produces canonical property order', () => {
+    // The third stamp path (`heightMm ≥ methodAMin` → Method A default).
+    const rogue = makeV2EnvelopeMissingFraming({
+      structure: 'floating',
+      foundation: {
+        type: 'tuffblocks',
+        product: { productId: 'tuffblock-12x12x4' },
+      },
+      footprint: {
+        widthMm: 4 * 304.8,
+        lengthMm: 4 * 304.8,
+        heightMm: 500, // → Method A stamp path
+      },
+    });
+    const { design } = deserialize(rogue);
+    const keys = Object.keys(design);
+    expect(keys.indexOf('floatingFraming')).toBe(
+      keys.indexOf('structure') + 1,
+    );
+  });
+
+  it('stamped design JSON-serializes to a canonical key sequence (byte-order regression)', () => {
+    // Belt-and-suspenders: the resulting design, when re-serialized
+    // via JSON.stringify, produces `structure` immediately followed
+    // by `floatingFraming` in the byte stream (validates the load-
+    // then-re-save round-trip). Uses the elevated stamp path for a
+    // simple pin.
+    const rogue = makeV2EnvelopeMissingFraming({});
+    const { design } = deserialize(rogue);
+    const json = JSON.stringify(design);
+    // Regex requires `"structure":"..."` to appear IMMEDIATELY before
+    // `,"floatingFraming":"..."` with no intervening properties.
+    expect(json).toMatch(/"structure":"[^"]+","floatingFraming":"[^"]+"/);
+  });
 });
