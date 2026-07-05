@@ -1286,18 +1286,32 @@ function produceAddSupportRow(
   }
 
   // S26 FIX #4 (review-gate, Opus-HIGH + QA-GAP-3) — Method A's
-  // block grid rows are PINNED to the two rim beams (see
+  // block grid rows are PINNED to the beam rows (see
   // `computeMethodA` in `floating-layout.ts`); `blockRowsHint` is
   // a no-op for +z in Method A. Adding a row of blocks does NOT
   // shorten the rim beam's +x span (beams run across the deck
   // WIDTH, not length). Return a DISABLED option that surfaces
   // the REAL alternative — the DIY user must learn what will
   // actually work (per FR-032's "MUST surface the alternative"
-  // clause). Only over-span-beam warnings emit this in Method A
-  // — a joist warning under Method A is not modeled by
-  // add-support-row (framing swap or joist-spacing reduction is
-  // the correct path).
+  // clause).
+  //
+  // Issue #75 (FR-F) — Method A now auto-adds INTERMEDIATE beam
+  // rows (up to `MAX_METHOD_A_BEAM_ROWS × cols` block-count cap)
+  // to keep joists span-safe. If the joist STILL warns after all
+  // that, the resolver has already exhausted the row budget — the
+  // remaining remediation is model-swap, not another row. Emit a
+  // DISABLED option so `useDesignStatus().lastError` surfaces the
+  // real alternative (no "lying UI").
   if (design.floatingFraming === 'beams-and-joists') {
+    if (warning.kind === 'over-span-joist') {
+      return makeDisabledAddSupportRowNoRowCount({
+        warning,
+        disabledReason:
+          "The layout already added the maximum interior beam rows the " +
+          "block-count cap allows. Reduce deck length, use a heavier joist, " +
+          "or switch to 'Joists on blocks' framing.",
+      });
+    }
     if (warning.kind !== 'over-span-beam') return null;
     return makeDisabledAddSupportRowNoRowCount({
       warning,

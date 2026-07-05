@@ -1400,6 +1400,14 @@ describe('applyParameters — beamConnection (S27)', () => {
     // materials). The floating validator will enforce the
     // beam-depth invariant — the FIXTURE's beam is 2×10 and joist
     // is 2×10 (equal), so the flush combo is legal.
+    // NOTE (issue #75): also shrink the footprint's LENGTH so
+    // Method A does NOT auto-add interior beam rows — flush +
+    // interior is now rejected by FR-E (see
+    // `floating-method-a-intermediate-beams.test.ts`). This test's
+    // intent is that `beamConnection` PERSISTS across structure +
+    // framing switches; using a small-enough deck keeps
+    // `interiorRows === 0` so FR-E doesn't fire and the beam-
+    // connection persistence invariant is what's under test.
     const toFloating = applyParameters(
       flushed.design,
       {
@@ -1409,6 +1417,7 @@ describe('applyParameters — beamConnection (S27)', () => {
           type: 'deck-blocks',
           product: { productId: 'oldcastle-11x11x7' },
         },
+        footprint: { lengthMm: 8 * 304.8 }, // 8 ft — well below any PT/Cedar 2×10 joist allowable
       },
       table,
     );

@@ -107,11 +107,16 @@ describe('<FloatingFramingSelector /> — dispatch', () => {
     });
     render(<FloatingFramingSelector />);
     const user = userEvent.setup();
-    // Capture initial layout member counts (Method A has beams).
+    // Capture initial layout member counts (Method A has beams:
+    // 2 rims minimum, plus any span-safe intermediate rows that
+    // issue #75 auto-adds — the exact count depends on the deck's
+    // default footprint + joist material, so we just assert
+    // "≥ 2" to keep this test focused on the framing-switch
+    // effect rather than pinning the beam-row count).
     const beforeBeams = useDesignStore
       .getState()
       .bundle.layout.members.filter((m) => m.kind === 'beam').length;
-    expect(beforeBeams).toBe(2); // rim beams
+    expect(beforeBeams).toBeGreaterThanOrEqual(2); // ≥ 2 rim beams (issue #75)
 
     await user.click(
       screen.getByRole('radio', { name: /joists on blocks/i }),

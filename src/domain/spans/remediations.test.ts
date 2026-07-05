@@ -1397,11 +1397,15 @@ describe('computeRemediations — S25 add-support-row (ticket #47)', () => {
     expect(idxAdd).toBeLessThan(idxReduce);
   });
 
-  it('over-span JOIST warning under Method A → NO add-support-row (row-densification does not fix a beam-carried joist span)', () => {
-    // S26 FIX #4 (review-gate) — under Method A, joists rest on
-    // rim beams (not on blocks); adding a block row does not
-    // change the joist support. `produceAddSupportRow` returns
-    // null for joist warnings under Method A.
+  it('over-span JOIST warning under Method A → DISABLED add-support-row with cap-reached reason (issue #75 FR-F)', () => {
+    // Issue #75 (FR-F) — Method A NOW auto-adds INTERMEDIATE
+    // beam rows to keep joists span-safe. If the joist STILL
+    // warns after that, the row budget is exhausted — the
+    // remaining remediation is model-swap. Emit a DISABLED
+    // add-support-row option so the UI can surface the real
+    // alternative (no "lying UI"). Message must name the three
+    // remediations (reduce length / heavier joist / joists on
+    // blocks).
     const design = makeFloating({
       widthFt: 12,
       lengthFt: 12,
@@ -1410,9 +1414,18 @@ describe('computeRemediations — S25 add-support-row (ticket #47)', () => {
     });
     const joistWarning = makeJoistWarning();
     const options = computeRemediations(joistWarning, design, IRC, RECOMPUTE);
-    for (const opt of options) {
-      expect(opt.kind).not.toBe('add-support-row');
-    }
+    const addRow = options.find((o) => o.kind === 'add-support-row');
+    expect(addRow).toBeDefined();
+    if (!addRow) return;
+    expect(addRow.disabled).toBe(true);
+    expect(addRow.disabledReason).toBeDefined();
+    const reason = String(addRow.disabledReason);
+    // Cap-reached remediation MUST name all three fixes so the
+    // user has actionable options (mirrors the FR-E validator
+    // message).
+    expect(reason).toMatch(/reduce deck length/i);
+    expect(reason).toMatch(/heavier joist/i);
+    expect(reason).toMatch(/joists on blocks/i);
   });
 
   // -------------------------------------------------------------------

@@ -93,7 +93,7 @@ import {
 import { FOOTING_WIDTH_MM } from '../y-stack';
 
 import { computeAxisCenters, blockCountForAxis, clampBlockSpacingMm, computeBlockGrid, MIN_BLOCK_SPACING_MM } from './block-grid';
-import { computeFloatingRimBeams } from './floating-beam-layout';
+import { computeFloatingBeams } from './floating-beam-layout';
 import { layoutFloatingDecking } from './floating-decking';
 import { layoutFloatingJoists } from './floating-joist-layout';
 import { computeMinFloatingHeightMm, computeYStackFloating } from './y-stack-floating';
@@ -238,6 +238,184 @@ export const DEFAULT_METHOD_B_BLOCK_SPACING_MM: Mm = 1220;
  * `floating-flying-joists.test.ts` re-check the invariant.
  */
 export const MAX_METHOD_B_BLOCK_COUNT = 400;
+
+// ==========================================================
+// feat/method-a-intermediate-beams (issue #75) constants + resolver
+// ==========================================================
+
+/**
+ * issue #75 — Method A hard cap on beam-row count.
+ *
+ * ## Value rationale (20)
+ *
+ * A 40 ft deck at 24″ beam pitch = 20 rows is already implausibly
+ * dense for a DIY residential deck. A 100 ft deck at 20 rows =
+ * 5 ft pitch — DIY-generous. The cap is a defense-in-depth guard
+ * against pathological span-safe derivations (e.g. a synthetic
+ * span-table with a joist allowable near `MIN_BLOCK_SPACING_MM`
+ * that would otherwise request 100+ rows). Combined with the
+ * `MIN_BEAM_ROW_GAP_MM` gap floor + the block-count postcondition
+ * in `clampMethodABeamRows`, worst-case total blocks stays
+ * comfortably under the r3f instance budget.
+ *
+ * Autonomous decision — reversible by editing this constant.
+ */
+export const MAX_METHOD_A_BEAM_ROWS = 20;
+
+/**
+ * issue #75 — Practical FLOOR on the +z gap between adjacent
+ * Method A beam rows.
+ *
+ * ## Value rationale (1000 mm ≈ 3.3 ft)
+ *
+ * Below this gap a beam row is denser than the joist bays under
+ * it (typical DIY joist spacing is 305–610 mm; a beam row every
+ * ~3.3 ft along the joist is already tighter than any span-table
+ * requires for 2× lumber). Rows tighter than the floor add cost
+ * (more beams + more blocks + more BOM) without a physics benefit.
+ *
+ * Enforced as `rowsMaxByGap = max(2, floor(lengthMm / MIN_BEAM_ROW_GAP_MM) + 1)`
+ * in `clampMethodABeamRows`. Autonomous decision — reversible by
+ * editing this constant.
+ */
+export const MIN_BEAM_ROW_GAP_MM: Mm = 1000;
+
+/**
+ * issue #75 — Method A hard cap on total block count
+ * (`totalRows × cols`).
+ *
+ * ## Value rationale (200)
+ *
+ * Mirrors the intent of `MAX_METHOD_B_BLOCK_COUNT = 400` but
+ * scaled to Method A's realistic footprint × row count product:
+ * a 40 ft × 40 ft deck with 5 rows × 8 cols = 40 blocks (under
+ * the cap); the theoretical worst case (`MAX_METHOD_A_BEAM_ROWS ×
+ * ceil(30480 / BLOCK_COL_MAX_SPACING_MM) + 1`) = 20 × 14 = 280
+ * is bounded but conservative — the 200 cap forces genuinely
+ * pathological inputs to fail LOUD via the postcondition throw in
+ * `clampMethodABeamRows` rather than silently instantiate ~300
+ * meshes. Autonomous decision — reversible.
+ */
+export const MAX_METHOD_A_BLOCK_COUNT = 200;
+
+/**
+ * issue #75 — Resolve the Method A total beam-row count and the
+ * derived interior-row count from the deck length and (optionally)
+ * a threaded-through `SpanTable`.
+ *
+ * ## Contract (mirrors `resolveMethodBGrid`'s span-safe branch)
+ *
+ * Two-branch derivation:
+ *
+ *   1. **SpanTable + material + spacing present AND `allowableMm > 0`.**
+ *      `totalRows = max(2, ceil(lengthMm / allowableMm) + 1)` —
+ *      the minimum row count that keeps every adjacent beam-row
+ *      gap ≤ the joist's IRC allowable. Rounded up to guarantee
+ *      the row pitch is safe (never fenceposts short).
+ *
+ *   2. **Fallback (any of table / material / spacing absent, OR
+ *      `allowableMm === 0`).** Returns `totalRows = 2` —
+ *      BYTE-IDENTICAL to the pre-#75 behavior so every existing
+ *      Method A golden fixture and every callsite that does NOT
+ *      thread the `SpanTable` through stays stable.
+ *
+ * The returned `totalRows` is CLAMPED via `clampMethodABeamRows`
+ * against the DoS + gap ceilings. `interiorRows = totalRows − 2`
+ * (always ≥ 0).
+ *
+ * Pure — same input yields byte-equal output. No side effects.
+ */
+export function resolveMethodABeamRows(
+  lengthMm: Mm,
+  spanTable?: SpanTable,
+  joistMaterial?: MaterialRef,
+  joistSpacingMm?: Mm,
+): { totalRows: number; interiorRows: number } {
+  let rowsReq = 2;
+  if (
+    spanTable !== undefined &&
+    joistMaterial !== undefined &&
+    joistSpacingMm !== undefined
+  ) {
+    const allowableMm = spanTable.lookupJoistMaxSpan(
+      joistMaterial,
+      joistSpacingMm,
+    );
+    if (allowableMm > 0) {
+      // Row pitch = lengthMm / (totalRows − 1) ≤ allowableMm
+      //   ⇒ totalRows ≥ lengthMm / allowableMm + 1.
+      // The `max(2, …)` floor covers the tiny-deck case where the
+      // pitch is already safe with 2 rims.
+      rowsReq = Math.max(2, Math.ceil(lengthMm / allowableMm) + 1);
+    }
+  }
+  const totalRows = clampMethodABeamRows(rowsReq, lengthMm, 0);
+  return { totalRows, interiorRows: totalRows - 2 };
+}
+
+/**
+ * issue #75 — Clamp a requested Method A beam-row count into the
+ * physically-realizable range.
+ *
+ * ## Ceilings (mirror `clampMethodBRows`)
+ *
+ *   - `rowsMaxByCap = MAX_METHOD_A_BEAM_ROWS` — hard DoS ceiling
+ *     defending against pathological span-safe derivations that
+ *     could otherwise request an implausibly dense grid.
+ *   - `rowsMaxByGap = max(2, floor(lengthMm / MIN_BEAM_ROW_GAP_MM) + 1)`
+ *     — practical floor on the +z gap between adjacent beam rows
+ *     (denser than a joist bay is wasteful).
+ *
+ * The `widthMm` argument is accepted for API symmetry with the
+ * postcondition below (which uses it via the shared block-count
+ * cap derivation). Passing `0` disables the block-count
+ * postcondition (used by `resolveMethodABeamRows` when the caller
+ * has not yet derived the column count — the actual layout call
+ * downstream will still hit the postcondition through the block
+ * grid's `validateInput`).
+ *
+ * ## Postcondition (LOUD failure)
+ *
+ * When `rows > 2`, `cols × rows ≤ MAX_METHOD_A_BLOCK_COUNT` MUST
+ * hold (`cols` is derived from the same `BLOCK_COL_MAX_SPACING_MM`
+ * that `computeMethodA` uses). The `rows === 2` degenerate corner
+ * is exempt — perimeter-two supersedes. A future arithmetic
+ * regression that violates this fails LOUD via `LayoutError`.
+ */
+export function clampMethodABeamRows(
+  rowsReq: number,
+  lengthMm: Mm,
+  widthMm: Mm,
+): number {
+  const rowsMaxByCap = MAX_METHOD_A_BEAM_ROWS;
+  const rowsMaxByGap = Math.max(
+    2,
+    Math.floor(lengthMm / MIN_BEAM_ROW_GAP_MM) + 1,
+  );
+  const rows = Math.max(
+    2,
+    Math.min(Math.floor(rowsReq), rowsMaxByCap, rowsMaxByGap),
+  );
+
+  // Postcondition — only meaningful when the caller supplied a
+  // positive `widthMm` (otherwise columns can't be derived here
+  // and the downstream block-grid `validateInput` catches the
+  // pathological case via `explicitRowZCenters` bounds).
+  if (widthMm > 0 && rows > 2) {
+    const cols = Math.ceil(widthMm / BLOCK_COL_MAX_SPACING_MM) + 1;
+    /* c8 ignore next 8 */
+    if (cols * rows > MAX_METHOD_A_BLOCK_COUNT) {
+      throw new LayoutError(
+        `Internal invariant violated: Method A block count ${cols}×${rows} = ` +
+          `${cols * rows} exceeds MAX_METHOD_A_BLOCK_COUNT ` +
+          `(${MAX_METHOD_A_BLOCK_COUNT}) while rows > 2 (perimeter-two ` +
+          `floor was not the reason for the overshoot).`,
+      );
+    }
+  }
+
+  return rows;
+}
 
 /**
  * feat/block-count-per-joist — schema-legal bounds on
@@ -515,7 +693,7 @@ export function computeFloatingLayout(
   design: DeckDesign,
   options?: ComputeFloatingLayoutOptions,
 ): Layout {
-  validateFloatingDesign(design);
+  validateFloatingDesign(design, options?.spanTable);
   const now = options?.now ?? defaultNow;
 
   try {
@@ -538,7 +716,7 @@ export function computeFloatingLayout(
     let members: LayoutMember[];
     switch (design.floatingFraming) {
       case 'beams-and-joists':
-        members = computeMethodA(design);
+        members = computeMethodA(design, options?.spanTable);
         break;
       case 'joists-on-blocks':
         members = computeMethodB(design, options?.spanTable);
@@ -568,23 +746,41 @@ export function computeFloatingLayout(
 /**
  * Method A layout — beams + joists on a supporting block grid.
  *
- * ## Block grid — Method A
+ * ## Block grid — Method A (**amended for issue #75**)
  *
- *   - **Rows (along +z):** exactly 2, at the rim-beam z-centers
- *     (`±(lengthMm/2 − FOOTING_WIDTH_MM/2)`). Passed as
- *     `explicitRowZCenters` so `computeBlockGrid` bypasses the
- *     derived row-count formula and places blocks directly under
- *     the two rim beams.
+ *   - **Rows (along +z):** N ≥ 2 rows spread EVENLY between the
+ *     two rim insets. Rows are placed at
+ *     `z_k = nearZ + k × (farZ − nearZ) / (totalRows − 1)` for
+ *     `k = 0..totalRows-1`, where `totalRows` comes from
+ *     {@link resolveMethodABeamRows} — 2 when no `SpanTable` is
+ *     threaded through or the joist material is not in the catalog
+ *     (byte-identical to pre-#75), otherwise the smallest N such
+ *     that the row pitch is ≤ the joist's IRC allowable. Every
+ *     beam row gets a block row directly under it
+ *     (`explicitRowZCenters = [nearZ, ...interiorZs, farZ]`).
  *   - **Columns (along +x):** derived from
  *     `ceil(widthMm / BLOCK_COL_MAX_SPACING_MM) + 1` (subject to
  *     `blockColsHint`) — bounds the block-to-block +x gap to keep
- *     each rim beam well-supported.
+ *     each beam row well-supported. Column derivation is UNCHANGED
+ *     by #75 — the column count is a property of each beam row,
+ *     not of the row count.
  *
  * The `explicitRowZCenters` override does not force the column
  * count — a user's `blockColsHint` still applies exactly as it did
  * pre-S26 (the S25 UI seam is unchanged).
+ *
+ * ## FR-E — flush + intermediate rejection
+ *
+ * When `beamConnection === 'flush' && interiorRows > 0`
+ * `validateFloatingDesign` throws BEFORE dispatch. The MVP does
+ * NOT support hanging joists off multiple interior beams (each
+ * joist would need to be split into per-bay members); the
+ * remediation-oriented error surfaces via `useDesignStatus().lastError`.
  */
-function computeMethodA(design: DeckDesign): LayoutMember[] {
+function computeMethodA(
+  design: DeckDesign,
+  spanTable?: SpanTable,
+): LayoutMember[] {
   if (design.foundation.type === 'posts-on-footings') {
     // Narrowing shim — unreachable in practice (validated above).
     throw new LayoutError('unreachable: posts-on-footings in Method A');
@@ -597,6 +793,39 @@ function computeMethodA(design: DeckDesign): LayoutMember[] {
   const nearZ = -halfLengthMm + beamInset;
   const farZ = +halfLengthMm - beamInset;
 
+  // Issue #75 — resolve N ≥ 2 beam rows. Fallback (no table /
+  // uncatalogued material) yields `totalRows = 2` (byte-identical
+  // to pre-#75). Extract the postcondition-friendly clamp on the
+  // widthMm side so the block-count invariant fails LOUD if a
+  // future span-table addition would explode the grid.
+  const { totalRows } = resolveMethodABeamRows(
+    design.footprint.lengthMm,
+    spanTable,
+    design.joist.material,
+    design.joist.spacingMm,
+  );
+  // Re-clamp with the concrete widthMm so the block-count
+  // postcondition in `clampMethodABeamRows` gets a chance to fire
+  // (the `resolveMethodABeamRows` call above passes `widthMm = 0`
+  // because the caller has not yet derived the column count).
+  const totalRowsClamped = clampMethodABeamRows(
+    totalRows,
+    design.footprint.lengthMm,
+    design.footprint.widthMm,
+  );
+  // Row z-centers: outer rows at ±(lengthMm/2 - beamInset), interior
+  // rows evenly interpolated. For N=2 this is `[nearZ, farZ]`
+  // — byte-identical to the pre-#75 layout.
+  const rowZCenters: number[] = [];
+  if (totalRowsClamped === 2) {
+    rowZCenters.push(nearZ, farZ);
+  } else {
+    const step = (farZ - nearZ) / (totalRowsClamped - 1);
+    for (let k = 0; k < totalRowsClamped; k++) {
+      rowZCenters.push(nearZ + k * step);
+    }
+  }
+
   const blocks = computeBlockGrid({
     footprintMm: {
       widthMm: design.footprint.widthMm,
@@ -608,22 +837,26 @@ function computeMethodA(design: DeckDesign): LayoutMember[] {
     // supplied, but the validator still requires it > 0. Pass the
     // same block-col cap defensively.
     joistSpanMaxMm: BLOCK_COL_MAX_SPACING_MM,
-    explicitRowZCenters: [nearZ, farZ],
+    explicitRowZCenters: rowZCenters,
   });
 
-  const beams = computeFloatingRimBeams(design);
+  const beams = computeFloatingBeams(design, { numRows: totalRowsClamped });
   const joists = layoutFloatingJoists(design);
   const boards = layoutFloatingDecking(design);
   // Issue #72 — solid blocking between joists per IRC R502.7.1.
   // Same shared helper the elevated pipeline uses; the floating
   // y-anchor comes from `computeYStackFloating.joistCenterY`
   // (co-planar with joists on the beam-top plane for Method A).
+  // Blocking sits in the joist plane; intermediate beams sit in the
+  // beam plane (a joist depth below) — different y-planes, so #75's
+  // interior beams cannot collide with blocking (FR-036 interop —
+  // §17 Q5 in issue #75).
   const blocking = computeFloatingBlockingFromDesign(design);
 
   // Top-down order (mirrors the y-stack): boards on top, blocks
   // on bottom. Blocking sits at the joist plane (interleaved with
-  // joists). AC7's determinism assertion is deep-equal on the
-  // array, so keeping the order stable here is important.
+  // joists). The determinism assertion is deep-equal on the
+  // array, so keeping the order stable here is important (AC11).
   return [...boards, ...joists, ...blocking, ...beams, ...blocks];
 }
 
@@ -868,7 +1101,10 @@ function computeFloatingBoundsFromMembers(
  *
  * See Developer Guardian Rules → Pre-compliance → Trust boundaries.
  */
-function validateFloatingDesign(design: DeckDesign): void {
+function validateFloatingDesign(
+  design: DeckDesign,
+  spanTable?: SpanTable,
+): void {
   if (design.structure !== 'floating') {
     throw new LayoutError(
       `computeFloatingLayout: expected design.structure === 'floating', ` +
@@ -943,6 +1179,38 @@ function validateFloatingDesign(design: DeckDesign): void {
   // remediation instead of the generic height message.
   if (design.floatingFraming === 'beams-and-joists') {
     validateFlushBeamDepth(design);
+    // Issue #75 (FR-E) — flush + intermediate beam rows are
+    // REJECTED at validation. Method A #75 places intermediate
+    // beam rows between the two rims to keep joists span-safe;
+    // FLUSH framing hangs joists off the beam face via hangers,
+    // so a joist can only span between TWO beam faces (its two
+    // ends). Interior beams under flush would require SEGMENTED
+    // joists (per-bay members) — a large geometric + BOM change
+    // deferred to a follow-up story (§16 in issue #75). The
+    // rejection is surfaced via `useDesignStatus().lastError`
+    // — three actionable remediations named below.
+    if (design.beamConnection === 'flush') {
+      const { interiorRows } = resolveMethodABeamRows(
+        design.footprint.lengthMm,
+        spanTable,
+        design.joist.material,
+        design.joist.spacingMm,
+      );
+      if (interiorRows > 0) {
+        throw new LayoutError(
+          `Flush beam connection combined with intermediate beam ` +
+            `rows (${interiorRows} interior row${interiorRows === 1 ? '' : 's'}) is not ` +
+            `supported in the MVP. Method A auto-adds interior beam rows to keep ` +
+            `joists span-safe on this deck length, but flush framing hangs each ` +
+            `joist off two beam faces — segmenting joists across interior beams ` +
+            `is deferred to a follow-up story (see issue #75). Choose one of the ` +
+            `three remediations: switch to "drop" beam connection (joists rest on ` +
+            `top and run continuously over every beam row), reduce deck length ` +
+            `until only the two rim beams are required, or switch to the "joists ` +
+            `on blocks" framing method (no beam layer at all).`,
+        );
+      }
+    }
   }
 
   let minHeightMm: Mm;

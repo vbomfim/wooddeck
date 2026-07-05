@@ -44,6 +44,7 @@ import type {
   MemberKind,
 } from '../model';
 import { computeLayout } from '../layout/layout-engine';
+import { IrcSpanTable } from '../spans/irc-2018-tables';
 
 import { deriveBom, type BomResult } from './derive-bom';
 
@@ -809,5 +810,114 @@ describe('deriveBom — issue #72 blocking wiring (real computeLayout)', () => {
     // per-length lower bound is already tight; this asserts the
     // aggregate too.
     expect(allCuts.length).toBeGreaterThanOrEqual(blockingMembers.length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #75 — Method A intermediate-beams count-parity (AC12 / FR-D)
+// ---------------------------------------------------------------------------
+//
+// Method A now auto-adds INTERMEDIATE beam rows so joists stay
+// span-safe (see `resolveMethodABeamRows` + `computeFloatingBeams`
+// in `src/domain/layout/floating/`). Each intermediate beam has
+// the SAME material + SAME length as the two rim beams, so
+// `deriveBom` should fold ALL beams (rim + intermediate) into the
+// SAME lumber SKU pack — one section, N cuts.
+//
+// This is a per-length count-parity assertion, per PR #73's
+// pattern: if any intermediate beam were silently dropped from
+// the BOM, `actual < expected` and the test fails LOUD. Pre-#75
+// this test would have been meaningless (2 beams only, no
+// intermediates); post-#75 it guards against a regression where
+// e.g. the barrel forgets to re-export `computeFloatingBeams` or
+// the FCP + BOM aggregator regresses to `beam.filter(rim)`.
+// -------------------------------------------------------------
+
+describe('deriveBom — issue #75 Method A intermediate-beam count parity', () => {
+  it('every intermediate beam appears as a cut in the beam SKU pack — no silent drops (AC12)', () => {
+    // 40 ft (Method A) × PT 2×6 @ 406 mm o.c. → resolver adds
+    // several intermediate beam rows. We use PT 2×6 (short IRC
+    // allowable) so the SpanTable path multiplies rows the most
+    // — the test observes the "N beams" case rather than the
+    // "2 rims" fallback.
+    // Compose a floating Method A design directly (avoid deep
+    // fixture imports).
+    const PT_2x6 = {
+      kind: 'lumber' as const,
+      nominal: '2x6' as const,
+      species: 'PT' as const,
+      grade: 'No2' as const,
+    };
+    const design: DeckDesign = {
+      id: '00000000-0000-4000-8000-000000000075',
+      createdAt: '2026-07-05T00:00:00.000Z',
+      footprint: {
+        widthMm: ftMm(12),
+        lengthMm: ftMm(40),
+        heightMm: 500, // above the beam+joist+decking Y stack min
+      },
+      structure: 'floating',
+      floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
+      foundation: {
+        type: 'deck-blocks',
+        product: { productId: 'oldcastle-11x11x7' },
+      },
+      joist: { material: PT_2x6, spacingMm: 406 },
+      beam: { material: PT_2x6 },
+      decking: {
+        material: PT_2x6,
+        orientation: 'parallel-to-width',
+      },
+      layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+    };
+    // MUST thread the IRC table through — otherwise
+    // `resolveMethodABeamRows` falls back to `totalRows = 2`
+    // (documented byte-identity fallback) and this test's
+    // precondition ("beams.length > 2") would fail as a false
+    // negative.
+    const layout = computeLayout(design, { spanTable: new IrcSpanTable() });
+    const beams = layout.members.filter((m) => m.kind === 'beam');
+    // Precondition: #75 kicked in — resolver added intermediate
+    // rows on top of the 2 rims. This is what makes the count-
+    // parity assertion meaningful; without it, the check
+    // degenerates to the pre-#75 shape.
+    expect(beams.length).toBeGreaterThan(2);
+    const beamMat = beams[0]!.material as LumberMemberMaterial;
+    // All beams must share the SAME SKU (same nominal + species
+    // + grade) — the BOM aggregator will fold them into one
+    // lumber section.
+    for (const b of beams) {
+      const mat = b.material as LumberMemberMaterial;
+      expect(mat.nominal).toBe(beamMat.nominal);
+      expect(mat.species).toBe(beamMat.species);
+      expect(mat.grade).toBe(beamMat.grade);
+    }
+    const result = deriveBom(layout, {});
+    const section = result.lumber.find(
+      (s) =>
+        s.nominal === beamMat.nominal &&
+        s.species === beamMat.species &&
+        s.grade === beamMat.grade,
+    );
+    expect(section).toBeDefined();
+    const allCuts = section!.pack.stockBoards.flatMap((b) =>
+      b.cuts.map((c) => c.lengthMm),
+    );
+    // Beam length = `size.x` (per-kind rule at derive-bom.ts).
+    const beamLengthsSorted = [...beams.map((b) => b.size.x)].sort(
+      (a, b) => a - b,
+    );
+    for (const len of new Set(beamLengthsSorted)) {
+      const expected = beamLengthsSorted.filter(
+        (v) => Math.abs(v - len) < 0.01,
+      ).length;
+      const actual = allCuts.filter((v) => Math.abs(v - len) < 0.01).length;
+      // Pack may also carry cuts of this length from joists /
+      // boards / blocking that share the SKU (all lengths in mm
+      // can collide), so demand `actual >= expected`. A silent
+      // beam drop would push `actual` BELOW `expected`.
+      expect(actual).toBeGreaterThanOrEqual(expected);
+    }
   });
 });
