@@ -79,7 +79,9 @@
  * highlights a member with a red outline material) can reuse the
  * SAME position / scale / rotation / geometry pipeline without
  * duplicating the component. When `material` is omitted, the
- * per-species shared material is looked up via `materialForMember`.
+ * per-KIND shared material is looked up via `materialForMember`
+ * (which reads `member.kind` post `fix/part-type-colors`; see
+ * `./materials.ts` for the palette rationale).
  *
  * Current call sites (the five kind layers via `<KindLayer>`) do
  * NOT pass `material` — behaviour is unchanged.
@@ -97,7 +99,7 @@ import { materialForMember } from './materials';
  * every render input — the layer above is responsible for filtering
  * to the right `kind`.
  *
- * `material` is optional — omit for the per-species shared material
+ * `material` is optional — omit for the per-KIND shared material
  * (the common case), or pass an override for a decorator use case
  * such as S11's WarningOverlay.
  */
@@ -107,7 +109,7 @@ export interface BoxMemberProps {
 }
 
 export function BoxMember({ member, material }: BoxMemberProps): JSX.Element {
-  // Look up the species material ONLY when the caller did not
+  // Look up the kind material ONLY when the caller did not
   // provide an override. The lookup is a Map.get + reference
   // return — no allocation.
   const effectiveMaterial = material ?? materialForMember(member);

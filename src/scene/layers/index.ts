@@ -20,11 +20,15 @@
  *                                         every layer group's userData
  *                                         (S12/S14 can grep-find a
  *                                         group by its logical id)
- *   function    materialForSpecies       — shared per-species material
+ *   function    materialForKind          — shared per-kind material
+ *                                          (replaces materialForSpecies)
  *   function    materialForMember        — helper for a LayoutMember
- *   function    materialForBlock         — S22 block-material picker
- *   constant    MATERIAL_COLORS          — the AC6 palette (S11 uses)
- *   constant    MATERIAL_BLOCK_COLORS    — S22 block palette
+ *                                          (routes lumber members by kind)
+ *   function    materialForBlock         — block-material picker for
+ *                                          BlocksLayer (routes through
+ *                                          the same kind map)
+ *   constant    MATERIAL_KIND_COLORS     — kind → hex palette (replaces
+ *                                          MATERIAL_COLORS + MATERIAL_BLOCK_COLORS)
  *   type        BoxMemberProps           — reusable rectangular-member props
  *
  * ## Excluded surface
@@ -33,11 +37,11 @@
  *     overlay (which highlights the SAME rectangular members with
  *     a red outline) can reuse the exact position / scale / rotation
  *     translation without re-implementing.
- *   - `disposeSharedMaterials` / `disposeSharedBlockMaterials` /
- *     `disposeSharedGeometries` are test/HMR-only — imported from
- *     `./shared/materials` and `./shared/geometries` directly in
- *     `.test.ts` files, kept out of the barrel so a production
- *     consumer reaching for them is a red flag.
+ *   - `disposeSharedMaterials` / `disposeSharedGeometries` are
+ *     test/HMR-only — imported from `./shared/materials` and
+ *     `./shared/geometries` directly in `.test.ts` files, kept out
+ *     of the barrel so a production consumer reaching for them is a
+ *     red flag.
  *   - `KindLayer` is an internal helper for the kind-scoped
  *     layers — NOT exported. Adding a new kind layer would go
  *     through this file, not through direct helper reuse.
@@ -63,9 +67,8 @@ export { BoxMember } from './shared/BoxMember';
 export type { BoxMemberProps } from './shared/BoxMember';
 
 export {
-  MATERIAL_BLOCK_COLORS,
-  MATERIAL_COLORS,
+  MATERIAL_KIND_COLORS,
   materialForBlock,
+  materialForKind,
   materialForMember,
-  materialForSpecies,
 } from './shared/materials';

@@ -28,11 +28,14 @@
  *   AC3  Every layer's group starts with `visible === true` when
  *        the ui-store default is "all on".
  *
- *   G5   Heterogeneous-species render — one PT + one Cedar + one
- *        Composite member across the deck; assert EXACTLY 3
- *        distinct material instances live in the scene graph
- *        (catches a leaky per-layer material refactor that would
- *        pump the material count).
+ *   G5   Heterogeneous-KIND render — one member per kind × three
+ *        species; assert EXACTLY 5 distinct member-mesh material
+ *        instances (one per lumber kind: joist / beam / post /
+ *        footing / board) in the scene graph. Post `fix/part-type-
+ *        colors` the palette is keyed by MemberKind, so species is
+ *        no longer a discriminator: three PT joists + three Cedar
+ *        joists + three Composite joists all share ONE joist
+ *        material.
  */
 import { describe, expect, it, beforeEach } from 'vitest';
 import ReactThreeTestRenderer from '@react-three/test-renderer';
@@ -45,6 +48,7 @@ import { resetDesignStoreForTests } from '../../state/design-store';
 import { DeckLayers } from './DeckLayers';
 import { DECK_LAYER_ORDER } from './deck-layer-order';
 import { LAYER_USER_DATA_KEY } from './shared/kind-layer';
+import { MATERIAL_KIND_COLORS } from './shared/materials';
 import { makeLayout, makeMember } from './__testing__/fixtures';
 
 function resetLayerVisibility(): void {
@@ -174,24 +178,31 @@ describe('<DeckLayers /> — AC3 default visibility (all on)', () => {
   });
 });
 
-describe('<DeckLayers /> — G5 heterogeneous-species render (per-species material sharing)', () => {
+describe('<DeckLayers /> — G5 heterogeneous-KIND render (per-kind material sharing, species IGNORED)', () => {
   beforeEach(() => {
     resetLayerVisibility();
     resetDesignStoreForTests();
   });
 
-  it('renders exactly 3 distinct material instances when the layout mixes PT + Cedar + Composite', async () => {
+  it('renders EXACTLY 5 distinct member-mesh material instances when the layout mixes 5 kinds × 3 species', async () => {
     // Seed a layout with SEVERAL members of each kind, spread
-    // across all three species. The AC6 contract says every mesh
-    // of the same species shares one MeshStandardMaterial instance,
-    // so no matter how many meshes render, the DISTINCT material
-    // set size MUST be exactly 3 (one per species).
+    // across all three species. Post `fix/part-type-colors`,
+    // the palette is keyed by MemberKind — species is IGNORED.
+    // Three PT joists + three Cedar joists + three Composite
+    // joists share ONE joist material instance; likewise for
+    // beam / post / footing / board.
+    //
+    // So no matter how many meshes render, the DISTINCT
+    // member-mesh material set size MUST be exactly 5 (one per
+    // lumber kind rendered here).
     //
     // This catches a subtle refactor regression: if a future
     // change accidentally moves material construction INTO
     // BoxMember (instead of looking it up from the shared
     // module-cache), each mesh gets its own material and the
-    // set size explodes. GPT/QA-G5.
+    // set size explodes. It also catches an accidental revert
+    // to per-species keying — a species-based cache would emit
+    // 15 (5 kinds × 3 species) distinct materials here. GPT/QA-G5.
     const species: Species[] = ['PT', 'Cedar', 'Composite'];
     const kinds: MemberKind[] = ['joist', 'beam', 'post', 'footing', 'board'];
     const members: LayoutMember[] = [];
@@ -216,26 +227,32 @@ describe('<DeckLayers /> — G5 heterogeneous-species render (per-species materi
       .findAllByType('Mesh')
       .map((n) => n.instance as Mesh);
     // Filter to member meshes only — the EnvironmentLayer's ground
-    // plane is also a Mesh but uses its own unique material. Every
-    // member mesh has one of the three shared species materials.
-    // Collect the unique material references (identity, not
-    // value) across every mesh that carries a species colour.
-    const speciesColorHexes = new Set([0x6b7a4a, 0xa0623c, 0x7a7a7a]);
-    const speciesMaterials = new Set(
+    // plane is also a Mesh but uses its own unique material.
+    // Every member mesh has one of the shared kind materials from
+    // MATERIAL_KIND_COLORS.
+    //
+    // Import the palette so we filter by ANY known kind hex — no
+    // hard-coded numeric literals here (a palette tweak in
+    // materials.ts must not silently break this test).
+    const memberKindHexes = new Set(Object.values(MATERIAL_KIND_COLORS));
+    const kindMaterials = new Set(
       meshes
         .map((m) => (Array.isArray(m.material) ? m.material[0] : m.material))
         .filter((mat) => {
           // Only count materials whose `.color` matches one of the
-          // three known species hexes — filters out the ground
-          // plane's tan material.
+          // known kind hexes — filters out the ground plane's tan
+          // material.
           if (mat === undefined) return false;
           if (!('color' in mat)) return false;
           const colorProp = (mat as { color?: { getHex?: () => number } }).color;
-          if (colorProp === undefined || typeof colorProp.getHex !== 'function') return false;
-          return speciesColorHexes.has(colorProp.getHex());
+          if (colorProp === undefined || typeof colorProp.getHex !== 'function')
+            return false;
+          return memberKindHexes.has(colorProp.getHex());
         }),
     );
-    expect(speciesMaterials.size).toBe(3);
+    // Exactly 5 — one per kind rendered here (joist, beam, post,
+    // footing, board). Block + blocking are NOT in the seed set.
+    expect(kindMaterials.size).toBe(5);
     // Every member mesh (there should be 15 — 5 kinds × 3 species)
     // is present in the scene graph. This is a light sanity check
     // that the layers actually rendered their meshes.
