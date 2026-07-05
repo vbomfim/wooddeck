@@ -346,15 +346,15 @@ describe('applyRemediation — S25 add-support-row', () => {
     });
   });
 
-  it('HIGH #3 (review) — END-TO-END PAYOFF: Method B over-spanned joist cleared by add-support-row (dispatches blockSpacingMm, not blockRowsHint)', () => {
-    // HIGH #3 (feat/block-spacing review): the ACTIVE remediation
-    // path now dispatches `blockSpacingMm` (spacing-primary) —
-    // the resolver PREFERS it over the legacy `blockRowsHint`.
-    // Same 12×12 geometry, same 2×8 PT joist, blockRowsHint=2:
-    // joist span 3657.6 mm >> allowable ~2400 mm → over-span-joist
-    // warning fires. Apply add-support-row → producer proposes
-    // blockSpacingMm ≈ 2400 → tighter grid → joist span ≤ 2400
-    // < allowable → warning clears.
+  it('count-primary END-TO-END PAYOFF: Method B over-spanned joist cleared by add-support-row (dispatches blockRowsHint, not blockSpacingMm)', () => {
+    // feat/block-count-per-joist — Method B's primary control
+    // is `blockRowsHint` (a COUNT). Applying `add-support-row`
+    // dispatches a strictly-larger row count so the resolver
+    // (which PREFERS `blockRowsHint` over `blockSpacingMm`)
+    // renders the tighter grid → joist span drops below
+    // allowable → warning clears. Same 12×12 geometry, same
+    // 2×8 PT joist, initial blockRowsHint=2 (joist span ~3658
+    // mm >> allowable ~2400 mm → over-span-joist fires).
     const design = makeFloatingDesign(2, 'joists-on-blocks');
     // Sanity: the initial design has an over-span-joist warning.
     const initial = spanCheck(computeLayout(design), table25);
@@ -374,9 +374,11 @@ describe('applyRemediation — S25 add-support-row', () => {
     expect(addSupport).toBeDefined();
     if (!addSupport) return;
     expect(addSupport.wouldClear).toBe(true);
-    // Verify the patch carries HIGH #3's spacing-primary fields.
+    // The patch carries the count-primary fields.
     if (addSupport.patch.kind === 'add-support-row') {
-      expect(addSupport.patch.proposedSpacingMm).toBeDefined();
+      expect(addSupport.patch.proposedRows).toBeGreaterThan(
+        addSupport.patch.currentRows,
+      );
     }
 
     // Apply → the bundle's warnings must NOT contain an over-span
@@ -388,21 +390,21 @@ describe('applyRemediation — S25 add-support-row', () => {
         w.memberId === joistWarning.memberId,
     );
     expect(stillOverSpanning).toBe(false);
-    // HIGH #3 dispatch dispatches `blockSpacingMm`, NOT
-    // `blockRowsHint` — the previous test asserted hint=3, but
-    // under HIGH #3 the hint stays unchanged and blockSpacingMm
-    // is set to a schema-legal shrink of the current effective.
+    // Count-primary dispatch writes `blockRowsHint` (the ACTIVE
+    // control) — legacy `blockSpacingMm` is left untouched (it
+    // is IGNORED by `resolveMethodBGrid` when a rowsHint is
+    // present, so the write would be a silent no-op).
     if (bundle.design.foundation.type === 'tuffblocks') {
-      expect(bundle.design.foundation.blockSpacingMm).toBeDefined();
-      expect(bundle.design.foundation.blockSpacingMm!).toBeGreaterThanOrEqual(
-        300,
-      );
-      expect(bundle.design.foundation.blockSpacingMm!).toBeLessThanOrEqual(
-        2438.4,
-      );
-      // Legacy `blockRowsHint` is preserved untouched — the
-      // resolver ignores it when blockSpacingMm is set.
-      expect(bundle.design.foundation.blockRowsHint).toBe(2);
+      expect(bundle.design.foundation.blockRowsHint).toBeDefined();
+      expect(bundle.design.foundation.blockRowsHint!).toBeGreaterThan(2);
+      // The apply path did NOT touch `blockSpacingMm`.
+      if (addSupport.patch.kind === 'add-support-row') {
+        const initialSpacing =
+          design.foundation.type === 'tuffblocks'
+            ? design.foundation.blockSpacingMm
+            : undefined;
+        expect(bundle.design.foundation.blockSpacingMm).toBe(initialSpacing);
+      }
     }
   });
 

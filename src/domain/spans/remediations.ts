@@ -167,10 +167,9 @@ import type { SpanTable } from './span-table';
 // spacing-primary Method B resolver so the remediation's
 // `currentRows` mirrors what the layout actually produces).
 import {
-  MAX_BLOCK_SPACING_MM,
   MIN_BLOCK_SPACING_MM,
 } from '../layout/floating/block-grid';
-import { resolveMethodBGrid } from '../layout/floating/floating-layout';
+import { resolveMethodBGrid, MAX_METHOD_B_BLOCK_COUNT } from '../layout/floating/floating-layout';
 import { layoutFloatingJoists } from '../layout/floating/floating-joist-layout';
 
 // ==========================================================
@@ -493,15 +492,14 @@ function applyPatchForVerification(
         },
       };
     case 'add-support-row': {
-      // HIGH #3 (review — feat/block-spacing): the ACTIVE
-      // source of truth for Method B is `blockSpacingMm` (the
-      // resolver `resolveMethodBGrid` prefers it over the legacy
-      // `blockRowsHint`). When the producer supplied a
-      // `proposedSpacingMm`, dispatch it directly so the user's
-      // "add-support-row" action reduces spacing → tighter grid
-      // → shorter joist span. LEGACY path (proposedSpacingMm
-      // undefined) preserves the pre-HIGH#3 hint-bump behavior
-      // for backwards compat with older synthesized patches.
+      // feat/block-count-per-joist — Method B's primary control
+      // is `blockRowsHint` (a COUNT). Always dispatch
+      // `blockRowsHint = proposedRows` so the actual layout
+      // resolver honors the patch. Under count-primary,
+      // `blockSpacingMm` is IGNORED when `blockRowsHint` is set,
+      // so a spacing-only dispatch would leave the grid
+      // unchanged — a silent no-op the verify path would then
+      // (correctly) report as still-warning.
       //
       // Guard: block foundations only. `posts-on-footings` is
       // never proposed by `produceAddSupportRow`; the branch is
@@ -510,20 +508,6 @@ function applyPatchForVerification(
       if (design.foundation.type === 'posts-on-footings') {
         return design;
       }
-      if (patch.proposedSpacingMm !== undefined) {
-        // Spacing-primary path (HIGH #3): store the proposed
-        // spacing so the resolver picks it up on the next
-        // recompute. Do NOT also touch `blockRowsHint` — the
-        // resolver ignores it when `blockSpacingMm` is set.
-        return {
-          ...design,
-          foundation: {
-            ...design.foundation,
-            blockSpacingMm: patch.proposedSpacingMm,
-          },
-        };
-      }
-      // LEGACY path — hint-based (pre-HIGH#3 producers).
       return {
         ...design,
         foundation: {
@@ -1341,13 +1325,11 @@ function produceAddSupportRow(
   // pure (mirror-import of the same helper `computeMethodB` calls).
   const numJoists = layoutFloatingJoists(design).length;
 
-  // HIGH #3 (review — feat/block-spacing): the ACTIVE resolver
-  // for Method B is `resolveMethodBGrid`, which prefers
-  // `blockSpacingMm` over the legacy hints. Reflect what the
-  // ACTUAL layout produces (spacing-aware, cap-aware) — not the
-  // orthogonal legacy `resolveGridCount(blockRowsHint, ...)`
-  // (pre-HIGH#3 code path — the reviewers flagged that as a
-  // LYING label + wouldClear:false when spacing was active).
+  // feat/block-count-per-joist — Method B's primary control is
+  // now `blockRowsHint` (a COUNT). Use the ACTIVE resolver so
+  // currentRows reflects what the layout renders (whether the
+  // design carries the count hint, a legacy blockSpacingMm, or
+  // neither).
   const currentGrid = resolveMethodBGrid(
     widthMm,
     lengthMm,
@@ -1358,53 +1340,63 @@ function produceAddSupportRow(
   );
   const currentRows = currentGrid.rows;
 
-  // Effective row pitch = the max +z gap between adjacent block
-  // rows. `blockCountForAxis`'s invariant guarantees
-  // `pitch = lengthMm / (rows - 1) ≤ spacing`. Use this pitch as
-  // the "currentSpacingMm" reported by the patch — it is the
-  // spacing the user would need to type to REPRODUCE the current
-  // grid, so a legacy hint-based design surfaces its effective
-  // spacing on save.
+  // Effective row pitch = lengthMm / (rows - 1). This is the
+  // block-to-block +z gap under each joist — the span the
+  // over-span-joist warning is measured against.
   const currentEffectiveSpacingMm = lengthMm / (currentRows - 1);
 
-  // Propose the LARGEST spacing ≤ current effective that yields
-  // row pitch ≤ warning.allowableMm. Since
-  // `blockCountForAxis(len, s)` guarantees pitch ≤ s, setting
-  // spacing ≤ allowable is SUFFICIENT — no iteration needed.
-  //
-  // Clamp to `[MIN_BLOCK_SPACING_MM, MAX_BLOCK_SPACING_MM]` so
-  // the dispatched value is always schema-valid (HIGH #2's
-  // input-boundary rule applies to synthesized values too).
-  const desiredSpacingMm = Math.min(
-    currentEffectiveSpacingMm,
-    warning.allowableMm,
-  );
-  const clampedProposedSpacingMm = Math.max(
-    MIN_BLOCK_SPACING_MM,
-    Math.min(MAX_BLOCK_SPACING_MM, desiredSpacingMm),
-  );
+  // Compute the count-based target directly under count-primary:
+  //   - We want a row pitch ≤ warning.allowableMm.
+  //   - Pitch = lengthMm / (rows - 1), so
+  //     rows ≥ lengthMm / allowableMm + 1.
+  //   - Use `blockCountForAxis(lengthMm, allowableMm)` which
+  //     returns `max(2, ceil(lengthMm/allowableMm) + 1)`.
+  //   - Defensive: `allowableMm ≤ 0` (unrated material) → we
+  //     cannot compute a target from the table; fall back to
+  //     `currentRows + 1` (a single-step add-support-row).
+  const requiredRows =
+    warning.allowableMm > 0
+      ? Math.max(2, Math.ceil(lengthMm / warning.allowableMm) + 1)
+      : currentRows + 1;
+  // The proposal strictly adds rows (never decreases): the user's
+  // intent is "give me MORE support", not "give me the theoretical
+  // minimum". Take the larger of currentRows+1 and requiredRows.
+  const desiredProposedRows = Math.max(currentRows + 1, requiredRows);
 
-  // Special case: the effective spacing is already at or below
-  // MIN and the design still over-spans. Adding a row would
-  // require sub-MIN spacing — refuse and surface the real
-  // alternative (heavier joist / shorter deck).
+  // Effective ceilings under count-primary:
+  //   - rowsMaxByCap: `numJoists × rows ≤ MAX_METHOD_B_BLOCK_COUNT`.
+  //   - rowsMaxByGap: adjacent-row gap ≥ MIN_BLOCK_SPACING_MM.
+  // Both floor at 2 so the perimeter-two invariant holds.
+  const rowsMaxByCap = Math.max(
+    2,
+    Math.floor(MAX_METHOD_B_BLOCK_COUNT / Math.max(1, numJoists)),
+  );
+  const rowsMaxByGap = Math.max(
+    2,
+    Math.floor(lengthMm / MIN_BLOCK_SPACING_MM) + 1,
+  );
+  const effectiveMaxRows = Math.min(rowsMaxByCap, rowsMaxByGap);
+  const proposedRows = Math.min(desiredProposedRows, effectiveMaxRows);
+
+  // Derived spacing (kept in the patch shape for backwards
+  // compatibility with legacy consumers of `proposedSpacingMm`;
+  // the ACTIVE dispatch path writes `blockRowsHint`).
+  const proposedSpacingMm = lengthMm / (proposedRows - 1);
+
+  // Special case — the design is ALREADY at the effective max
+  // row count for its footprint (rowsMaxByGap floor from
+  // MIN_BLOCK_SPACING_MM). Adding a row would require sub-MIN
+  // block spacing — refuse and surface the real alternative
+  // (heavier joist / shorter deck).
+  //
+  // We detect this by checking `currentRows >= rowsMaxByGap` OR
+  // `currentEffectiveSpacingMm ≤ MIN_BLOCK_SPACING_MM + ε`. The
+  // second form catches the "carrier design pinned blockSpacingMm
+  // at MIN" case that pre-dates count-primary.
   if (
-    currentEffectiveSpacingMm <= MIN_BLOCK_SPACING_MM + 1e-6 &&
-    warning.allowableMm < currentEffectiveSpacingMm
+    currentRows >= rowsMaxByGap ||
+    currentEffectiveSpacingMm <= MIN_BLOCK_SPACING_MM + 1e-6
   ) {
-    // fix/joists-on-blocks-flying (review MED #1): use the
-    // cap-aware resolver so the metadata reflects what a
-    // recomputed design would ACTUALLY produce (not the raw
-    // `blockCountForAxis` value the cap may reduce).
-    const disabledGrid = resolveMethodBGrid(
-      widthMm,
-      lengthMm,
-      MIN_BLOCK_SPACING_MM,
-      design.foundation.blockRowsHint,
-      design.foundation.blockColsHint,
-      numJoists,
-    );
-    const disabledRows = disabledGrid.rows;
     return {
       kind: 'add-support-row',
       memberId: warning.memberId,
@@ -1412,9 +1404,9 @@ function produceAddSupportRow(
         kind: 'add-support-row',
         targetBeamId: warning.memberId,
         currentRows,
-        proposedRows: disabledRows,
+        proposedRows: currentRows,
         currentSpacingMm: currentEffectiveSpacingMm,
-        proposedSpacingMm: MIN_BLOCK_SPACING_MM,
+        proposedSpacingMm: currentEffectiveSpacingMm,
       },
       summary: 'Reduce block spacing to add support (disabled)',
       currentAllowableMm: warning.allowableMm,
@@ -1428,42 +1420,9 @@ function produceAddSupportRow(
     };
   }
 
-  // If the proposal doesn't actually SHRINK the spacing (equal
-  // within a mm of current), we're already at the min or below
-  // the allowable — anything smaller just wastes blocks. Guard
-  // against a degenerate "propose the same thing" case.
-  const wouldShrink =
-    clampedProposedSpacingMm < currentEffectiveSpacingMm - 1e-6;
-
-  const proposedSpacingMm = wouldShrink
-    ? clampedProposedSpacingMm
-    : MIN_BLOCK_SPACING_MM;
-  // fix/joists-on-blocks-flying (review MED #1): the ACTUAL layout
-  // resolver caps rows at `max(2, floor(MAX_METHOD_B_BLOCK_COUNT /
-  // numJoists))` because block columns are now pinned to joist
-  // x-centers (one column per joist — total = numJoists × rows).
-  // A naive `blockCountForAxis(length, proposedSpacingMm)` reports
-  // the row count that spacing WOULD produce IF the cap didn't
-  // exist. On a large / joist-dense Method-B deck that value can
-  // exceed `maxRows`, so the remediation would render a lying
-  // "N → M" arrow (M unreachable). Use the SAME cap-aware
-  // resolver the layout uses so the patch metadata reflects what
-  // the recomputed design will ACTUALLY produce.
-  const proposedGrid = resolveMethodBGrid(
-    widthMm,
-    lengthMm,
-    proposedSpacingMm,
-    design.foundation.blockRowsHint,
-    design.foundation.blockColsHint,
-    numJoists,
-  );
-  const proposedRows = proposedGrid.rows;
-
-  // If the cap prevents adding any support rows (proposed ≤
-  // current), the option can't help — surface a cap-specific
-  // reason instead of a misleading "N → N" arrow. This short-
-  // circuits before verify to avoid the invalidPatch path
-  // swallowing the cap case with a generic message.
+  // If the numJoists-cap prevents adding rows (proposed ≤ current
+  // via rowsMaxByCap), surface the cap-specific reason instead
+  // of a misleading "N → N" arrow.
   if (proposedRows <= currentRows) {
     return {
       kind: 'add-support-row',
@@ -1474,7 +1433,7 @@ function produceAddSupportRow(
         currentRows,
         proposedRows: currentRows,
         currentSpacingMm: currentEffectiveSpacingMm,
-        proposedSpacingMm,
+        proposedSpacingMm: currentEffectiveSpacingMm,
       },
       summary: 'Reduce block spacing to add support (disabled)',
       currentAllowableMm: warning.allowableMm,
@@ -1515,10 +1474,8 @@ function produceAddSupportRow(
   }
 
   if (verify.wouldClear) {
-    // The new adjacent-block gap along +z is bounded by the new
-    // spacing (blockCountForAxis invariant). Report the new
-    // ACTUAL span the joist has to carry; the allowable is
-    // unchanged (same joist SKU).
+    // The new adjacent-block gap along +z under the proposal.
+    // Under count-primary this equals `lengthMm / (proposedRows - 1)`.
     const newActualSpanMm = lengthMm / (proposedRows - 1);
     return makeOption({
       kind: 'add-support-row',
@@ -1532,9 +1489,10 @@ function produceAddSupportRow(
   }
 
   // Verify said still-warning. The invariant
-  // "pitch ≤ spacing ≤ allowable" makes this unreachable for a
-  // finite recompute — but if it fires, surface as disabled
-  // rather than an ENABLED-but-nonclearing option.
+  // "pitch ≤ allowable ⇒ no over-span" makes this unreachable
+  // when we scale rows to hit the exact target — but if it
+  // fires, surface as disabled rather than an ENABLED-but-
+  // nonclearing option.
   return {
     kind: 'add-support-row',
     memberId: warning.memberId,

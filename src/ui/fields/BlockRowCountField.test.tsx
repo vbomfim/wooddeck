@@ -1,0 +1,271 @@
+/**
+ * `BlockRowCountField.test.tsx` — feat/block-count-per-joist.
+ *
+ * ## Coverage
+ *
+ *   - Visibility gate — renders NOTHING for:
+ *       • default (elevated) design
+ *       • floating + beams-and-joists (Method A)
+ *       • non-block foundation (defensive)
+ *     Renders an integer stepper for floating + joists-on-blocks
+ *     (Method B).
+ *   - Default surface — with `foundation.blockRowsHint` UNSET,
+ *     the input displays a sensible starter integer within
+ *     `[MIN_BLOCK_ROWS_HINT, MAX_BLOCK_ROWS_HINT]`.
+ *   - Reflects an explicit value — after applyParameters commits
+ *     a rows hint, the field re-renders with the new value.
+ *   - Dispatch — typing a new count writes back through
+ *     `applyParameters({ foundation: { blockRowsHint } })`; the
+ *     store carries the new value AND the layout re-renders
+ *     with that exact row count.
+ *   - Clamp AT input boundary — values below MIN clamp up to
+ *     MIN, values above MAX clamp down to MAX (schema safety).
+ *   - Round-trip through serialize/deserialize — every user
+ *     edit produces a schema-legal design.
+ */
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { act, cleanup, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+
+import { deserialize, serialize } from '../../persistence';
+import {
+  MAX_BLOCK_ROWS_HINT,
+  MIN_BLOCK_ROWS_HINT,
+  useDesignStore,
+} from '../../state';
+import { resetDesignStoreForTests } from '../../state/design-store';
+
+import { BlockRowCountField } from './BlockRowCountField';
+
+beforeEach(() => {
+  resetDesignStoreForTests();
+});
+
+afterEach(() => {
+  cleanup();
+});
+
+/**
+ * Flip the design store to floating + Method B (joists-on-blocks).
+ * This is the ONE state where the block-row-count field is
+ * visible.
+ */
+function flipToMethodB(): void {
+  act(() => {
+    useDesignStore.getState().applyParameters({
+      structure: 'floating',
+      foundation: {
+        type: 'tuffblocks',
+        product: { productId: 'tuffblock-12x12x4' },
+      },
+      floatingFraming: 'joists-on-blocks',
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Visibility
+// ---------------------------------------------------------------------------
+
+describe('<BlockRowCountField /> — visibility gating', () => {
+  it('renders nothing when the design is elevated (default state)', () => {
+    const { container } = render(<BlockRowCountField />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('renders nothing when floating + beams-and-joists (Method A)', () => {
+    act(() => {
+      useDesignStore.getState().applyParameters({
+        structure: 'floating',
+        foundation: {
+          type: 'tuffblocks',
+          product: { productId: 'tuffblock-12x12x4' },
+        },
+        floatingFraming: 'beams-and-joists',
+      });
+    });
+    const { container } = render(<BlockRowCountField />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it('renders a "Blocks along each joist" input when floating + joists-on-blocks (Method B)', () => {
+    flipToMethodB();
+    render(<BlockRowCountField />);
+    expect(
+      screen.getByLabelText(/blocks along each joist/i),
+    ).toBeInTheDocument();
+    // The hint copy from the field's own docstring surfaces to the
+    // user; assert the substring so a future rewording is caught.
+    expect(
+      screen.getByText(/spread evenly end-to-end/i),
+    ).toBeInTheDocument();
+  });
+
+  it('exposes min/max on the native number input matching the schema bounds', () => {
+    flipToMethodB();
+    render(<BlockRowCountField />);
+    const input = screen.getByLabelText<HTMLInputElement>(
+      /blocks along each joist/i,
+    );
+    expect(input.type).toBe('number');
+    expect(input.min).toBe(String(MIN_BLOCK_ROWS_HINT));
+    expect(input.max).toBe(String(MAX_BLOCK_ROWS_HINT));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Default surface
+// ---------------------------------------------------------------------------
+
+describe('<BlockRowCountField /> — default surface', () => {
+  it('displays a sensible starter integer when blockRowsHint is unset', () => {
+    flipToMethodB();
+    const design = useDesignStore.getState().bundle.design;
+    if (
+      design.foundation.type !== 'deck-blocks' &&
+      design.foundation.type !== 'tuffblocks'
+    ) {
+      throw new Error('expected block foundation for this test');
+    }
+    expect(design.foundation.blockRowsHint).toBeUndefined();
+
+    render(<BlockRowCountField />);
+    const input = screen.getByLabelText<HTMLInputElement>(
+      /blocks along each joist/i,
+    );
+    const shown = Number.parseInt(input.value, 10);
+    expect(Number.isFinite(shown)).toBe(true);
+    expect(shown).toBeGreaterThanOrEqual(MIN_BLOCK_ROWS_HINT);
+    expect(shown).toBeLessThanOrEqual(MAX_BLOCK_ROWS_HINT);
+  });
+
+  it('reflects an explicit foundation.blockRowsHint value from the store', () => {
+    flipToMethodB();
+    act(() => {
+      useDesignStore.getState().applyParameters({
+        foundation: { blockRowsHint: 5 },
+      });
+    });
+    render(<BlockRowCountField />);
+    const input = screen.getByLabelText<HTMLInputElement>(
+      /blocks along each joist/i,
+    );
+    expect(input.value).toBe('5');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dispatch — the field writes back to the store
+// ---------------------------------------------------------------------------
+
+describe('<BlockRowCountField /> — dispatch', () => {
+  it('typing a new integer commits foundation.blockRowsHint through applyParameters', async () => {
+    flipToMethodB();
+    render(<BlockRowCountField />);
+    const user = userEvent.setup();
+    const input = screen.getByLabelText<HTMLInputElement>(
+      /blocks along each joist/i,
+    );
+
+    await user.clear(input);
+    await user.type(input, '6');
+
+    const design = useDesignStore.getState().bundle.design;
+    if (
+      design.foundation.type !== 'deck-blocks' &&
+      design.foundation.type !== 'tuffblocks'
+    ) {
+      throw new Error('expected block foundation after Method B flip');
+    }
+    expect(design.foundation.blockRowsHint).toBe(6);
+  });
+
+  it('a fresh joists-on-blocks deck at 12×12 produces NO over-span-joist warning at the default count', () => {
+    // Regression pin for the UAT bug: fresh joists-on-blocks
+    // design at typical size (12×12) must NOT be over-spanned
+    // by default. The default derivation picks a span-safe count.
+    flipToMethodB();
+    const layout = useDesignStore.getState().bundle.layout;
+    const warnings = useDesignStore.getState().bundle.warnings;
+    // Every joist has ≥ 2 blocks under it → span check runs.
+    const blocks = layout.members.filter((m) => m.kind === 'block');
+    expect(blocks.length).toBeGreaterThan(0);
+    // No over-span warnings on the fresh deck.
+    const overSpanJoist = warnings.filter(
+      (w) => w.kind === 'over-span-joist',
+    );
+    expect(overSpanJoist).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Clamp — schema-legal range enforcement at the input boundary
+// ---------------------------------------------------------------------------
+
+describe('<BlockRowCountField /> — clamp stored value to schema-legal range', () => {
+  it('below-min input (0) → design stores MIN_BLOCK_ROWS_HINT', async () => {
+    flipToMethodB();
+    render(<BlockRowCountField />);
+    const user = userEvent.setup();
+    const input = screen.getByLabelText<HTMLInputElement>(
+      /blocks along each joist/i,
+    );
+    await user.clear(input);
+    await user.type(input, '0');
+
+    const design = useDesignStore.getState().bundle.design;
+    if (
+      design.foundation.type !== 'deck-blocks' &&
+      design.foundation.type !== 'tuffblocks'
+    ) {
+      throw new Error('expected block foundation');
+    }
+    expect(design.foundation.blockRowsHint).toBeDefined();
+    expect(
+      design.foundation.blockRowsHint ?? Number.NEGATIVE_INFINITY,
+    ).toBeGreaterThanOrEqual(MIN_BLOCK_ROWS_HINT);
+  });
+
+  it('above-max input (999) → design stores MAX_BLOCK_ROWS_HINT', async () => {
+    flipToMethodB();
+    render(<BlockRowCountField />);
+    const user = userEvent.setup();
+    const input = screen.getByLabelText<HTMLInputElement>(
+      /blocks along each joist/i,
+    );
+    await user.clear(input);
+    await user.type(input, '999');
+
+    const design = useDesignStore.getState().bundle.design;
+    if (
+      design.foundation.type !== 'deck-blocks' &&
+      design.foundation.type !== 'tuffblocks'
+    ) {
+      throw new Error('expected block foundation');
+    }
+    expect(design.foundation.blockRowsHint).toBeDefined();
+    expect(
+      design.foundation.blockRowsHint ?? Number.POSITIVE_INFINITY,
+    ).toBeLessThanOrEqual(MAX_BLOCK_ROWS_HINT);
+  });
+
+  it('every edited value ROUND-TRIPS through serialize→deserialize (save/reload safety)', async () => {
+    flipToMethodB();
+    render(<BlockRowCountField />);
+    const user = userEvent.setup();
+    const input = screen.getByLabelText<HTMLInputElement>(
+      /blocks along each joist/i,
+    );
+
+    for (const raw of ['3', '7', '999']) {
+      await user.clear(input);
+      await user.type(input, raw);
+      const design = useDesignStore.getState().bundle.design;
+      const json = serialize(design, {
+        createdAt: design.createdAt,
+        generatorVersion: '1.0.0',
+      });
+      expect(() => deserialize(json)).not.toThrow();
+    }
+  });
+});

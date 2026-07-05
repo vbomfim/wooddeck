@@ -79,21 +79,17 @@ export function patchFromRemediation(
         beam: { material: { species: patch.newSpecies, grade: 'No2' } },
       };
     case 'add-support-row':
-      // HIGH #3 (review — feat/block-spacing): the ACTIVE
-      // Method B path dispatches `blockSpacingMm` (the
-      // spacing-primary source of truth). The pre-HIGH#3 path
-      // (undefined `proposedSpacingMm`) still dispatches the
-      // legacy `blockRowsHint` so any consumer that synthesizes
-      // a patch without spacing fields still works. The
-      // whitelist entries `foundation.blockSpacingMm` +
-      // `foundation.blockRowsHint` in
-      // `apply-parameters.KNOWN_OPTIONAL_LEAF_KEYS` allow either
+      // feat/block-count-per-joist — Method B's primary control
+      // is `blockRowsHint` (a COUNT). Always dispatch
+      // `blockRowsHint = proposedRows` so the actual layout
+      // resolver honors the patch. Legacy `proposedSpacingMm`
+      // in the patch is kept for label back-compat but no longer
+      // drives dispatch — under count-primary, writing
+      // `blockSpacingMm` alongside a rowsHint would be IGNORED
+      // by `resolveMethodBGrid` (count wins over spacing). The
+      // whitelist entry `foundation.blockRowsHint` in
+      // `apply-parameters.KNOWN_OPTIONAL_LEAF_KEYS` allows the
       // key to be added to a foundation that currently lacks it.
-      if (patch.proposedSpacingMm !== undefined) {
-        return {
-          foundation: { blockSpacingMm: patch.proposedSpacingMm },
-        };
-      }
       return {
         foundation: { blockRowsHint: patch.proposedRows },
       };

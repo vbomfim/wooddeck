@@ -99,13 +99,24 @@ export { DEFAULT_DESIGN_PARAMS, makeDefaultDesign } from './default-design';
 // pattern already in `design-store.ts`).
 //
 // `MIN_BLOCK_SPACING_MM` / `MAX_BLOCK_SPACING_MM` are ALSO re-exported
-// (HIGH #2 review response) so the `BlockSpacingField` can clamp
-// user input at the boundary — a raw value outside the schema
-// range would poison the design, be silently clamped by the LAYOUT
-// for geometry, but the STORED design would then fail
-// `deserialize` on the next open (save/reload trap).
+// so back-compat consumers (legacy tests, remediation label code)
+// can still read the schema bounds. `blockSpacingMm` is superseded
+// by `blockRowsHint` for the primary Method-B control (see below)
+// but remains in the model for save/reload compat.
+//
+// ---- feat/block-count-per-joist — Method B primary control ----------------
+//
+// `blockRowsHint` (integer, `[MIN_BLOCK_ROWS_HINT, MAX_BLOCK_ROWS_HINT]`)
+// is the NEW primary control for Method B: the user picks HOW MANY
+// blocks sit under each joist, and the layout spreads them evenly
+// end-to-end. `MAX_METHOD_B_BLOCK_COUNT` is also re-exported so
+// the UI can compute an EFFECTIVE per-design maximum when the joist
+// count is known (`floor(MAX / numJoists)`).
 export {
   DEFAULT_METHOD_B_BLOCK_SPACING_MM,
+  MAX_METHOD_B_BLOCK_COUNT,
+  MAX_BLOCK_ROWS_HINT,
+  MIN_BLOCK_ROWS_HINT,
 } from '../domain/layout/floating/floating-layout';
 export {
   MAX_BLOCK_SPACING_MM,

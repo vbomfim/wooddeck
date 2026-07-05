@@ -1232,16 +1232,15 @@ describe('computeRemediations — S25 add-support-row (ticket #47)', () => {
     expect(addSupport.disabled).toBe(false);
   });
 
-  it('AC1 (HIGH #3 semantics) — Method B recompute-verified wouldClear TRUE even on 30 ft: HIGH #3 proposes the right spacing directly, not just +1 row', () => {
-    // HIGH #3 (review — feat/block-spacing): the pre-HIGH#3
-    // algorithm ALWAYS proposed `currentRows + 1`, so a 30-ft
-    // length with hint=2 → proposed=3 → row-pitch 4572 mm still
-    // over-spanned → DISABLED. Under HIGH #3 the producer
-    // computes the LARGEST blockSpacingMm ≤ current effective
-    // that clears (proposedSpacing = min(currentEff, allowable),
-    // clamped to [MIN, MAX]) — so the option is now ENABLED
-    // with a concrete proposal that actually clears. This
-    // matches the ticket's "reduce blockSpacingMm" contract.
+  it('AC1 (count-primary semantics) — Method B recompute-verified wouldClear TRUE even on 30 ft: count-primary proposes the right ROW COUNT directly, not just +1 row', () => {
+    // feat/block-count-per-joist — Method B's primary control
+    // is now `blockRowsHint` (a COUNT), not `blockSpacingMm`.
+    // A 30-ft length with hint=2 needs enough rows to bring the
+    // row pitch (lengthMm/(rows-1)) at or below allowable. The
+    // producer computes `requiredRows = ceil(lengthMm/allowable)
+    // + 1` and proposes at least that many, so a 30-ft deck no
+    // longer stays DISABLED after a single +1 bump — the option
+    // jumps STRAIGHT to a clearing row count.
     const design = makeFloating({
       widthFt: 12,
       lengthFt: 30,
@@ -1256,21 +1255,26 @@ describe('computeRemediations — S25 add-support-row (ticket #47)', () => {
     const addSupport = options.find((o) => o.kind === 'add-support-row');
     expect(addSupport).toBeDefined();
     if (!addSupport) return;
-    // ENABLED with a smaller spacing that clears.
+    // ENABLED with a larger row count that clears.
     expect(addSupport.wouldClear).toBe(true);
     expect(addSupport.disabled).toBe(false);
-    // Spacing-primary patch (HIGH #3) carries the new fields.
+    // Count-primary patch carries the row-count fields.
     expect(addSupport.patch.kind).toBe('add-support-row');
     if (addSupport.patch.kind === 'add-support-row') {
+      // The proposal must strictly ADD rows.
+      expect(addSupport.patch.proposedRows).toBeGreaterThan(
+        addSupport.patch.currentRows,
+      );
+      // On a 30-ft length, a single +1 (rows=3) leaves pitch =
+      // 9144/2 = 4572 mm, still over-spanned for typical joists.
+      // The producer must jump past +1 to a truly clearing count.
+      expect(addSupport.patch.proposedRows).toBeGreaterThanOrEqual(4);
+      // Derived spacing is still populated for legacy display
+      // consumers; sanity check its shape.
       expect(addSupport.patch.proposedSpacingMm).toBeDefined();
-      expect(addSupport.patch.currentSpacingMm).toBeDefined();
-      // Proposal must SHRINK the spacing (that's the whole point).
       expect(addSupport.patch.proposedSpacingMm!).toBeLessThan(
         addSupport.patch.currentSpacingMm!,
       );
-      // Proposal must stay within the schema-legal range.
-      expect(addSupport.patch.proposedSpacingMm!).toBeGreaterThanOrEqual(300);
-      expect(addSupport.patch.proposedSpacingMm!).toBeLessThanOrEqual(2438.4);
     }
   });
 
@@ -1735,23 +1739,23 @@ describe('computeRemediations — add-support-row DISABLED at minimum spacing (H
 });
 
 // ---------------------------------------------------------------------------
-// HIGH #3 (review — feat/block-spacing): the ACTIVE remediation
-// path targets `blockSpacingMm` (the spacing-primary source of
-// truth). Pin the shape:
-//   - proposedSpacingMm < currentSpacingMm (must shrink)
-//   - proposedSpacingMm clamped to [MIN, MAX] (schema-safe)
-//   - blockSpacingMm > blockRowsHint precedence (both set →
-//     spacing controls)
-//   - dispatched patch applies via blockSpacingMm (verified by
+// feat/block-count-per-joist: the ACTIVE remediation path
+// targets `blockRowsHint` (the count-primary source of truth).
+// Pin the shape:
+//   - proposedRows > currentRows (must add support)
+//   - blockRowsHint > blockSpacingMm precedence (both set →
+//     count controls)
+//   - dispatched patch applies via blockRowsHint (verified by
 //     the paired apply-remediation.test.ts)
 // ---------------------------------------------------------------------------
 
-describe('computeRemediations — HIGH #3 spacing-primary Method-B remediation', () => {
-  it('a design carrying blockSpacingMm (no hint) still surfaces an ENABLED remediation with a smaller proposedSpacingMm', () => {
+describe('computeRemediations — count-primary Method-B remediation', () => {
+  it('a design carrying blockSpacingMm (no hint) still surfaces an ENABLED remediation with a strictly larger proposedRows', () => {
     // Design carries `blockSpacingMm = MAX (2438.4 mm)` on a
-    // 12×12 tuffblock deck. 2×8 PT @ 406 mm — allowable ≈ 2400
-    // < 2438.4 → over-span-joist. Remediation must ENABLE and
-    // propose a strictly smaller spacing.
+    // 12×12 tuffblock deck (NO blockRowsHint). Under
+    // count-primary, the resolver falls back to spacing when
+    // rowsHint is absent → over-span warning fires →
+    // remediation must ENABLE with a strictly larger proposedRows.
     const design = makeFloating({
       widthFt: 12,
       lengthFt: 12,
@@ -1762,8 +1766,8 @@ describe('computeRemediations — HIGH #3 spacing-primary Method-B remediation',
     if (!joistWarning) {
       // If the SpanTable / joist happens to clear at 2438 mm on
       // this fixture, the test's semantic pin still holds — the
-      // enabled-shrink invariant is exercised by AC1 (HIGH #3
-      // semantics) above.
+      // enabled-add-support-row invariant is exercised by AC1
+      // (count-primary semantics) above.
       expect(initial.length).toBeGreaterThanOrEqual(0);
       return;
     }
@@ -1774,48 +1778,49 @@ describe('computeRemediations — HIGH #3 spacing-primary Method-B remediation',
     expect(addSupport.wouldClear).toBe(true);
     expect(addSupport.disabled).toBe(false);
     if (addSupport.patch.kind === 'add-support-row') {
+      expect(addSupport.patch.proposedRows).toBeGreaterThan(
+        addSupport.patch.currentRows,
+      );
+      // Derived spacing shape sanity-check.
       expect(addSupport.patch.proposedSpacingMm).toBeDefined();
       expect(addSupport.patch.currentSpacingMm).toBeDefined();
-      expect(addSupport.patch.proposedSpacingMm!).toBeLessThan(
-        addSupport.patch.currentSpacingMm!,
-      );
     }
   });
 
-  it('SHOULD-FIX precedence — blockSpacingMm > legacy blockRowsHint (both set → spacing controls)', () => {
-    // A design with BOTH `blockSpacingMm = MAX` and
-    // `blockRowsHint = 5` — the resolver PREFERS blockSpacingMm
-    // (block-spacing.test.ts pins this at the resolver seam).
-    // Here we pin the SAME precedence for the remediation:
-    // currentRows / currentSpacingMm must reflect the
-    // blockSpacingMm-derived grid, NOT the hint-derived one.
+  it('count-primary precedence — blockRowsHint > legacy blockSpacingMm (both set → count controls)', () => {
+    // A design with BOTH `blockSpacingMm = MAX (2438.4)` and
+    // `blockRowsHint = 2` — the resolver PREFERS blockRowsHint
+    // under count-primary. Here we pin the SAME precedence at
+    // the remediation seam: currentRows / currentSpacingMm must
+    // reflect the hint-derived grid, NOT the spacing-derived
+    // one.
     const design = makeFloating({
       widthFt: 12,
       lengthFt: 12,
       blockSpacingMm: 2438.4,
-      blockRowsHint: 5, // ignored under spacing-primary
+      blockRowsHint: 2, // controls under count-primary
     });
     const initial = RECOMPUTE(design);
     const joistWarning = initial.find((w) => w.kind === 'over-span-joist');
-    if (!joistWarning) {
-      expect(initial.length).toBeGreaterThanOrEqual(0);
-      return;
-    }
+    expect(joistWarning).toBeDefined();
+    if (!joistWarning) return;
     const options = computeRemediations(joistWarning, design, IRC, RECOMPUTE);
     const addSupport = options.find((o) => o.kind === 'add-support-row');
     expect(addSupport).toBeDefined();
     if (!addSupport) return;
     if (addSupport.patch.kind === 'add-support-row') {
-      // With `blockSpacingMm = 2438.4` on 12ft: blockCountForAxis(3657.6, 2438.4) =
-      // max(2, ceil(1.5)+1) = max(2, 2+1) = 3 rows. Current
-      // spacing = 3657.6/2 = 1828.8 mm (NOT 3657.6/(5-1)=914.4
-      // as the hint would compute).
-      expect(addSupport.patch.currentRows).toBe(3);
-      // currentSpacingMm derived from the resolved grid, not the hint.
+      // With `blockRowsHint = 2` on 12ft: currentRows=2 (hint
+      // wins over spacing). Current spacing = 3657.6/1 = 3657.6
+      // mm (NOT 3657.6/2 ≈ 1828.8 mm as the blockSpacingMm
+      // would produce).
+      expect(addSupport.patch.currentRows).toBe(2);
+      // currentSpacingMm derived from the hint-based grid.
       expect(addSupport.patch.currentSpacingMm).toBeDefined();
       expect(
-        Math.abs(addSupport.patch.currentSpacingMm! - 1828.8),
+        Math.abs(addSupport.patch.currentSpacingMm! - 3657.6),
       ).toBeLessThan(1);
+      // Proposal strictly adds rows.
+      expect(addSupport.patch.proposedRows).toBeGreaterThan(2);
     }
   });
 });

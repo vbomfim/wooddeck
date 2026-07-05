@@ -93,7 +93,7 @@ import {
 } from '../state';
 
 import { BlockProductSelector } from './fields/BlockProductSelector';
-import { BlockSpacingField } from './fields/BlockSpacingField';
+import { BlockRowCountField } from './fields/BlockRowCountField';
 import { BeamConnectionSelector } from './fields/BeamConnectionSelector';
 import { FloatingFramingSelector } from './fields/FloatingFramingSelector';
 import { FoundationTypeSelector } from './fields/FoundationTypeSelector';
@@ -502,13 +502,17 @@ export function ParameterPanel(): JSX.Element {
           onChangeMm={(spacingMm): void => apply({ joist: { spacingMm } })}
         />
         {/*
-          feat/block-spacing — Method B foundation-block grid pitch.
-          Renders only when floating + joists-on-blocks (Method B). The
-          field is a NO-OP visual on any other structure/framing combo
-          (returns null). Placed near "Joist spacing" so the two
-          related distances read together in the panel.
+          feat/block-count-per-joist — Method B block-row COUNT
+          field. Renders only when floating + joists-on-blocks
+          (Method B). The field is a NO-OP visual on any other
+          structure/framing combo (returns null). Placed near
+          "Joist spacing" so the two related controls read
+          together in the panel. Replaces the pre-fix
+          `BlockSpacingField` (DISTANCE input) — UAT feedback:
+          users think in "how many blocks under each joist",
+          not "how many millimeters between them".
         */}
-        <BlockSpacingField />
+        <BlockRowCountField />
 
         <SelectField<LumberNominal>
           label="Joist size"
