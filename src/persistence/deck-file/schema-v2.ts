@@ -429,16 +429,31 @@ function finalizeFloatingFraming(design: DeckDesign): DeckDesign {
   // if that happens, fall back to the canonical default and let the
   // downstream `computeLayout` surface the material error with its
   // own message (better than swallowing here).
+  //
+  // Defensive default on `beamConnection` (S27 review-response HIGH
+  // regression): `computeMinFloatingHeightMm` reaches into
+  // `computeYStackFloating`, whose exhaustive `switch (beamConnection)`
+  // calls `assertNever(undefined)` when the field is missing. The
+  // composite `finalizeDesign` above runs `finalizeBeamConnection`
+  // FIRST for exactly this reason — but if a future caller invokes
+  // this helper directly (or a refactor drops the finalize seam), the
+  // probe would throw, get swallowed by the try/catch below, and the
+  // design would silently mis-default to Method A. Belt-and-suspenders:
+  // pass `beamConnection ?? 'drop'` into every probe object so the
+  // classifier is correct regardless of caller order.
+  const probeBeamConnection = design.beamConnection ?? 'drop';
   let methodAMin: number;
   let methodBMin: number;
   try {
     methodAMin = computeMinFloatingHeightMm({
       ...design,
       floatingFraming: 'beams-and-joists',
+      beamConnection: probeBeamConnection,
     });
     methodBMin = computeMinFloatingHeightMm({
       ...design,
       floatingFraming: 'joists-on-blocks',
+      beamConnection: probeBeamConnection,
     });
   } catch {
     return stampFloatingFraming(design, 'beams-and-joists');
@@ -507,14 +522,26 @@ function stampFloatingFraming(
  * Runs BOTH `finalizeFloatingFraming` (S26) AND
  * `finalizeBeamConnection` (S27) so every load path (v1 migrate,
  * v2 native) has ONE finalization seam. Idempotent on
- * already-populated designs. The order below matters ONLY for
- * canonical property-order preservation (both stamp helpers copy
- * the design field-by-field in the canonical order defined by
- * `DeckDesign` in `model.ts`) — either order yields the same
- * key sequence because the helpers respect the interface order.
+ * already-populated designs.
+ *
+ * ## Order matters (S27 review-response HIGH regression fix)
+ *
+ * `finalizeBeamConnection` runs FIRST so that, by the time
+ * `finalizeFloatingFraming`'s Method-A/B height PROBE calls into
+ * `computeMinFloatingHeightMm` → `computeYStackFloating`, the
+ * exhaustive `switch (beamConnection)` in the floating y-stack
+ * always sees a defined value. If we ran the framing helper first
+ * on a pre-S27 v2 file missing BOTH optional fields, the probe
+ * would throw `assertNever(undefined)`, the broad try/catch would
+ * swallow it, and a low-profile floating file would silently
+ * mis-default to Method A (then fail Method-A's height validation
+ * and become unopenable). `finalizeBeamConnection` reads only
+ * `beamConnection` (never `floatingFraming`), so running it first
+ * is safe. Both stamp helpers preserve canonical property order
+ * so the final key sequence is identical regardless of order.
  */
 function finalizeDesign(design: DeckDesign): DeckDesign {
-  return finalizeBeamConnection(finalizeFloatingFraming(design));
+  return finalizeFloatingFraming(finalizeBeamConnection(design));
 }
 
 /**
