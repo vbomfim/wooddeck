@@ -55,6 +55,7 @@ export const GOLDEN_DECK_DESIGN: DeckDesign = {
   footprint: { widthMm: 3658, lengthMm: 4877, heightMm: 914 },
   structure: 'elevated',
   floatingFraming: 'beams-and-joists',
+  beamConnection: 'drop',
   foundation: {
     type: 'posts-on-footings',
     post: { nominal: '6x6', species: 'PT', grade: 'No2' },
@@ -91,6 +92,7 @@ export const SECOND_GOLDEN_DECK_DESIGN: DeckDesign = {
   footprint: { widthMm: 6100, lengthMm: 9144, heightMm: 1219 },
   structure: 'elevated',
   floatingFraming: 'beams-and-joists',
+  beamConnection: 'drop',
   foundation: {
     type: 'posts-on-footings',
     post: { nominal: '4x4', species: 'PT', grade: 'No2' },

@@ -182,6 +182,14 @@ export const deckDesignArb: fc.Arbitrary<DeckDesign> = fc
       // `structure` for field-order consistency across all fixtures
       // (S26 FIX #7 / Opus#6).
       floatingFraming: 'beams-and-joists' as const,
+      // S27 (feat/joist-beam-connection) — generator seeds the
+      // `'drop'` default (joists on top of beams — matches every
+      // pre-S27 fixture). The AC4 JSON round-trip property tests
+      // structural stability, not geometry semantics; keeping the
+      // arb pinned to drop preserves byte-identical Layout output
+      // for every generated design. A future flush-specific arb
+      // can be added when the ticket lands a flush-goldens suite.
+      beamConnection: 'drop' as const,
       foundation,
       joist: { material: r.joistMaterial, spacingMm: r.joistSpacingMm },
       beam: { material: r.beamMaterial },

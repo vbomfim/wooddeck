@@ -51,6 +51,7 @@ function makeFloating(overrides: Partial<{
   heightMm: number;
   foundation: FoundationSpec;
   floatingFraming: 'beams-and-joists' | 'joists-on-blocks';
+  beamConnection: 'drop' | 'flush';
 }> = {}): DeckDesign {
   return {
     id: '00000000-0000-4000-8000-000000000019',
@@ -62,6 +63,7 @@ function makeFloating(overrides: Partial<{
     },
     structure: 'floating',
     floatingFraming: overrides.floatingFraming ?? 'beams-and-joists',
+    beamConnection: overrides.beamConnection ?? 'drop',
     foundation: overrides.foundation ?? TUFFBLOCK_FOUNDATION,
     joist: { material: overrides.joist ?? PT_2X8, spacingMm: 406 },
     beam: { material: overrides.beam ?? PT_2X8 },
@@ -92,6 +94,7 @@ describe('computeMinFloatingHeightMm — Method A (beams + joists)', () => {
     const design = makeFloating({
       beam: PT_2X10,
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
     });
     const beam = lookupMaterial('2x10', 'PT', 'No2');
     const joist = lookupMaterial('2x8', 'PT', 'No2');

@@ -51,6 +51,7 @@ interface FloatOverrides {
   heightMm?: Mm;
   spacingMm?: Mm;
   floatingFraming?: DeckDesign['floatingFraming'];
+  beamConnection?: DeckDesign['beamConnection'];
   foundation?: FoundationSpec;
 }
 
@@ -70,12 +71,13 @@ function makeFloatingDesign(overrides: FloatOverrides = {}): DeckDesign {
       heightMm: overrides.heightMm ?? 500,
     },
     structure: 'floating',
+    floatingFraming: overrides.floatingFraming ?? 'beams-and-joists',
+    beamConnection: overrides.beamConnection ?? 'drop',
     foundation: overrides.foundation ?? TUFFBLOCK_FOUNDATION,
     joist: { material: PT_2X8, spacingMm: overrides.spacingMm ?? 406 },
     beam: { material: PT_2X8 },
     decking: { material: PT_54, orientation: 'parallel-to-width' },
     layout: { bayRemainderStrategy: 'extra-bay-at-end' },
-    floatingFraming: overrides.floatingFraming ?? 'beams-and-joists',
   };
 }
 
@@ -209,6 +211,7 @@ describe('Method B (joists-on-blocks): joists directly on blocks, no beams', () 
   it('emits joists at design.joist.spacingMm and ZERO beams', () => {
     const design = makeFloatingDesign({
       floatingFraming: 'joists-on-blocks',
+      beamConnection: 'drop',
     });
     const layout = computeFloatingLayout(design);
     const joists = layout.members.filter((m) => m.kind === 'joist');
@@ -223,6 +226,7 @@ describe('Method B (joists-on-blocks): joists directly on blocks, no beams', () 
       widthFt: 16,
       spacingMm: 406,
       floatingFraming: 'joists-on-blocks',
+      beamConnection: 'drop',
     });
     const layout = computeFloatingLayout(design);
     const joists = layout.members.filter((m) => m.kind === 'joist');
@@ -232,6 +236,7 @@ describe('Method B (joists-on-blocks): joists directly on blocks, no beams', () 
   it('joists rest ON TOP of blocks (joist bottom flush with block top y=0)', () => {
     const design = makeFloatingDesign({
       floatingFraming: 'joists-on-blocks',
+      beamConnection: 'drop',
     });
     const layout = computeFloatingLayout(design);
     const joists = layout.members.filter((m) => m.kind === 'joist');
@@ -247,6 +252,7 @@ describe('Method B (joists-on-blocks): joists directly on blocks, no beams', () 
   it('decking sits directly on joists (Method B stack is decking → joists → blocks)', () => {
     const design = makeFloatingDesign({
       floatingFraming: 'joists-on-blocks',
+      beamConnection: 'drop',
     });
     const layout = computeFloatingLayout(design);
     const joists = layout.members.filter((m) => m.kind === 'joist');
@@ -268,10 +274,12 @@ describe('Floating y-stack — method-dependent minimum height', () => {
     // Delta = beam.depth (184 mm for 2×8).
     const methodA = makeFloatingDesign({
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
       heightMm: 500,
     });
     const methodB = makeFloatingDesign({
       floatingFraming: 'joists-on-blocks',
+      beamConnection: 'drop',
       heightMm: 500,
     });
     const layoutA = computeFloatingLayout(methodA);
@@ -318,6 +326,7 @@ describe('Elevated path is unaffected by floatingFraming', () => {
       decking: { material: PT_54, orientation: 'parallel-to-width' },
       layout: { bayRemainderStrategy: 'extra-bay-at-end' },
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
     };
     const layoutA = computeLayout(base, { now: () => base.createdAt });
     const layoutB = computeLayout(
@@ -432,6 +441,7 @@ describe('FIX #2 — floating joist-spacing validation (safety guard)', () => {
       decking: { material: PT_54, orientation: 'parallel-to-width' },
       layout: { bayRemainderStrategy: 'extra-bay-at-end' },
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
     };
     for (const bad of [0, Number.NaN, 30]) {
       const design: DeckDesign = {

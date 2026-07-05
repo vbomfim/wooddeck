@@ -10,19 +10,45 @@
  * modules from drifting apart on the "how tall is the deck built up?"
  * question.
  *
- * ## The stack (top-down, y decreasing)
+ * ## The stack (top-down, y decreasing) — DEPENDS ON `beamConnection`
  *
- *   1. Decking TOP           at y = footprint.heightMm            (= "the surface the user walks on")
- *   2. Decking CENTER        at y = heightMm - deckingThickness/2
- *   3. Decking BOTTOM        at y = heightMm - deckingThickness    (= joist TOP)
- *   4. Joist  CENTER         at y = deckingBottom - joistDepth/2
- *   5. Joist  BOTTOM         at y = deckingBottom - joistDepth     (= beam TOP)
- *   6. Beam   CENTER         at y = joistBottom  - beamDepth/2
- *   7. Beam   BOTTOM         at y = beamTop      - beamDepth        (= post TOP)
- *   8. Post   CENTER         at y = postBottom + postHeight/2
- *   9. Post   BOTTOM         at y = 0                                (= footing TOP, ground plane)
- *  10. Footing CENTER        at y = -FOOTING_DEPTH_MM / 2            (footing extends into -y)
- *  11. Footing BOTTOM        at y = -FOOTING_DEPTH_MM
+ * ### `beamConnection: 'drop'` (default, MVP pre-S27 behavior)
+ *
+ * Joist BOTTOM rests on beam TOP. Beam sits UNDER the joists,
+ * classic drop-beam construction. The stack is:
+ *
+ *   1. Decking TOP           at y = footprint.heightMm            (= walking surface)
+ *   2. Decking BOTTOM        at y = heightMm - deckingThickness    (= joist TOP)
+ *   3. Joist  BOTTOM         at y = deckingBottom - joistDepth     (= beam TOP)
+ *   4. Beam   BOTTOM         at y = joistBottom  - beamDepth        (= post TOP)
+ *   5. Post   BOTTOM         at y = 0                                (= footing TOP)
+ *
+ * Above-ground stack depth = deckingThickness + joistDepth + beamDepth.
+ *
+ * ### `beamConnection: 'flush'` (S27 new)
+ *
+ * Joist TOP is LEVEL with beam TOP — joists are hung on the SIDE of
+ * the beam with joist hangers. The beam extends DOWNWARD beside the
+ * joist ends. The decking still rests on the joist top (= beam top).
+ *
+ *   1. Decking TOP           at y = footprint.heightMm            (= walking surface)
+ *   2. Decking BOTTOM        at y = heightMm - deckingThickness    (= joist TOP = beam TOP)
+ *   3. Joist  BOTTOM         at y = deckingBottom - joistDepth
+ *   4. Beam   BOTTOM         at y = deckingBottom - beamDepth       (= post TOP)
+ *   5. Post   BOTTOM         at y = 0                                (= footing TOP)
+ *
+ * Above-ground stack depth = deckingThickness + max(joistDepth, beamDepth).
+ * The joist and beam OVERLAP vertically by min(joistDepth, beamDepth).
+ *
+ * Note: for equal joist / beam depths (the typical case) the flush
+ * stack is exactly `joistDepth` shorter than the drop stack, so the
+ * posts extend `joistDepth` LOWER for the same walking-surface
+ * height.
+ *
+ * Below-decking footing anchors are unchanged:
+ *
+ *  6. Footing CENTER        at y = -FOOTING_DEPTH_MM / 2
+ *  7. Footing BOTTOM        at y = -FOOTING_DEPTH_MM
  *
  * `deckingThickness` = decking material `actual.widthMm` (the SMALLER
  * dressed dimension — boards are laid FLAT, so the visible face is the
@@ -38,12 +64,14 @@
  *
  * ## Height-zero edge case
  *
- * When `footprint.heightMm` is small enough that (deckingThickness +
- * joistDepth + beamDepth) is ≥ heightMm, `postHeight` clamps to 0. This
- * matches the ticket's height-zero edge case ("posts have zero y-extent;
- * footings still placed"). Above-ground stack members still get their
- * correct y-positions relative to the top; the y-stack simply stops
- * at the beam bottom, which happens to be at or below y=0.
+ * When `footprint.heightMm` is small enough that the framing stack
+ * (drop: deckingThickness + joistDepth + beamDepth; flush:
+ * deckingThickness + max(joistDepth, beamDepth)) is ≥ heightMm,
+ * `postHeight` clamps to 0 or negative. This matches the ticket's
+ * height-zero edge case ("posts have zero y-extent; footings still
+ * placed"). Above-ground stack members still get their correct
+ * y-positions relative to the top; the y-stack simply stops at the
+ * beam bottom, which happens to be at or below y=0.
  *
  * ## Framework/DOM ban
  *
@@ -55,6 +83,7 @@
 import { lookupMaterial } from '../materials-catalog';
 import type { DeckDesign } from '../model';
 import type { Mm } from '../units';
+import { assertNever } from '../assert-never';
 
 /**
  * Depth of an in-ground concrete footing pier — a fixed MVP default.
@@ -139,11 +168,46 @@ export function computeYStack(design: DeckDesign): YStack {
   const deckingBottomY = deckingTopY - deckingThicknessMm;
   const deckingCenterY = deckingTopY - deckingThicknessMm / 2;
 
-  const joistBottomY = deckingBottomY - joistDepthMm;
-  const joistCenterY = deckingBottomY - joistDepthMm / 2;
-
-  const beamBottomY = joistBottomY - beamDepthMm;
-  const beamCenterY = joistBottomY - beamDepthMm / 2;
+  // Dispatch on `beamConnection` — the ONE seam that separates
+  // classic "drop beam" (joists rest on beam) from "flush beam"
+  // (joists hung on beam side; joist and beam TOPS level, joist
+  // hangers bear the load). See module header for the full
+  // ASCII stack diagram for both branches.
+  //
+  // Exhaustive switch — TypeScript's control-flow analysis
+  // guarantees the `default:` branch is unreachable via
+  // `assertNever`; a corrupt persisted value that widens the
+  // union will fail loud at runtime instead of silently drifting
+  // through with `undefined` positions.
+  let joistBottomY: Mm;
+  let joistCenterY: Mm;
+  let beamBottomY: Mm;
+  let beamCenterY: Mm;
+  switch (design.beamConnection) {
+    case 'drop':
+      // MVP pre-S27 behavior — joist bottom on beam top.
+      // Beam extends DOWNWARD from the joist bottom; the two
+      // members are stacked, not overlapping.
+      joistBottomY = deckingBottomY - joistDepthMm;
+      joistCenterY = deckingBottomY - joistDepthMm / 2;
+      beamBottomY = joistBottomY - beamDepthMm;
+      beamCenterY = joistBottomY - beamDepthMm / 2;
+      break;
+    case 'flush':
+      // S27 new — joist TOP flush with beam TOP. Beam still on
+      // edge, but its top coincides with the joist top (=
+      // decking bottom). The two members OVERLAP vertically by
+      // `min(joistDepth, beamDepth)`; the stack is
+      // correspondingly shorter, so the post height GROWS by
+      // that overlap for the same walking-surface height.
+      joistBottomY = deckingBottomY - joistDepthMm;
+      joistCenterY = deckingBottomY - joistDepthMm / 2;
+      beamBottomY = deckingBottomY - beamDepthMm;
+      beamCenterY = deckingBottomY - beamDepthMm / 2;
+      break;
+    default:
+      assertNever(design.beamConnection, 'computeYStack: design.beamConnection');
+  }
 
   // Post height = distance from ground plane (y=0) to the underside of
   // the beam. For a design that passed `validateDesign` this is
@@ -177,4 +241,47 @@ export function computeYStack(design: DeckDesign): YStack {
     footingCenterY,
     footingTopY,
   };
+}
+
+/**
+ * S27 review-response HIGH #3 — compute the framing-stack contribution
+ * to the minimum structural height in ONE place, dispatched on
+ * `beamConnection`. Both `layout-engine.computeMinStructuralHeightMm`
+ * (elevated) and any future caller MUST derive their min-height from
+ * the same helper — the min IS the y-stack, just with the post
+ * collapsed to `MIN_POST_HEIGHT_MM`.
+ *
+ *   - `'drop'`  (unchanged from pre-S27):
+ *       `decking + joist + beam + MIN_POST`
+ *       — joist stacks ON TOP of beam, no overlap.
+ *   - `'flush'` (S27 new):
+ *       `decking + max(joistDepth, beamDepth) + MIN_POST`
+ *       — joist and beam OVERLAP vertically (tops flush); the taller
+ *       of the two dictates the stack. `validateFlushBeamDepth`
+ *       guarantees `beamDepth >= joistDepth` for flush, so this is
+ *       equivalent to `decking + beamDepth + MIN_POST` in practice —
+ *       but computing it as `max(...)` documents the geometry
+ *       correctly and stays correct even if a future caller applies
+ *       this helper before validation.
+ *
+ * Pure function on primitives so it is trivially unit-testable and
+ * has no material-catalog dependency (callers do the lookup).
+ */
+export function computeFramingStackMm(input: {
+  readonly beamConnection: DeckDesign['beamConnection'];
+  readonly deckingThicknessMm: Mm;
+  readonly joistDepthMm: Mm;
+  readonly beamDepthMm: Mm;
+}): Mm {
+  const { beamConnection, deckingThicknessMm, joistDepthMm, beamDepthMm } = input;
+  switch (beamConnection) {
+    case 'drop':
+      return deckingThicknessMm + joistDepthMm + beamDepthMm + MIN_POST_HEIGHT_MM;
+    case 'flush':
+      return (
+        deckingThicknessMm + Math.max(joistDepthMm, beamDepthMm) + MIN_POST_HEIGHT_MM
+      );
+    default:
+      assertNever(beamConnection, 'computeFramingStackMm: beamConnection');
+  }
 }

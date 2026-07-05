@@ -232,6 +232,24 @@ describe('useDesignStore — AC2 zundo undo/redo scaffold', () => {
     expect(useDesignStore.getState().bundle.design.footprint.widthMm).toBe(beforeWidth);
   });
 
+  it('G3 (S27 review-response): undo/redo restores beamConnection after a flush toggle', () => {
+    // The store default is `beamConnection: 'drop'`. Toggle to flush,
+    // assert the toggle stuck, undo, assert we are back on drop,
+    // redo, assert we are back on flush. This pins that
+    // `beamConnection` — a top-level scalar added to `DeckDesign` in
+    // S27 — participates in zundo's history exactly like every other
+    // design field (a field left OUT of the partialize would silently
+    // fail to restore).
+    const initial = useDesignStore.getState().bundle.design.beamConnection;
+    expect(initial).toBe('drop');
+    useDesignStore.getState().applyParameters({ beamConnection: 'flush' });
+    expect(useDesignStore.getState().bundle.design.beamConnection).toBe('flush');
+    useDesignStore.temporal.getState().undo();
+    expect(useDesignStore.getState().bundle.design.beamConnection).toBe('drop');
+    useDesignStore.temporal.getState().redo();
+    expect(useDesignStore.getState().bundle.design.beamConnection).toBe('flush');
+  });
+
   it('tracks only bundle (partialize) — status/lastError transitions do NOT hit pastStates', () => {
     // Seed some history so pastStates count is > 0.
     useDesignStore.getState().applyParameters({
@@ -888,6 +906,7 @@ describe('useDesignStore — applyRemediation action (S16 issue #38)', () => {
       },
       structure: 'floating',
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
       foundation: {
         type: 'tuffblocks',
         product: { productId: 'tuffblock-12x12x4' },
@@ -1388,6 +1407,7 @@ describe('useDesignStore — S23 QA G3: structure switch + undo has no orphan ke
     useDesignStore.getState().applyParameters({
       structure: 'floating',
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
       foundation: {
         type: 'tuffblocks',
         product: { productId: 'tuffblock-12x12x4' },
@@ -1443,6 +1463,7 @@ describe('useDesignStore — S23 QA G3: structure switch + undo has no orphan ke
     useDesignStore.getState().applyParameters({
       structure: 'floating',
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
       foundation: {
         type: 'tuffblocks',
         product: { productId: 'tuffblock-12x12x4' },
@@ -1464,6 +1485,7 @@ describe('useDesignStore — S23 QA G3: structure switch + undo has no orphan ke
     useDesignStore.getState().applyParameters({
       structure: 'elevated',
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
       foundation: {
         type: 'posts-on-footings',
         post: {

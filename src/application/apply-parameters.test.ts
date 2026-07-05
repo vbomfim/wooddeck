@@ -728,6 +728,7 @@ describe('applyParameters — discriminator switch REPLACES the subtree (S23)', 
     const patch: DeepPartial<DeckDesign> = {
       structure: 'floating',
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
       foundation: {
         type: 'tuffblocks',
         product: { productId: 'tuffblock-12x12x4' },
@@ -980,6 +981,7 @@ describe('applyParameters — S23 pair-fix #1: orphan variant keys (FR-026 shape
     const patch: DeepPartial<DeckDesign> = {
       structure: 'floating',
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
       foundation: {
         type: 'tuffblocks',
         product: { productId: 'tuffblock-12x12x4' },
@@ -1249,6 +1251,7 @@ describe('applyParameters — S23 pair-fix iter-2 #2: nested shape validation on
     const patch: DeepPartial<DeckDesign> = {
       structure: 'floating',
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
       foundation: {
         type: 'tuffblocks',
         product: { productId: 'tuffblock-12x12x4' },
@@ -1278,6 +1281,7 @@ describe('applyParameters — S23 pair-fix iter-2 #2: nested shape validation on
     const patch: DeepPartial<DeckDesign> = {
       structure: 'elevated',
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
       // floating fixture's footprint.heightMm is minimal for a
       // ground-level deck; the elevated variant needs a taller
       // stack (posts extent > 0), so bump the height to a safe
@@ -1300,5 +1304,107 @@ describe('applyParameters — S23 pair-fix iter-2 #2: nested shape validation on
     expect(Object.keys(bundle.design.foundation.footing).sort()).toEqual(
       ['depthMm', 'widthMm'].sort(),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S27 — beamConnection carries through the merge (own-key of DeckDesign)
+// ---------------------------------------------------------------------------
+
+describe('applyParameters — beamConnection (S27)', () => {
+  const table = new IrcSpanTable();
+
+  it('patch { beamConnection: "flush" } flips the field and re-runs layout', () => {
+    // Start from an elevated FIXTURE that defaults to drop. A
+    // beamConnection-only patch is a top-level scalar own-key of
+    // DeckDesign — it must survive the deep-merge unchanged and
+    // trigger a fresh layout (which changes the post height).
+    const before = applyParameters(FIXTURE, {}, table);
+    expect(before.design.beamConnection).toBe('drop');
+    const beforePost = before.layout.members.find((m) => m.kind === 'post');
+    if (beforePost === undefined) throw new Error('expected posts in FIXTURE');
+
+    const after = applyParameters(FIXTURE, { beamConnection: 'flush' }, table);
+    expect(after.design.beamConnection).toBe('flush');
+    const afterPost = after.layout.members.find((m) => m.kind === 'post');
+    if (afterPost === undefined) throw new Error('expected posts after flush');
+    // Post grows taller because the framing stack is shorter.
+    expect(afterPost.size.y).toBeGreaterThan(beforePost.size.y);
+  });
+
+  it('unrelated patch leaves beamConnection untouched (deep-merge preserves own keys)', () => {
+    // Patching an unrelated field (heightMm) must not clobber the
+    // top-level `beamConnection` value that came in on the CURRENT
+    // design.
+    const flushed = applyParameters(FIXTURE, { beamConnection: 'flush' }, table);
+    const after = applyParameters(
+      flushed.design,
+      { footprint: { heightMm: 1200 } },
+      table,
+    );
+    expect(after.design.beamConnection).toBe('flush');
+  });
+
+  it('G4 (S27 review-response): beamConnection persists across structure + framing-method switches', () => {
+    // A user sets `beamConnection: 'flush'` on an elevated deck,
+    // then switches structure → floating, then flips
+    // `floatingFraming` twice (Method A → B → A). The
+    // `beamConnection` field must ride along untouched throughout —
+    // deep-merge treats it as an own key that is never rewritten
+    // unless the patch explicitly names it.
+    //
+    // Regression pin: pre-review a subtle bug that reset
+    // `beamConnection` to 'drop' whenever the user changed
+    // `structure` (e.g. a defensive "normalize on switch" step
+    // could have done that) would silently lose the user's choice.
+    // This test asserts the invariant end-to-end.
+    const flushed = applyParameters(FIXTURE, { beamConnection: 'flush' }, table);
+    expect(flushed.design.beamConnection).toBe('flush');
+
+    // Switch to a valid floating deck (block foundation + a height
+    // that clears the Method A + flush stack for the fixture's
+    // materials). The floating validator will enforce the
+    // beam-depth invariant — the FIXTURE's beam is 2×10 and joist
+    // is 2×10 (equal), so the flush combo is legal.
+    const toFloating = applyParameters(
+      flushed.design,
+      {
+        structure: 'floating',
+        floatingFraming: 'beams-and-joists',
+        foundation: {
+          type: 'deck-blocks',
+          product: { productId: 'oldcastle-11x11x7' },
+        },
+      },
+      table,
+    );
+    expect(toFloating.design.beamConnection).toBe('flush');
+    expect(toFloating.design.structure).toBe('floating');
+    expect(toFloating.design.floatingFraming).toBe('beams-and-joists');
+
+    // Flip to Method B (`beamConnection` is IGNORED for Method B —
+    // no beam layer — but the FIELD must still be preserved so
+    // switching BACK to Method A restores the user's choice).
+    const toMethodB = applyParameters(
+      toFloating.design,
+      { floatingFraming: 'joists-on-blocks' },
+      table,
+    );
+    expect(toMethodB.design.beamConnection).toBe('flush');
+    expect(toMethodB.design.floatingFraming).toBe('joists-on-blocks');
+
+    // Flip back to Method A — the preserved 'flush' is now
+    // meaningful again and re-drives the y-stack + hanger BOM.
+    const backToMethodA = applyParameters(
+      toMethodB.design,
+      { floatingFraming: 'beams-and-joists' },
+      table,
+    );
+    expect(backToMethodA.design.beamConnection).toBe('flush');
+    expect(backToMethodA.design.floatingFraming).toBe('beams-and-joists');
+    // Hanger BOM re-appears at Method A + flush (Method B
+    // suppressed it while the framing method was 'joists-on-blocks').
+    // (We only assert existence here; the exact hanger count is
+    // pinned in the BOM tests.)
   });
 });

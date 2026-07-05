@@ -137,6 +137,10 @@ function makeFixture(
     // immediately after `structure` for field-order consistency
     // (S26 FIX #7 / Opus#6).
     floatingFraming: 'beams-and-joists',
+    // S27 (feat/joist-beam-connection) — v1→v2 migration stamps
+    // the classic drop-beam connection (joists on TOP of beams).
+    // Every v1 file's implicit convention. See `migrateV1ToV2`.
+    beamConnection: 'drop',
     foundation: {
       type: 'posts-on-footings',
       post: { ...design.post.material },

@@ -127,3 +127,68 @@ export function validateJoistSpacing(design: DeckDesign): void {
     );
   }
 }
+
+/**
+ * S27 review-response HIGH #2 — flush-beam physical-plausibility guard.
+ *
+ * In FLUSH framing, the joist hangs OFF THE BEAM FACE via a joist
+ * hanger (top-flange or face-mount), so the joist bottom is at
+ * `beamTop − joistDepth`. When `joistDepth > beamDepth`, the joist
+ * physically extends BELOW the beam bottom — impossible to hang
+ * off a beam that isn't tall enough. Pre-S27-review the y-stack
+ * silently produced this geometry (e.g. 2×10 joist + 2×8 beam
+ * flush → joistBottomY = −51 mm at the min-height boundary — a
+ * joist underground).
+ *
+ * The invariant only applies when the design HAS beams AND the
+ * joists are hung off them:
+ *
+ *   - `beamConnection === 'flush'`
+ *   - `structure === 'elevated'` (2 beams always) OR
+ *     `structure === 'floating' && floatingFraming === 'beams-and-joists'`
+ *     (Method A — 2 rim beams). Method B (`joists-on-blocks`) has
+ *     NO beam layer and this check MUST NOT fire — that's why the
+ *     caller (validateFloatingDesign) guards on `floatingFraming`.
+ *
+ * The error message names both depths and prescribes the two
+ * remediations (deeper beam OR switch to drop) so the
+ * ParameterPanel banner (surfaced via `useDesignStatus().lastError`)
+ * is directly actionable — no separate UI code needed.
+ *
+ * @throws {LayoutError} when the invariant is violated, or when a
+ *   material lookup fails (wrapped with `cause`).
+ */
+export function validateFlushBeamDepth(design: DeckDesign): void {
+  if (design.beamConnection !== 'flush') return;
+  let joistDepthMm: Mm;
+  let beamDepthMm: Mm;
+  try {
+    joistDepthMm = lookupMaterial(
+      design.joist.material.nominal,
+      design.joist.material.species,
+      design.joist.material.grade,
+    ).actual.heightMm;
+    beamDepthMm = lookupMaterial(
+      design.beam.material.nominal,
+      design.beam.material.species,
+      design.beam.material.grade,
+    ).actual.heightMm;
+  } catch (err) {
+    throw new LayoutError(
+      `Invalid framing material for flush-beam depth check: ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+      { cause: err },
+    );
+  }
+  if (joistDepthMm > beamDepthMm) {
+    throw new LayoutError(
+      `Flush-beam framing requires the beam to be at least as deep as the joist ` +
+        `(the joist hangs from the beam face via a hanger, so a deeper joist ` +
+        `would extend below the beam bottom). Got joist depth ${joistDepthMm} mm ` +
+        `(${design.joist.material.nominal}) > beam depth ${beamDepthMm} mm ` +
+        `(${design.beam.material.nominal}). Choose a beam nominal that is at ` +
+        `least as deep as the joist, or switch to Drop beam (joists rest on ` +
+        `top of the beam).`,
+    );
+  }
+}

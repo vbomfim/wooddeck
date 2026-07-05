@@ -77,6 +77,7 @@ function makeDesign(overrides: DesignOverrides = {}): DeckDesign {
     },
     structure: 'elevated',
     floatingFraming: 'beams-and-joists',
+    beamConnection: 'drop',
     foundation: {
       type: 'posts-on-footings',
       post: { nominal: '6x6', species: 'PT', grade: 'No2' },
@@ -1158,6 +1159,7 @@ function makeFloating(overrides: {
     },
     structure: 'floating',
     floatingFraming: framing,
+    beamConnection: 'drop',
     foundation,
     joist: { material: PT_2X8, spacingMm: 406 },
     beam: { material: PT_2X8 },
@@ -1335,6 +1337,7 @@ describe('computeRemediations — S25 add-support-row (ticket #47)', () => {
       }),
       structure: 'floating',
       floatingFraming: 'joists-on-blocks',
+      beamConnection: 'drop',
       // Intentionally-invalid combination for the AC6 defensive
       // check. Cast is safe here because the compat-matrix would
       // reject this at load; the point is to prove computeRemediations

@@ -499,6 +499,7 @@ describe('deserialize — AC4 v2 schema rejects malformed Epic-2 fields', () => 
     const rogue = envelopeWithDesignPatch({
       structure: 'floating',
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
       foundation: {
         type: 'deck-blocks',
         product: { productId: 'unknown-sku-999' },
@@ -938,5 +939,255 @@ describe('deserialize — S26 FIX #3: pre-S26 floating decks default to Method B
     // Regex requires `"structure":"..."` to appear IMMEDIATELY before
     // `,"floatingFraming":"..."` with no intervening properties.
     expect(json).toMatch(/"structure":"[^"]+","floatingFraming":"[^"]+"/);
+  });
+});
+
+// ===========================================================================
+// S27 — feat/joist-beam-connection (`beamConnection` field)
+// ===========================================================================
+//
+// The v2 schema is EXTENDED with a new OPTIONAL string enum field:
+//
+//     "beamConnection": "drop" | "flush"      -- OPTIONAL in the schema
+//
+// On the WIRE the field is optional so pre-S27 v2 files still load. Inside
+// the domain type it is REQUIRED (see `model.ts` — the load path stamps a
+// default of `'drop'` via `finalizeBeamConnection` when missing, which
+// preserves pre-S27 semantics: joists rest on beam tops).
+//
+// The finalize helper MIRRORS the S26 `finalizeFloatingFraming` pattern
+// (one seam routing both v1-migration and v2-native load paths through a
+// single defaulter). The stamp helper `stampBeamConnection` rebuilds the
+// design in CANONICAL key order (immediately after `floatingFraming`), so
+// a loaded design and a factory-constructed design serialize byte-for-byte
+// identically.
+
+describe('deserialize — S27 beamConnection load defaults + canonical order', () => {
+  const OPTS = {
+    createdAt: '2026-07-04T00:00:00.000Z',
+    generatorVersion: '1.0.0',
+  } as const;
+
+  function makeV2EnvelopeMissingBeamConn(): string {
+    // Build a valid v2 envelope from GOLDEN_DECK_DESIGN, then strip
+    // `beamConnection` from the design payload. The field is
+    // OPTIONAL in the v2 schema exactly so this is a legal payload.
+    const s = serialize(GOLDEN_DECK_DESIGN, OPTS);
+    const parsed = JSON.parse(s) as DeckFileV2;
+    const rawDesign = { ...parsed.design } as Record<string, unknown>;
+    delete rawDesign['beamConnection'];
+    const patchedEnv = { ...parsed, design: rawDesign };
+    return JSON.stringify(patchedEnv);
+  }
+
+  it('pre-S27 v2 file (no beamConnection field) loads with beamConnection="drop" (preserves pre-S27 geometry)', () => {
+    const rogue = makeV2EnvelopeMissingBeamConn();
+    const { design } = deserialize(rogue);
+    expect(design.beamConnection).toBe('drop');
+  });
+
+  it('v2 file with beamConnection="flush" loads with beamConnection="flush" (round-trip)', () => {
+    // Round-trip: start from GOLDEN, apply flush, serialize,
+    // deserialize; the loaded design must carry `'flush'`.
+    const flushDesign = {
+      ...GOLDEN_DECK_DESIGN,
+      beamConnection: 'flush' as const,
+    };
+    const s = serialize(flushDesign, OPTS);
+    const { design } = deserialize(s);
+    expect(design.beamConnection).toBe('flush');
+  });
+
+  it('an INVALID beamConnection enum value is REJECTED by Ajv', () => {
+    // Reject `'bogus'` via the schema's enum constraint.
+    const s = serialize(GOLDEN_DECK_DESIGN, OPTS);
+    const parsed = JSON.parse(s) as DeckFileV2;
+    const patched = {
+      ...parsed,
+      design: { ...parsed.design, beamConnection: 'bogus-value' },
+    };
+    expect(() => deserialize(JSON.stringify(patched))).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  it('stamps beamConnection in the CANONICAL property order (immediately after `floatingFraming`)', () => {
+    // Loading a pre-S27 v2 file that lacks `beamConnection` stamps
+    // the default. The resulting design's key order must place
+    // `beamConnection` right after `floatingFraming`, NOT at the
+    // end. Mirrors the S26 FIX #7 residual guard above.
+    const rogue = makeV2EnvelopeMissingBeamConn();
+    const { design } = deserialize(rogue);
+    const keys = Object.keys(design);
+    const framingIdx = keys.indexOf('floatingFraming');
+    const bcIdx = keys.indexOf('beamConnection');
+    expect(framingIdx).toBeGreaterThanOrEqual(0);
+    expect(bcIdx).toBe(framingIdx + 1);
+    // Not the last key (which is where a naive
+    // `{ ...design, beamConnection: X }` spread would put it).
+    expect(bcIdx).not.toBe(keys.length - 1);
+  });
+
+  it('stamped design JSON-serializes with beamConnection immediately after floatingFraming (byte-order regression)', () => {
+    const rogue = makeV2EnvelopeMissingBeamConn();
+    const { design } = deserialize(rogue);
+    const json = JSON.stringify(design);
+    expect(json).toMatch(
+      /"floatingFraming":"[^"]+","beamConnection":"[^"]+"/,
+    );
+  });
+
+  it('round-trip byte identity: serialize(design) then deserialize + re-serialize is byte-identical', () => {
+    // The finalize helpers preserve canonical order under load, so
+    // a design that was written then read then re-written must
+    // produce the same bytes. This is the load-then-save
+    // invariant that pins the schema's contract.
+    const first = serialize(GOLDEN_DECK_DESIGN, OPTS);
+    const { design } = deserialize(first);
+    const second = serialize(design, OPTS);
+    expect(second).toBe(first);
+  });
+
+  // G5 (S27 review-response) — parametrized byte-identity save/load
+  // round-trip over drop AND flush. Pins that the presence of the
+  // 'flush' value on the wire does not break canonical ordering
+  // (already the case for 'drop' — the golden defaults there). If a
+  // future refactor accidentally lower-cased or reordered the field
+  // for one variant only, this test fires.
+  it.each(['drop', 'flush'] as const)(
+    'G5: byte-identity round-trip for beamConnection = %s',
+    (bc) => {
+      const design = { ...GOLDEN_DECK_DESIGN, beamConnection: bc };
+      const first = serialize(design, OPTS);
+      const { design: reloaded } = deserialize(first);
+      expect(reloaded.beamConnection).toBe(bc);
+      const second = serialize(reloaded, OPTS);
+      expect(second).toBe(first);
+    },
+  );
+});
+
+// -----------------------------------------------------------------
+// S27 review-response HIGH regression — finalize ordering under
+// missing BOTH optional fields.
+//
+// `finalizeDesign = finalizeBeamConnection ∘ finalizeFloatingFraming`
+// runs `finalizeFloatingFraming` FIRST. That helper PROBES Method-A
+// vs Method-B by computing floating heights (`computeMinFloating-
+// HeightMm`, which reaches `computeYStackFloating`). After S27's
+// hardening, the floating y-stack has an exhaustive
+// `switch (beamConnection)` with `default: assertNever(...)`. When
+// a pre-S27 v2 file is missing BOTH `floatingFraming` AND
+// `beamConnection`, `beamConnection` is still `undefined` during the
+// probe → `assertNever(undefined)` throws → the broad `try/catch` in
+// the probe swallows the error and falls back to Method A. A
+// low-profile floating file that SHOULD default to Method B then
+// fails Method-A's height validation and becomes silently
+// unopenable.
+//
+// Fix: reorder `finalizeDesign` so `finalizeBeamConnection` runs
+// FIRST. That way the height-probe always sees a defined
+// `beamConnection` (`'drop'`). Also make the probe defensive
+// (`beamConnection: design.beamConnection ?? 'drop'`) so a future
+// caller can't hit the same failure mode.
+// -----------------------------------------------------------------
+
+describe('deserialize — S27 review-response: finalize order regression (missing BOTH optional fields)', () => {
+  const OPTS = {
+    createdAt: '2026-07-04T00:00:00.000Z',
+    generatorVersion: '1.0.0',
+  } as const;
+
+  function makeV2EnvelopeMissingBoth(
+    designPatch: Record<string, unknown>,
+  ): string {
+    // Build a valid v2 envelope from GOLDEN_DECK_DESIGN, then strip
+    // BOTH `floatingFraming` AND `beamConnection` from the design
+    // payload (both are OPTIONAL in the v2 schema, so this is a
+    // legal payload — representative of a pre-S26 v2 `.deck` file
+    // that was written before either field existed).
+    const s = serialize(GOLDEN_DECK_DESIGN, OPTS);
+    const parsed = JSON.parse(s) as DeckFileV2;
+    const rawDesign = { ...parsed.design, ...designPatch } as Record<
+      string,
+      unknown
+    >;
+    delete rawDesign['floatingFraming'];
+    delete rawDesign['beamConnection'];
+    const patchedEnv = { ...parsed, design: rawDesign };
+    return JSON.stringify(patchedEnv);
+  }
+
+  it('low-profile floating design missing BOTH fields defaults to Method B + drop, loads without throwing (fix for assertNever regression)', () => {
+    // 209 mm is a legal pre-S26 min floating height (joistDepth 184
+    // + deckingThickness 25) that lives in the Method-B-legal /
+    // Method-A-too-short corridor `[methodBMin, methodAMin)`. Under
+    // the pre-fix finalize order, the probe throws inside the
+    // `switch (beamConnection)` on `assertNever(undefined)`; the
+    // catch swallows it and stamps Method A; then Method A's height
+    // validation rejects the design and `computeLayout` throws.
+    //
+    // Post-fix (finalizeBeamConnection runs FIRST), the probe sees
+    // `beamConnection: 'drop'` and correctly classifies the design
+    // as Method B — the design loads and computes a valid layout.
+    const rogue = makeV2EnvelopeMissingBoth({
+      structure: 'floating',
+      foundation: {
+        type: 'tuffblocks',
+        product: { productId: 'tuffblock-12x12x4' },
+      },
+      footprint: {
+        widthMm: 4 * 304.8,
+        lengthMm: 4 * 304.8,
+        heightMm: 209,
+      },
+    });
+    // Load must not throw.
+    const { design } = deserialize(rogue);
+    // Both fields defaulted correctly.
+    expect(design.floatingFraming).toBe('joists-on-blocks');
+    expect(design.beamConnection).toBe('drop');
+    // Downstream computeLayout must succeed — this is the
+    // "silently unopenable" contract this test defends.
+    expect(() =>
+      computeLayout(design, { now: () => '2026-07-04T00:00:00.000Z' }),
+    ).not.toThrow();
+  });
+
+  it('elevated design missing BOTH fields defaults to Method A + drop, loads without throwing', () => {
+    // Elevated ignores `floatingFraming` at layout time, but the
+    // finalizer still stamps a value. `beamConnection` defaults to
+    // `'drop'`. Pre-fix this path did NOT throw (the probe is
+    // gated on `structure === 'floating'`) — this test guards
+    // against a regression that would generalize the bug.
+    const rogue = makeV2EnvelopeMissingBoth({}); // elevated is GOLDEN default
+    const { design } = deserialize(rogue);
+    expect(design.structure).toBe('elevated');
+    expect(design.floatingFraming).toBe('beams-and-joists');
+    expect(design.beamConnection).toBe('drop');
+    expect(() =>
+      computeLayout(design, { now: () => '2026-07-04T00:00:00.000Z' }),
+    ).not.toThrow();
+  });
+
+  it('comfortable-height floating design missing BOTH fields defaults to Method A + drop', () => {
+    // 500 mm comfortably clears Method A min for the fixture
+    // materials — the classifier stamps the canonical Method A
+    // default. `beamConnection` still defaults to `'drop'`.
+    const rogue = makeV2EnvelopeMissingBoth({
+      structure: 'floating',
+      foundation: {
+        type: 'tuffblocks',
+        product: { productId: 'tuffblock-12x12x4' },
+      },
+      footprint: {
+        widthMm: 4 * 304.8,
+        lengthMm: 4 * 304.8,
+        heightMm: 500,
+      },
+    });
+    const { design } = deserialize(rogue);
+    expect(design.floatingFraming).toBe('beams-and-joists');
+    expect(design.beamConnection).toBe('drop');
   });
 });

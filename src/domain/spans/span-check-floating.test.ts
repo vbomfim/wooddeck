@@ -65,6 +65,7 @@ function makeFloating(overrides: Partial<{
     },
     structure: 'floating',
     floatingFraming: 'beams-and-joists',
+    beamConnection: 'drop',
     foundation: TUFFBLOCK_FOUNDATION,
     joist: { material: overrides.beam ?? PT_2X8, spacingMm: 406 },
     beam: { material: overrides.beam ?? PT_2X8 },
@@ -426,6 +427,7 @@ describe('spanCheck (floating Method B) — FIX #1 joist span from blocks', () =
       },
       structure: 'floating',
       floatingFraming: 'joists-on-blocks',
+      beamConnection: 'drop',
       foundation,
       joist: { material: overrides.joist ?? PT_2X8, spacingMm: 406 },
       beam: { material: PT_2X8 }, // ignored for Method B

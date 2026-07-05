@@ -101,6 +101,11 @@
           "description": "S26 (fix/floating-framing-joists) — OPTIONAL discriminator that selects the framing method for a floating deck. `beams-and-joists` (default) puts rim beams over blocks with joists on top at `joist.spacingMm`; `joists-on-blocks` places joists directly on blocks with no beam layer. IGNORED for elevated designs — the loader always sets the field to `beams-and-joists` (the default) if it is absent, so downstream consumers can treat it as required after `deserialize`. Optional so v2 files written before S26 remain load-compatible; when omitted the loader stamps the default (see `src/persistence/deck-file/schema-v2.ts`).",
           "type": "string",
           "enum": ["beams-and-joists", "joists-on-blocks"]
+        },
+        "beamConnection": {
+          "description": "S27 (feat/joist-beam-connection) — OPTIONAL discriminator that selects the joist-to-beam connection geometry. `drop` (default; pre-S27 behavior) puts joists ON TOP of beams (joistBottomY === beamTopY). `flush` hangs joists on the SIDE of beams via joist hangers so joist TOP is level with beam TOP (joistTopY === beamTopY) — yields a shorter deck stack. Only meaningful when the design has BOTH beams AND joists: elevated (all foundation types) OR floating Method A (`floatingFraming` === `beams-and-joists`). IGNORED for floating Method B (`joists-on-blocks`; no beam layer). Optional so v2 files written before S27 remain load-compatible; when omitted the loader stamps the default `drop` (see `finalizeBeamConnection` in `src/persistence/deck-file/schema-v2.ts`).",
+          "type": "string",
+          "enum": ["drop", "flush"]
         }
       }
     },

@@ -157,6 +157,14 @@ function migrateDesign(v1Design: V1LegacyDesign): DeckDesign {
     // field-order consistency across model.ts / default-design.ts /
     // model.test golden / persistence fixtures.
     floatingFraming: 'beams-and-joists',
+    // S27 (feat/joist-beam-connection) — every migrated v1 design
+    // is elevated by definition (see FR-027 default) and uses the
+    // classic drop-beam connection (joists on TOP of beams). The
+    // v2 schema makes the field OPTIONAL for round-trip compat but
+    // the domain type REQUIRES it — stamp the default here.
+    // Placed immediately after `floatingFraming` for field-order
+    // consistency across model.ts / default-design / fixtures.
+    beamConnection: 'drop',
     foundation,
     joist: {
       material: { ...v1Design.joist.material },
