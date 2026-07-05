@@ -1,13 +1,25 @@
 /*
  * `src/ui/styles/app-shell.css` — CSS-grid layout for AppShell.
  *
- * Grid template:
+ * Grid template — chrome rows + body:
  *
- *   Row 1: DisclaimerBanner (sticky)
- *   Row 2: StorageBanner (auto — 0 height when null)
- *   Row 3: AppHeader
- *   Row 4: Mobile note (0 height on desktop via display:none)
- *   Row 5: Body — three columns [leftPanel | main | rightPanel]
+ *   Row 1: DisclaimerBanner       (always rendered, auto height)
+ *   Row 2: StorageBanner          (auto: null → 0 height, banner → ~40 px)
+ *   Row 3: ContextLostBanner      (auto: null → 0 height, banner → ~60 px)
+ *   Row 4: AppHeader              (always rendered, ~65 px)
+ *   Row 5: minmax(0, 1fr) — Body (leftPanel | main | rightPanel)
+ *
+ * (MigrationToast is `position: fixed` and does NOT participate in
+ * the grid flow. The mobile-note is `display: none` on desktop and
+ * doesn't occupy a track either — on mobile it slots in as an auto
+ * row above the body.)
+ *
+ * The body is EXPLICITLY pinned to track 5 via `grid-row: 5 / 6`
+ * (see code-review pair-fix — MED #2 below). Without the pin, grid
+ * auto-placement puts body wherever the next open track is — on the
+ * happy path (all conditional banners null), that's track 3, and
+ * the `1fr` track sits empty at row 5. Pinning body → row 5 makes
+ * the layout invariant across every banner combination.
  *
  * Desktop viewports (≥ 1024px) use a three-column grid inside the
  * body row; narrower viewports collapse to a single-column stack
@@ -18,26 +30,27 @@
  * The shell is a FIXED-VIEWPORT-HEIGHT layout on desktop
  * (≥ 1024px): `height: 100vh` (with `100dvh` progressive-enhancement
  * for iOS Safari, where the URL bar changes the viewport height).
- * The chrome rows (disclaimer + storage banner + app header) take
- * their natural height; the body row (`minmax(0, 1fr)`) fills the
- * remaining viewport. Inside the body:
+ * On top of that, html/body are locked (`overflow: hidden; margin:
+ * 0; height: 100%`) so the DOCUMENT itself cannot scroll — see
+ * code-review pair-fix — HIGH #1 for why `.wd-app-shell { overflow:
+ * hidden }` alone is insufficient (keyboard PageDown / End / arrows
+ * and wheel-over-header still shifted the shell before the lock).
+ *
+ * Inside the body:
  *   - each `<aside>` scrolls INTERNALLY (`overflow-y: auto` +
  *     `min-height: 0`) — its height is capped by the grid row,
  *     content beyond that scrolls within the aside;
  *   - `<main>` is `overflow: hidden` + `min-height: 0` — the r3f
  *     `<Canvas>` fills main and stays fixed in the viewport
  *     regardless of panel content.
- * The shell root gets `overflow: hidden` so no child can push the
- * page taller than the viewport (belt-and-braces alongside the
- * height cap).
  *
  * On mobile (< 1024px, stacked), the shell keeps `min-height: 100vh`
- * WITHOUT the fixed cap and WITHOUT `overflow: hidden`: main sits
- * on top with a definite `min-height` so the r3f Canvas has a
- * non-zero parent size, then the two asides stack below at their
- * natural content height. The PAGE scrolls (not the asides) — that
- * is the sensible mobile UX for a stacked layout, and it doesn't
- * regress the existing `@media (max-width: 1023px)` reshape.
+ * WITHOUT the fixed cap, WITHOUT `overflow: hidden`, and WITHOUT the
+ * html/body lock: main sits on top with a definite `min-height` so
+ * the r3f Canvas has a non-zero parent size, then the two asides
+ * stack below at their natural content height. The PAGE scrolls
+ * (not the asides) — that is the sensible mobile UX for a stacked
+ * layout, and it doesn't regress the existing @media reshape.
  *
  * ## Grid quirk: min-height: 0
  *
@@ -81,6 +94,35 @@
 }
 
 @media (min-width: 1024px) {
+  /*
+   * Document-scroll lock (code-review pair-fix — HIGH #1).
+   *
+   * `.wd-app-shell { overflow: hidden }` alone does NOT stop the
+   * DOCUMENT from scrolling: html/body is a separate scroll
+   * container. Without this rule, PageDown / End / arrow keys and
+   * wheel-over-header shifted the shell up and clipped the 3D
+   * canvas top off-screen (confirmed live at 1400×800 pre-fix).
+   *
+   *   - `overflow: hidden` on BOTH html and body prevents keyboard
+   *     scroll, wheel scroll, and focus-driven scrollIntoView from
+   *     moving the document viewport.
+   *   - `margin: 0` on body removes the default 8 px margin, which
+   *     would otherwise make (100vh shell + 16 px body margins)
+   *     exceed the viewport and trigger a page scrollbar.
+   *   - `height: 100%` on both anchors the sizing chain viewport
+   *     → html → body → shell so the shell's 100vh matches its
+   *     containing block exactly.
+   *
+   * Applied ONLY inside this desktop media query — mobile (< 1024px)
+   * must remain page-scrollable so the stacked layout is reachable.
+   */
+  html,
+  body {
+    overflow: hidden;
+    margin: 0;
+    height: 100%;
+  }
+
   .wd-app-shell {
     /* Fixed viewport height. `100dvh` accounts for iOS Safari's
        changing URL bar; `100vh` is the fallback for browsers
@@ -126,10 +168,25 @@
  * `min-height: auto` (min-content) would cause the outer grid's
  * `minmax(0, 1fr)` row to grow with panel content, defeating the
  * fixed-viewport cap.
+ *
+ * `grid-row: 5 / 6` (code-review pair-fix — MED #2) pins the body
+ * to the 1fr track EXPLICITLY. Without the pin, grid auto-placement
+ * puts body wherever the next open track is — usually track 3 on
+ * the happy path (StorageBanner, ContextLostBanner, MigrationToast
+ * all return null; mobile-note is display:none on desktop), which
+ * means the `minmax(0, 1fr)` track sits empty at track 5 and the
+ * chrome / body layout depends on whichever banners happen to be
+ * active. Pinning body → track 5 makes the CSS match the docstring
+ * and keeps the layout invariant across every banner combination
+ * (0 banners, all banners, WebGL context lost, migration toast, …).
+ * The chrome (disclaimer, header, optional banners) auto-places into
+ * tracks 1–4; empty tracks are `auto` with no content so they
+ * collapse to 0 height.
  * ------------------------------------------------------------------------- */
 .wd-app-shell__body {
   display: grid;
   min-height: 0;
+  grid-row: 5 / 6;
 }
 
 @media (min-width: 1024px) {
