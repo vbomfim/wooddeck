@@ -6,8 +6,14 @@
  * When `design.structure === 'floating'` AND `design.floatingFraming
  * === 'joists-on-blocks'` (Method B), render a length input for
  * `foundation.blockSpacingMm` — the user-controllable distance
- * between adjacent foundation blocks (grid PITCH, mm). Dispatch
- * commits via `applyParameters({ foundation: { blockSpacingMm } })`.
+ * between adjacent block ROWS ALONG each joist (mm). This is the
+ * span-relevant dimension that bounds the joist span between
+ * supports (the pitch is what `over-span-joist` in
+ * `span-check.ts` measures against the IRC allowable). Block
+ * COLUMNS are pinned to the joist x-centers — one column per
+ * joist, no user knob (a joist that flew unsupported was the
+ * fix/joists-on-blocks-flying UAT bug). Dispatch commits via
+ * `applyParameters({ foundation: { blockSpacingMm } })`.
  *
  * When EITHER precondition fails (elevated construction, Method A
  * framing, or a non-block foundation) render NOTHING (return
@@ -128,7 +134,7 @@ export function BlockSpacingField(): JSX.Element | null {
       label="Block spacing"
       mmValue={currentSpacingMm}
       system={units}
-      hint="Distance between adjacent foundation blocks (grid pitch)."
+      hint="Distance between block rows along each joist (bounds the joist span between supports)."
       onChangeMm={handleChange}
     />
   );
