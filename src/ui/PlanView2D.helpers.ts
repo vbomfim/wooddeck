@@ -230,45 +230,75 @@ export function projectCenter(
 // ---------------------------------------------------------------------------
 
 /**
- * The nearest-neighbor delta between joist z-positions, in mm.
+ * The representative adjacent-neighbor delta between joist CENTERS
+ * along `position.x`, in mm.
  *
- * ## Why compute from LAYOUT instead of reading `design.joist.spacingMm`
+ * ## Why the X axis (pair-fix Review, BLOCKING #1)
  *
- * The ticket §AC5 wording is `at {spacing} on-center` — the number
- * the SR reads should reflect what is RENDERED, not what the
- * design nominally REQUESTED. Layout math can round the requested
- * spacing to fit a bay-remainder strategy; reading from the
- * rendered joists guarantees the description matches the drawing.
+ * Production joists (`src/domain/layout/joist-layout.ts`) run
+ * ALONG the length axis: every joist has `size.z = footprint.lengthMm`
+ * and `position.z = 0`. Adjacent joists are separated ALONG the
+ * WIDTH axis (`position.x`) — that is the axis this helper must
+ * diff. The pre-fix code diffed `position.z`, which was uniformly
+ * zero for every real layout → helper returned `null` → the AC5
+ * `<desc>` silently dropped the "at {spacing} on-center" clause.
  *
- * When the last bay is shorter than the rest (the
- * `extra-bay-at-end` strategy), consecutive deltas differ. We
- * return the MINIMUM adjacent-pair delta so the announced spacing
- * doesn't over-state the framing — a screen-reader user knows
- * "joists are AT MOST this far apart" is the safety-critical
- * number, not "joists are on average this far apart".
+ * ## Why MEDIAN (not MIN or MEAN)
  *
- * @returns the min adjacent-pair delta in mm, or `null` when
- *          fewer than 2 joists exist (no spacing computable — the
- *          `<desc>` omits the clause in that case).
+ * `joist-layout.ts` uses an EVEN-CENTERED strategy (flush-left +
+ * flush-right anchors with a uniform interior grid — no ragged
+ * remainder bay). All adjacent deltas therefore agree up to
+ * float rounding (e.g. `~402.18` mm repeated). MEDIAN of the
+ * adjacent-x deltas is:
+ *
+ *   - robust to floating-point noise between deltas;
+ *   - identical to "the actual bay spacing" for the even-centered
+ *     model, so the SR reads the value the layout actually drew;
+ *   - self-contained — it does not need to peek at
+ *     `design.joist.spacingMm`, which would either (a) diverge
+ *     from the rendered spacing after even-centering, or (b)
+ *     require an extra store dependency in this pure module.
+ *
+ * The pre-fix JSDoc claimed we returned the MIN because of an
+ * "extra bay at the end" remainder strategy — that rationale
+ * was FALSE (joist-layout.ts documents the even-centered choice
+ * to avoid exactly that degeneracy) and has been deleted.
+ *
+ * @returns the median of adjacent-pair x-deltas, in mm, or `null`
+ *          when fewer than 2 joists exist (the `<desc>` omits the
+ *          clause in that case).
  */
 export function computeJoistSpacingMm(
   members: readonly LayoutMember[],
 ): Mm | null {
-  const joistZs = members
+  const joistXs = members
     .filter((m) => m.kind === 'joist')
-    .map((m) => m.position.z)
+    .map((m) => m.position.x)
     .sort((a, b) => a - b);
-  if (joistZs.length < 2) {
+  if (joistXs.length < 2) {
     return null;
   }
-  let minDelta = Number.POSITIVE_INFINITY;
-  for (let i = 1; i < joistZs.length; i++) {
-    const delta = joistZs[i]! - joistZs[i - 1]!;
-    if (delta > 0 && delta < minDelta) {
-      minDelta = delta;
+  const deltas: number[] = [];
+  for (let i = 1; i < joistXs.length; i++) {
+    const delta = joistXs[i]! - joistXs[i - 1]!;
+    if (delta > 0) {
+      deltas.push(delta);
     }
   }
-  return Number.isFinite(minDelta) ? minDelta : null;
+  if (deltas.length === 0) {
+    return null;
+  }
+  // Median — deltas is already in the order we pushed them (which
+  // is ascending because `joistXs` was sorted ascending). Sort by
+  // value anyway to make the median definition robust against a
+  // future caller that hands us pre-shuffled positions.
+  deltas.sort((a, b) => a - b);
+  const mid = deltas.length >> 1;
+  const median =
+    deltas.length % 2 === 1
+      ? deltas[mid]!
+      : (deltas[mid - 1]! + deltas[mid]!) / 2;
+  return median;
 }
 
 // ---------------------------------------------------------------------------
@@ -305,6 +335,21 @@ export function formatFootprintLabel(
  * meaningful spacing to announce). Singular/plural is handled for
  * the joist/post counts so "1 joists" never happens.
  *
+ * ## Spacing precision — why "coarse"
+ *
+ * The rendered joist spacing is the OUTPUT of an even-centered
+ * anchor algorithm (`layoutJoists` — `usableSpan / bayCount`), so
+ * for imperial designs a nominal "16 in" spacing renders as
+ * (e.g.) 402.18 mm — `formatLength` at fine precision would spell
+ * that as `12 63/64″`, which a screen-reader would read as
+ * "twelve and sixty-three sixty-fourths of an inch". Coarse
+ * precision (nearest whole inch imperial / nearest cm metric)
+ * gives the CARPENTER-legible reading a homeowner expects
+ * ("13 in", "40 cm") and matches how joist spacing is quoted on
+ * every plan sheet. Footprint dimensions stay at the default
+ * (fine) precision — those numbers ARE crisp SI values, not
+ * algorithm outputs.
+ *
  * English-only in MVP (§16 out-of-scope for i18n).
  */
 export function buildPlanDescription(
@@ -323,7 +368,10 @@ export function buildPlanDescription(
   const parts: string[] = [`Deck footprint: ${w} by ${l}.`];
 
   if (spacingMm !== null) {
-    const spacingLabel = formatLength(spacingMm, units);
+    // Coarse precision — the spacing is the OUTPUT of the
+    // even-centered anchor algorithm, so it's rarely a round SI
+    // number. See JSDoc rationale above.
+    const spacingLabel = formatLength(spacingMm, units, { precision: 'coarse' });
     parts.push(`${String(joistCount)} ${joistWord} at ${spacingLabel} on-center.`);
   } else {
     parts.push(`${String(joistCount)} ${joistWord}.`);

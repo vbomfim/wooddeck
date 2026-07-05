@@ -1,5 +1,5 @@
 /**
- * `src/ui/PlanView2D.tsx` — S15 issue #16.
+ * `src/ui/PlanView2D.tsx` — S15 issue #16 + consolidated pair-fix.
  *
  * ## Responsibility (single)
  *
@@ -34,19 +34,43 @@
  *   - Blocks / blocking    — faint filled squares/dots (best-effort
  *                            per ticket §Scope; do not crash).
  *
- * All fill/stroke uses the same monochrome ink over the surface
- * token, so a Windows-high-contrast user or a colour-blind user
- * sees the SAME plan.
+ * Stroke widths are declared as `<rect stroke-width=…>` ATTRIBUTES
+ * (see `STROKE_WIDTHS_MM`) — the SINGLE source of truth. The CSS
+ * (`plan-view.css`) intentionally does NOT set `stroke-width`, so
+ * a jsdom test can read the attribute deterministically (the CSS
+ * wouldn't be applied) and the a11y beam-vs-joist ratio invariant
+ * lives in exactly one place.
  *
- * ## Accessibility (§10)
+ * ## Accessibility (§10) — SVG-AAM per pair-fix SHOULD-FIX #5
  *
  *   - `<section aria-labelledby="wd-plan-view__title">` with a
  *     nested `<h2>Plan view</h2>` — matches the SidePanels
- *     landmark convention (a section per panel).
- *   - The `<svg role="img" aria-labelledby="{titleId} {descId}">`
- *     with a nested `<title>` + `<desc>` — SR announces both.
+ *     landmark convention.
+ *   - `<svg role="img" aria-labelledby={titleId}
+ *                      aria-describedby={descId}>` with a nested
+ *     `<title>` + `<desc>`. Per SVG-AAM: `<title>` becomes the
+ *     accessible NAME, `<desc>` becomes the accessible DESCRIPTION
+ *     — split wiring is the correct pattern, not a concatenated
+ *     `aria-labelledby="titleId descId"` (the pre-fix code).
  *   - No focus traps, no keyboard handlers — the SVG is purely
  *     descriptive.
+ *
+ * ## Layout / clipping (pair-fix BLOCKING #3)
+ *
+ * The pre-fix component relied on `.wd-plan-view__canvas`'s
+ * `max-height` + `overflow: hidden` to bound the SVG, but the
+ * `<svg>` itself had `width: 100%; height: auto` — so a PORTRAIT
+ * viewBox (length > width, e.g. the 12×16 ft default) in a
+ * ~320 px side panel auto-computed a height greater than the
+ * wrapper's max-height and got CLIPPED to the top slice.
+ * `preserveAspectRatio="xMidYMid meet"` cannot help here because
+ * the SVG viewport itself is not height-constrained.
+ *
+ * Fix: constrain the `<svg>` viewport directly via an inline
+ * `max-height: {maxHeightPx}px`. `preserveAspectRatio` then
+ * letterboxes internally within the (width × maxHeightPx) box.
+ * The wrapper's `overflow: hidden` remains a safety net, not the
+ * primary constraint.
  *
  * ## Boundary
  *
@@ -152,21 +176,22 @@ export function PlanView2D(props: PlanView2DProps = {}): JSX.Element {
       <h2 id={sectionTitleId}>{PLAN_VIEW_HEADING}</h2>
 
       {/*
-       * Wrapper `<div>` isolates the max-height CSS so the SVG can
-       * remain a bare graphic element (its width/height are driven
-       * by the viewBox + parent width). `overflow: hidden` prevents
-       * a very-tall SVG from spilling out of the panel.
+       * Wrapper `<div>` keeps the outer flow tidy. The SVG itself
+       * (below) carries the `max-height` constraint so
+       * `preserveAspectRatio="xMidYMid meet"` letterboxes within
+       * a bounded box — see BLOCKING #3 rationale in the module
+       * header. `overflow: hidden` on the wrapper is a safety net
+       * only, not the primary height cap.
        */}
-      <div
-        className="wd-plan-view__canvas"
-        style={{ maxHeight: `${String(maxHeightPx)}px` }}
-      >
+      <div className="wd-plan-view__canvas">
         <svg
           role="img"
-          aria-labelledby={`${svgTitleId} ${svgDescId}`}
+          aria-labelledby={svgTitleId}
+          aria-describedby={svgDescId}
           viewBox={viewBox.viewBoxAttr}
           preserveAspectRatio="xMidYMid meet"
           className="wd-plan-view__svg"
+          style={{ maxHeight: `${String(maxHeightPx)}px` }}
           // No handlers — AC7. Left explicit so a future maintainer
           // sees the read-only invariant.
         >
@@ -222,11 +247,33 @@ export function PlanView2D(props: PlanView2DProps = {}): JSX.Element {
  * Dispatch on `member.kind` to the right SVG primitive. Every
  * shape carries `data-kind="<kind>"` so tests can select without
  * depending on CSS class stability.
+ *
+ * ## Rotation handling (pair-fix NICE #8)
+ *
+ * MVP layouts are axis-aligned — every `LayoutMember.rotation` is
+ * `{0, 0, 0}` (see `src/domain/layout/joist-layout.ts` and every
+ * other producer). If a non-zero rotation slips in (e.g. a
+ * future rotated deck), we still project the unrotated bounding
+ * box in the x-z plane. The DEV-only `console.warn` below makes
+ * that silent behavior LOUD in development so a future rotated
+ * member does not fail unnoticed — the warning is stripped in
+ * production builds by Vite's dead-code elimination when
+ * `import.meta.env.DEV === false`.
  */
 function renderMember(
   member: import('../domain/model').LayoutMember,
   bounds: import('../domain/model').Dimensions3D,
 ): JSX.Element | null {
+  if (import.meta.env.DEV) {
+    const r = member.rotation;
+    if (r.x !== 0 || r.y !== 0 || r.z !== 0) {
+      console.warn(
+        `PlanView2D: ignoring non-zero rotation on member "${member.id}" ` +
+          `(${String(r.x)}, ${String(r.y)}, ${String(r.z)}); MVP renders the ` +
+          `axis-aligned bounding box on the x-z plane.`,
+      );
+    }
+  }
   switch (member.kind) {
     case 'joist':
       return renderRect(member, bounds, 'joist', 'wd-plan-view__joist');

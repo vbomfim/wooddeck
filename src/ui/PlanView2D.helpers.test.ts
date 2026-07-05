@@ -25,10 +25,11 @@
  *   - `formatFootprintLabel`   — "12′ 0″ × 16′ 0″" (or metric).
  *   - `buildPlanDescription`   — the a11y `<desc>` sentence.
  */
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { Layout, LayoutMember } from '../domain/model';
 import { MM_PER_FOOT } from '../domain/units';
+import { resetDesignStoreForTests, useDesignStore } from '../state/design-store';
 
 import {
   buildPlanDescription,
@@ -72,24 +73,31 @@ function makeMember(
 
 function makeJoistLayout(spacingMm: number, count: number): Layout {
   const members: LayoutMember[] = [];
+  const widthMm = 3658;
   const lengthMm = 4877;
-  // Center around z=0, so joist z positions run from -(count-1)/2 * spacing → +
-  const half = ((count - 1) * spacingMm) / 2;
+  const thicknessMm = 38;
+  const depthMm = 184;
+  // Center around x=0 so the joist centers are symmetric about the
+  // footprint centerline — matches production `computeJoistXCenters`
+  // (even-centered anchor pattern; see `src/domain/layout/joist-layout.ts`).
+  // Each joist runs ALONG the length axis: `size.z = lengthMm`,
+  // thin `size.x = thicknessMm`. `position.z = 0` for every joist,
+  // exactly like production.
+  const halfSpan = ((count - 1) * spacingMm) / 2;
   for (let i = 0; i < count; i++) {
     members.push(
       makeMember({
         kind: 'joist',
         id: `joist-${String(i)}`,
-        position: { x: 0, y: 100, z: -half + i * spacingMm },
-        // A joist runs along the width axis (x) — thin in z.
-        size: { x: 3658, y: 184, z: 38 },
+        position: { x: -halfSpan + i * spacingMm, y: 100, z: 0 },
+        size: { x: thicknessMm, y: depthMm, z: lengthMm },
       }),
     );
   }
   return {
     designId: 'test',
     computedAt: '2024-01-01T00:00:00.000Z',
-    bounds: { widthMm: 3658, lengthMm, heightMm: 900 },
+    bounds: { widthMm, lengthMm, heightMm: 900 },
     members,
   };
 }
@@ -250,19 +258,37 @@ describe('projectCenter', () => {
 // ---------------------------------------------------------------------------
 
 describe('computeJoistSpacingMm', () => {
-  it('returns the nearest-neighbor delta for uniformly-spaced joists', () => {
+  it('returns the adjacent-neighbor delta for uniformly-spaced joists (along x)', () => {
     const layout = makeJoistLayout(406, 10);
     expect(computeJoistSpacingMm(layout.members)).toBeCloseTo(406, 3);
   });
 
-  it('returns the MINIMUM adjacent-pair delta when the last bay is a remainder', () => {
-    // 3 joists at z = 0, 400, 700 → deltas 400, 300 → min 300.
+  it('returns the MEDIAN of adjacent-x deltas (robust to a single outlier bay)', () => {
+    // 5 joists at x = 0, 400, 800, 1200, 1700 → deltas 400, 400, 400, 500.
+    // Sorted deltas: [400, 400, 400, 500] → median = (400+400)/2 = 400.
+    // (MIN would be 400 too here, but the point is median ignores the
+    //  500 outlier; a fixture with a leading outlier confirms MIN is NOT used.)
     const members: LayoutMember[] = [
       makeMember({ kind: 'joist', id: 'j1', position: { x: 0, y: 0, z: 0 } }),
-      makeMember({ kind: 'joist', id: 'j2', position: { x: 0, y: 0, z: 400 } }),
-      makeMember({ kind: 'joist', id: 'j3', position: { x: 0, y: 0, z: 700 } }),
+      makeMember({ kind: 'joist', id: 'j2', position: { x: 400, y: 0, z: 0 } }),
+      makeMember({ kind: 'joist', id: 'j3', position: { x: 800, y: 0, z: 0 } }),
+      makeMember({ kind: 'joist', id: 'j4', position: { x: 1200, y: 0, z: 0 } }),
+      makeMember({ kind: 'joist', id: 'j5', position: { x: 1700, y: 0, z: 0 } }),
     ];
-    expect(computeJoistSpacingMm(members)).toBe(300);
+    expect(computeJoistSpacingMm(members)).toBe(400);
+  });
+
+  it('median ignores a single narrow outlier bay (would trip a MIN implementation)', () => {
+    // 4 joists at x = 0, 400, 402, 800 → deltas 400, 2, 398.
+    // Sorted: [2, 398, 400] → median = 398 (odd length → middle element).
+    // MIN would return 2 — this test locks in that we DO NOT return MIN.
+    const members: LayoutMember[] = [
+      makeMember({ kind: 'joist', id: 'j1', position: { x: 0, y: 0, z: 0 } }),
+      makeMember({ kind: 'joist', id: 'j2', position: { x: 400, y: 0, z: 0 } }),
+      makeMember({ kind: 'joist', id: 'j3', position: { x: 402, y: 0, z: 0 } }),
+      makeMember({ kind: 'joist', id: 'j4', position: { x: 800, y: 0, z: 0 } }),
+    ];
+    expect(computeJoistSpacingMm(members)).toBe(398);
   });
 
   it('returns null when there are fewer than 2 joists', () => {
@@ -271,12 +297,12 @@ describe('computeJoistSpacingMm', () => {
     expect(computeJoistSpacingMm(one)).toBeNull();
   });
 
-  it('ignores non-joist members', () => {
+  it('ignores non-joist members (uses only joist x-positions)', () => {
     const members: LayoutMember[] = [
       makeMember({ kind: 'beam', id: 'b1', position: { x: 0, y: 0, z: 0 } }),
-      makeMember({ kind: 'beam', id: 'b2', position: { x: 0, y: 0, z: 500 } }),
+      makeMember({ kind: 'beam', id: 'b2', position: { x: 500, y: 0, z: 0 } }),
       makeMember({ kind: 'joist', id: 'j1', position: { x: 0, y: 0, z: 0 } }),
-      makeMember({ kind: 'joist', id: 'j2', position: { x: 0, y: 0, z: 406 } }),
+      makeMember({ kind: 'joist', id: 'j2', position: { x: 406, y: 0, z: 0 } }),
     ];
     expect(computeJoistSpacingMm(members)).toBe(406);
   });
@@ -367,5 +393,60 @@ describe('buildPlanDescription', () => {
     // exactly "1 joist" (not "1 joists") and "1 post" (not "1 posts")
     expect(desc).toMatch(/\b1 joist\b/);
     expect(desc).toMatch(/\b1 post\b/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Integration regression pin — production engine → buildPlanDescription
+// ---------------------------------------------------------------------------
+//
+// Review-gate pair-fix (BLOCKING #1, Opus CRITICAL + GPT HIGH):
+//
+//   `computeJoistSpacingMm` used to diff `position.z`, but production
+//   joists (see `src/domain/layout/joist-layout.ts`) run ALONG the
+//   length axis — `size.z = footprint.lengthMm`, `position.z = 0`
+//   for EVERY joist — and are spaced ALONG `position.x`. So for
+//   every real layout the old helper saw all-equal z (0) → returned
+//   null → the `<desc>` dropped the AC5-required "at {spacing}
+//   on-center." clause.
+//
+// This test bypasses hand-built fixtures entirely: it runs the REAL
+// `computeLayoutAndCheck` (via `resetDesignStoreForTests` →
+// `makeDefaultBundle`) and pipes the resulting `Layout` through
+// `buildPlanDescription`. It MUST FAIL on the pre-fix code and PASS
+// after the fix — this is the regression pin the review demanded.
+//
+// Boundary-safe: we import from `../state/design-store` (already
+// legal for UI) — NOT `../domain/layout` (would trip
+// `ui-no-domain-layout` in dep-cruiser).
+
+describe('buildPlanDescription — integration with production layout engine (pair-fix regression pin)', () => {
+  beforeEach(() => {
+    resetDesignStoreForTests({ id: 'plan-view-int', createdAt: '2024-01-01T00:00:00.000Z' });
+  });
+
+  it('includes the "at {spacing} on-center" clause on the DEFAULT design (real engine)', () => {
+    const layout = useDesignStore.getState().bundle.layout;
+    // Sanity: the default has ≥2 joists so a spacing IS computable.
+    const joistCount = layout.members.filter((m) => m.kind === 'joist').length;
+    expect(joistCount).toBeGreaterThanOrEqual(2);
+
+    const desc = buildPlanDescription(layout, 'imperial');
+    // The FIX: description must contain "on-center" for a real layout.
+    expect(desc).toMatch(/on-center/);
+    // And the joist count should be present.
+    expect(desc).toMatch(new RegExp(`${String(joistCount)} joists`));
+    // Spacing should be a plausible imperial fragment (feet+inches or inches).
+    expect(desc).toMatch(/at\s+.+\s+on-center/);
+  });
+
+  it('quotes a plausible joist spacing (production is ~16 in nominal for the default)', () => {
+    const layout = useDesignStore.getState().bundle.layout;
+    const spacing = computeJoistSpacingMm(layout.members);
+    expect(spacing).not.toBeNull();
+    // Production default is 16 in ≈ 406.4 mm; even-centered spacing
+    // usually rounds within ±80 mm depending on the footprint width.
+    expect(spacing!).toBeGreaterThan(150); // sanity floor
+    expect(spacing!).toBeLessThan(700); // sanity ceiling (never > code max)
   });
 });

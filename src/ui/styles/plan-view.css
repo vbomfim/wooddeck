@@ -1,5 +1,5 @@
 /*
- * `src/ui/styles/plan-view.css` — S15 issue #16.
+ * `src/ui/styles/plan-view.css` — S15 issue #16 + consolidated pair-fix.
  *
  * `<PlanView2D>` is a monochrome schematic — every stroke uses
  * the same ink over the surface token. Member kinds are
@@ -8,20 +8,26 @@
  * (18.9:1 contrast on `--wd-color-bg` per tokens.css) is the ink
  * source of truth so a future palette change propagates.
  *
- * ## Layout
+ * ## Layout — SVG max-height lives on the <svg> itself
  *
- * `.wd-plan-view` is the outer `<section>`. `.wd-plan-view__canvas`
- * wraps the `<svg>` so its `max-height` (set inline from the
- * component's `maxHeightPx` prop) constrains the drawing area
- * while `preserveAspectRatio="xMidYMid meet"` letterboxes.
+ * The `<svg>` carries the `max-height` constraint via an inline
+ * style (component sets it from `maxHeightPx`). CSS here does NOT
+ * set width/height on the SVG so the inline style is authoritative.
+ * `.wd-plan-view__canvas` wraps for spacing/border; its
+ * `overflow: hidden` is defense-in-depth, NOT the primary size cap
+ * (see BLOCKING #3 in `PlanView2D.tsx` module header for the
+ * clipping bug this fix addresses).
  *
- * ## Stroke widths (mm — SVG user units)
+ * ## Stroke widths — attribute-only (pair-fix NICE #7)
  *
- * The viewBox is in mm, so every stroke width below is in mm too.
- * A 40-mm footprint stroke on a 3600-mm-wide deck renders as ~1%
- * of the deck width — visible but not overwhelming. Beams are ~2×
- * the joist width so screen-readers-off users can tell them apart
- * by silhouette alone.
+ * `stroke-width` for members lives EXCLUSIVELY on the `<rect>` /
+ * `<circle>` attributes (see `STROKE_WIDTHS_MM` in
+ * `PlanView2D.tsx`). CSS here declares fill / stroke color and
+ * `vector-effect: non-scaling-stroke` (so a hair-thin joist stays
+ * legible when the SVG is letterboxed into a small pixel box) but
+ * does NOT restate the width — one source of truth avoids drift.
+ * The footprint stroke IS in CSS because the footprint `<rect>`
+ * has no per-instance width configuration.
  */
 
 @import './tokens.css';
@@ -40,7 +46,7 @@
 
 .wd-plan-view__canvas {
   width: 100%;
-  overflow: hidden;
+  overflow: hidden; /* safety net — SVG max-height is the primary cap */
   background-color: var(--wd-color-surface-alt, #f5f5f5);
   border: 1px solid var(--wd-color-border, #d0d0d0);
   border-radius: 4px;
@@ -53,6 +59,12 @@
   width: 100%;
   height: auto;
   color: var(--wd-color-text, #111111);
+  /*
+   * The `max-height` inline style on the <svg> (set by the
+   * component from `maxHeightPx`) lets `preserveAspectRatio="xMidYMid meet"`
+   * letterbox a portrait layout without clipping. See PlanView2D.tsx
+   * §BLOCKING #3.
+   */
 }
 
 .wd-plan-view__label {
@@ -74,12 +86,15 @@
 }
 
 /* -----------------------------------------------------------
- * Member strokes / fills — distinguish by width, not color.
+ * Member fills / colors — stroke-width is on the <rect>/<circle>
+ * attribute (STROKE_WIDTHS_MM in PlanView2D.tsx). `vector-effect:
+ * non-scaling-stroke` is HERE so joist strokes stay legible at
+ * small container sizes (a sub-pixel stroke would disappear).
  * ---------------------------------------------------------- */
 .wd-plan-view__footprint {
   fill: none;
   stroke: var(--wd-color-text, #111111);
-  stroke-width: 40; /* mm — thick perimeter border */
+  stroke-width: 40; /* mm — thick perimeter border (footprint has no per-instance override) */
   vector-effect: non-scaling-stroke;
 }
 
@@ -87,47 +102,47 @@
   fill: var(--wd-color-text, #111111);
   fill-opacity: 0.85;
   stroke: var(--wd-color-text, #111111);
-  stroke-width: 24; /* mm — thick beam stroke */
+  vector-effect: non-scaling-stroke;
 }
 
 .wd-plan-view__joist {
   fill: var(--wd-color-text, #111111);
   fill-opacity: 0.5;
   stroke: var(--wd-color-text, #111111);
-  stroke-width: 8; /* mm — medium joist stroke */
+  vector-effect: non-scaling-stroke;
 }
 
 .wd-plan-view__board {
   fill: none;
   stroke: var(--wd-color-text, #111111);
-  stroke-width: 2; /* mm — faint hint stroke */
   stroke-opacity: 0.3;
+  vector-effect: non-scaling-stroke;
 }
 
 .wd-plan-view__blocking {
   fill: var(--wd-color-text, #111111);
   fill-opacity: 0.35;
   stroke: var(--wd-color-text, #111111);
-  stroke-width: 4;
+  vector-effect: non-scaling-stroke;
 }
 
 .wd-plan-view__block {
   fill: var(--wd-color-text, #111111);
   fill-opacity: 0.55;
   stroke: var(--wd-color-text, #111111);
-  stroke-width: 6;
+  vector-effect: non-scaling-stroke;
 }
 
 .wd-plan-view__footing {
   fill: none;
   stroke: var(--wd-color-text, #111111);
-  stroke-width: 6;
   stroke-dasharray: 20 10; /* dashed = below-grade convention */
+  vector-effect: non-scaling-stroke;
 }
 
 .wd-plan-view__post {
   fill: var(--wd-color-text, #111111);
   fill-opacity: 0.9;
   stroke: var(--wd-color-text, #111111);
-  stroke-width: 10;
+  vector-effect: non-scaling-stroke;
 }

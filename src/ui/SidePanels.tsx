@@ -1,7 +1,7 @@
 /**
  * `src/ui/SidePanels.tsx` — S14 issue #15 §2 wrapper.
  *
- * Composes the four right-panel sections into a single vertical
+ * Composes the five right-panel sections into a single vertical
  * stack passed to AppShell's `rightPanel` slot. Each nested
  * `<section>` carries its own `<h2>`, satisfying the AppShell
  * landmark invariant.
