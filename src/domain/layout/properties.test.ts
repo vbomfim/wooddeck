@@ -231,7 +231,27 @@ describe('layout engine — AC3 property: no same-kind bounding-box overlap', ()
       }),
       { numRuns: 100 },
     );
-  });
+  // ------------------------------------------------------------------
+  // Timeout bump (PR #73 CI follow-up — issue #72 blocking-between-
+  // joists). Vitest's 5000 ms default is not enough headroom for
+  // this test after `MemberKind = 'blocking'` was added to the
+  // emitter. This is an O(n²) same-kind pairwise bounding-box
+  // check; blocking members form the LARGEST same-kind group at
+  // the property test's upper dimension bound (a 50 ft × 50 ft
+  // deck at 305 mm o.c. emits ~300 blocking → ~44,850 pairs —
+  // roughly 5-10× the pre-blocking dominant group (boards)).
+  // 100 fc runs × the inflated pairwise work + shrinking on
+  // near-failure legitimately exceeds 5 s on CI runners (which
+  // are 3-10× slower than local dev machines on JIT/GC-heavy
+  // property tests). The emitter itself is confirmed LINEAR
+  // (`layoutBlockingBetweenJoists` is a pure O(rows × bays)
+  // double-loop with no nested scans over the member list — see
+  // `src/domain/layout/blocking-layout.ts`); a probe measured
+  // 0.25 ms per full `computeLayout` at the worst-case
+  // dimension. So the bump reflects real test-workload growth,
+  // NOT a masked production perf regression. 30 s gives comfortable
+  // 4×+ headroom over the pathological CI case.
+  }, 30_000);
 
   // -------------------------------------------------------------------------
   // Fix A property strengthening (GPT-HIGH#1): expand the spacing arb to
@@ -622,5 +642,19 @@ describe('layout engine — AC6 amplified property (Fix E / QA-Gap#2)', () => {
       }),
       { numRuns: 100 },
     );
-  });
+  // ------------------------------------------------------------------
+  // Timeout bump (PR #73 CI follow-up — issue #72 blocking-between-
+  // joists). Vitest's 5000 ms default is not enough headroom for
+  // this test after blocking members were added. This is a per-
+  // member O(n) sweep with many `expect()` assertions per member.
+  // Blocking members inflate the layout's total member count at
+  // the property test's upper dimension bound (a 50 ft × 50 ft
+  // deck emits ~300 blocking on top of the pre-existing ~200
+  // non-blocking members — a ~2.5× workload bump). 100 fc runs ×
+  // n × per-axis-and-per-material `expect()` legitimately exceeds
+  // 5 s on CI runners (3-10× slower than local dev). 30 s gives
+  // comfortable headroom; matches the AC3 timeout for the same
+  // reason. Emitter is LINEAR (see AC3 comment above); this is
+  // pure test-workload growth, not a masked perf regression.
+  }, 30_000);
 });
