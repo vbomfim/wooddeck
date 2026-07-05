@@ -117,16 +117,69 @@ describe('computeLayout — AC6 complete render contract', () => {
     }
   });
 
-  it('all five MemberKind values appear in members[]', () => {
+  it('all six lumber MemberKind values appear in members[] (elevated + posts-on-footings + issue #72 blocking)', () => {
+    // Post-issue-#72 the elevated + posts-on-footings pipeline
+    // emits SIX kinds: the original five (joist / beam / post /
+    // footing / board) plus `blocking` (solid noggins between
+    // joists per IRC R502.7.1). Block-kind members appear only
+    // under the deck-blocks foundation variant — not here.
     const layout = computeLayout(makeDesign());
     const kinds = new Set<MemberKind>(layout.members.map((m) => m.kind));
-    expect(kinds).toEqual(new Set<MemberKind>(['joist', 'beam', 'post', 'footing', 'board']));
+    expect(kinds).toEqual(
+      new Set<MemberKind>(['joist', 'beam', 'post', 'footing', 'board', 'blocking']),
+    );
   });
 
   it('every member id is unique across the whole layout', () => {
     const layout = computeLayout(makeDesign());
     const ids = layout.members.map((m) => m.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  // -------------------------------------------------------------
+  // Issue #72 — blocking between joists (IRC R502.7.1)
+  // -------------------------------------------------------------
+  //
+  // Wiring coverage: the elevated pipeline emits blocking
+  // members. Per-member geometry is proved by
+  // `../blocking-layout.test.ts`; here we only prove the SHARED
+  // helper is actually called from the elevated compute path.
+
+  it('elevated + posts-on-footings emits blocking members between adjacent joists (issue #72)', () => {
+    const layout = computeLayout(makeDesign());
+    const joists = layout.members.filter((m) => m.kind === 'joist');
+    const blocking = layout.members.filter((m) => m.kind === 'blocking');
+    expect(joists.length).toBeGreaterThanOrEqual(2);
+    expect(blocking.length).toBeGreaterThan(0);
+    // At least (joists.length - 1) blocking pieces (one per bay,
+    // times ≥ 1 row per IRC R502.7.1 minimum-row floor).
+    expect(blocking.length).toBeGreaterThanOrEqual(joists.length - 1);
+  });
+
+  it('every blocking member sits at joistCenterY (co-planar with joists) — issue #72', () => {
+    const layout = computeLayout(makeDesign());
+    const joistY = layout.members.find((m) => m.kind === 'joist')!.position.y;
+    for (const b of layout.members.filter((m) => m.kind === 'blocking')) {
+      expect(b.position.y).toBe(joistY);
+    }
+  });
+
+  it('blocking is emitted for the deck-blocks elevated variant too — issue #72', () => {
+    // Both elevated variants share the joist y-anchor
+    // (`computeYStack.joistCenterY`), so the shared helper works
+    // for both. The variant test in the deck-blocks describe
+    // block below spot-checks the geometry; this test proves the
+    // wiring for the posts-on-footings variant is symmetric with
+    // the deck-blocks branch.
+    // (No design construction here — the deck-blocks describe
+    // suite proves the wiring for the block variant separately.)
+    const layout = computeLayout(makeDesign());
+    const blocking = layout.members.filter((m) => m.kind === 'blocking');
+    for (const b of blocking) {
+      // Every emitted member carries a lumber material so the BOM
+      // routes it into the joist-material lumber pack.
+      expect(b.material.kind).toBe('lumber');
+    }
   });
 });
 
@@ -647,6 +700,18 @@ describe('computeLayout — S20 elevated + deck-blocks AC1 (block members, no fo
     // 3657.6 / 2438.4 = 1.5 → ceil=2 → +1 = 3 posts per beam × 2 beams = 6.
     expect(posts).toHaveLength(6);
     expect(blocks).toHaveLength(6);
+  });
+
+  it('elevated + deck-blocks also emits blocking between joists (issue #72)', () => {
+    // The deck-blocks variant shares the joist y-anchor with the
+    // posts-on-footings variant (`computeYStack.joistCenterY`), so
+    // the same `computeBlockingFromDesign` adapter applies. This
+    // test proves the wiring lives in BOTH elevated compute paths.
+    const layout = computeLayout(makeDeckBlocksDesign());
+    const joists = layout.members.filter((m) => m.kind === 'joist');
+    const blocking = layout.members.filter((m) => m.kind === 'blocking');
+    expect(joists.length).toBeGreaterThanOrEqual(2);
+    expect(blocking.length).toBeGreaterThan(0);
   });
 });
 

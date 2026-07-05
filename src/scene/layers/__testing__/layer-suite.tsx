@@ -74,6 +74,7 @@ function resetLayerVisibility(): void {
       environment: true,
       decking: true,
       joists: true,
+      blocking: true,
       beams: true,
       posts: true,
       footings: true,

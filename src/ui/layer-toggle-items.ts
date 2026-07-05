@@ -11,29 +11,38 @@
 import type { CameraPreset, LayerVisibility } from '../state';
 
 /**
- * The seven MVP layer keys with wired UI toggles — plus their
- * user-facing labels. Order matches the ticket §2 field listing
- * (environment → decking → framing → footings → blocks).
+ * The eight MVP layer keys with wired UI toggles — plus their
+ * user-facing labels. Order matches the physical stack (top-down):
+ * environment → decking → joists → blocking (co-planar with joists,
+ * per IRC R502.7.1) → beams → posts → footings/blocks (foundation).
  * Extracted as a module constant so tests can walk the list without
  * duplicating the copy.
  *
  * ## S26 addition — blocks row (issue #48)
  *
  * S22 (Epic 2 / FR-029) added `blocks` to the `LayerVisibility`
- * union and wired VISIBILITY at the scene layer. S26 (this file)
- * adds the matching CHECKBOX row here — the panel iterates
- * `LAYER_ITEMS` to render one row per key. Placement is after
- * `footings` per ticket §2 (foundation-layer members grouped
- * together at the bottom of the toggle list).
+ * union and wired VISIBILITY at the scene layer. S26 added the
+ * matching CHECKBOX row here — the panel iterates `LAYER_ITEMS`
+ * to render one row per key. Placement is after `footings` per
+ * ticket §2 (foundation-layer members grouped together at the
+ * bottom of the toggle list).
  *
- * ## S26 FIX #6 (review-gate) — `blocking` row REMOVED
+ * ## S26 FIX #6 (review-gate) — `blocking` row REMOVED (historical)
  *
  * The S26 review found the "Blocking" checkbox toggled an
- * always-empty layer (the new floating layout emits no `blocking`
- * members and no other layout produces them). Removing the row
- * here — and the key from `LayerVisibility` — eliminates the dead
- * UI. See `state/ui-store.ts` `LayerVisibility` doc-block for the
- * re-add path.
+ * always-empty layer (the new floating layout emitted no `blocking`
+ * members and no other layout produced them). The row was removed
+ * here — and the key from `LayerVisibility` — eliminating the dead
+ * UI.
+ *
+ * ## Issue #72 — `blocking` row RE-ADDED (blocking-between-joists)
+ *
+ * The active `blocking` `MemberKind` is now emitted by the SHARED
+ * helper `layoutBlockingBetweenJoists` (called from both elevated
+ * and floating pipelines) — solid noggins between adjacent joists
+ * per IRC R502.7 / R502.7.1. Placement is BETWEEN `joists` and
+ * `beams` because blocking sits co-planar with the joists it
+ * restrains (same y-anchor as `computeYStack.joistCenterY`).
  *
  * ## Type shape — `as const satisfies` (S26 pair-fix Review #1)
  *
@@ -55,6 +64,7 @@ export const LAYER_ITEMS = [
   { key: 'environment', label: 'Environment' },
   { key: 'decking', label: 'Decking' },
   { key: 'joists', label: 'Joists' },
+  { key: 'blocking', label: 'Blocking' },
   { key: 'beams', label: 'Beams' },
   { key: 'posts', label: 'Posts' },
   { key: 'footings', label: 'Footings' },

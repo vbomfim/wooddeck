@@ -836,6 +836,206 @@
         }
       },
       {
+        "id": "blocking-r0-b0",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -1316.875,
+          "y": 377.5,
+          "z": 0
+        },
+        "size": {
+          "x": 338.25,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b1",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -940.625,
+          "y": 377.5,
+          "z": 0
+        },
+        "size": {
+          "x": 338.25,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b2",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -564.375,
+          "y": 377.5,
+          "z": 0
+        },
+        "size": {
+          "x": 338.25,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b3",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -188.125,
+          "y": 377.5,
+          "z": 0
+        },
+        "size": {
+          "x": 338.25,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b4",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 188.125,
+          "y": 377.5,
+          "z": 0
+        },
+        "size": {
+          "x": 338.25,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b5",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 564.375,
+          "y": 377.5,
+          "z": 0
+        },
+        "size": {
+          "x": 338.25,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b6",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 940.625,
+          "y": 377.5,
+          "z": 0
+        },
+        "size": {
+          "x": 338.25,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b7",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 1316.875,
+          "y": 377.5,
+          "z": 0
+        },
+        "size": {
+          "x": 338.25,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
         "id": "beam-near",
         "kind": "beam",
         "material": {

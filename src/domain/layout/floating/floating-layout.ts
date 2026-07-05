@@ -77,9 +77,12 @@
 
 import type { DeckDesign, Layout, LayoutMember, MaterialRef } from '../../model';
 import { lookupFoundationProduct } from '../../foundation-catalog';
+import { lookupMaterial } from '../../materials-catalog';
 import type { SpanTable } from '../../spans/span-table';
 import { MM_PER_FOOT, type Mm } from '../../units';
 import { assertNever } from '../../assert-never';
+import { layoutBlockingBetweenJoists } from '../blocking-layout';
+import { computeJoistXCenters } from '../joist-layout';
 import {
   LayoutError,
   MAX_DECK_DIMENSION_MM,
@@ -93,7 +96,7 @@ import { computeAxisCenters, blockCountForAxis, clampBlockSpacingMm, computeBloc
 import { computeFloatingRimBeams } from './floating-beam-layout';
 import { layoutFloatingDecking } from './floating-decking';
 import { layoutFloatingJoists } from './floating-joist-layout';
-import { computeMinFloatingHeightMm } from './y-stack-floating';
+import { computeMinFloatingHeightMm, computeYStackFloating } from './y-stack-floating';
 
 /**
  * Max cross-width spacing between adjacent BLOCKS in the same row.
@@ -611,11 +614,17 @@ function computeMethodA(design: DeckDesign): LayoutMember[] {
   const beams = computeFloatingRimBeams(design);
   const joists = layoutFloatingJoists(design);
   const boards = layoutFloatingDecking(design);
+  // Issue #72 — solid blocking between joists per IRC R502.7.1.
+  // Same shared helper the elevated pipeline uses; the floating
+  // y-anchor comes from `computeYStackFloating.joistCenterY`
+  // (co-planar with joists on the beam-top plane for Method A).
+  const blocking = computeFloatingBlockingFromDesign(design);
 
   // Top-down order (mirrors the y-stack): boards on top, blocks
-  // on bottom. AC7's determinism assertion is deep-equal on the
+  // on bottom. Blocking sits at the joist plane (interleaved with
+  // joists). AC7's determinism assertion is deep-equal on the
   // array, so keeping the order stable here is important.
-  return [...boards, ...joists, ...beams, ...blocks];
+  return [...boards, ...joists, ...blocking, ...beams, ...blocks];
 }
 
 /**
@@ -740,8 +749,62 @@ function computeMethodB(
   });
 
   const boards = layoutFloatingDecking(design);
-  // Order: boards → joists → blocks. No beam layer.
-  return [...boards, ...joists, ...blocks];
+  // Issue #72 — solid blocking between joists per IRC R502.7.1.
+  // Method B joists rest directly on the block top (`beamDepthMm
+  // = 0` in the floating y-stack), so `joistCenterY` sits
+  // half-a-joist-depth above y=0 — blocking co-planar with the
+  // joists honors the same "solid on-edge blocking between joists"
+  // detail as Method A + the elevated pipeline.
+  const blocking = computeFloatingBlockingFromDesign(design);
+  // Order: boards → joists → blocking → blocks. No beam layer.
+  return [...boards, ...joists, ...blocking, ...blocks];
+}
+
+/**
+ * Floating-pipeline adapter to the shared
+ * {@link layoutBlockingBetweenJoists} helper. Sibling of the
+ * elevated `computeBlockingFromDesign` in `../layout-engine.ts`;
+ * the only difference is the y-anchor source
+ * (`computeYStackFloating` vs `computeYStack`). The x-anchor is
+ * derived from the SAME `computeJoistXCenters` helper both joist
+ * layers (elevated + floating Method A/B) already use, so
+ * blocking cannot drift from joists.
+ *
+ * ## Method A vs Method B
+ *
+ * Both methods produce joists at `computeJoistXCenters` (see
+ * `layoutFloatingJoists`), so the SAME derivation covers both.
+ * The y-anchor `computeYStackFloating.joistCenterY` already
+ * dispatches on `design.floatingFraming`: Method A joists sit on
+ * beam-top, Method B joists sit on block-top. Blocking follows.
+ *
+ * @throws {Error} from `lookupMaterial` when the joist material
+ *   triple is not in the catalog. `computeFloatingLayout` wraps
+ *   this as `LayoutError`.
+ */
+function computeFloatingBlockingFromDesign(
+  design: DeckDesign,
+): readonly LayoutMember[] {
+  const joistMat = lookupMaterial(
+    design.joist.material.nominal,
+    design.joist.material.species,
+    design.joist.material.grade,
+  );
+  const joistThicknessMm = joistMat.actual.widthMm;
+  const joistDepthMm = joistMat.actual.heightMm;
+  const widthMm = design.footprint.widthMm;
+  const spacingMm = design.joist.spacingMm;
+  const joistXCenters = computeJoistXCenters(widthMm, spacingMm, joistThicknessMm);
+  const joistCenterY = computeYStackFloating(design).joistCenterY;
+
+  return layoutBlockingBetweenJoists({
+    joistXCenters,
+    joistCenterY,
+    joistThicknessMm,
+    joistDepthMm,
+    lengthMm: design.footprint.lengthMm,
+    material: { kind: 'lumber', ...design.joist.material },
+  });
 }
 
 /**

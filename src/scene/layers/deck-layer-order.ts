@@ -18,7 +18,7 @@
  *   3. blocks       — foundation blocks (S22)
  *   4. posts        — vertical members from footing to beam
  *   5. beams        — horizontal supports carrying joists
- *   6. blocking     — short lumber between beams (S22)
+ *   6. blocking     — solid noggins between joists (#72; IRC R502.7)
  *   7. joists       — floor joists carrying decking
  *   8. decking      — top boards, the visually top-most primitives
  *
@@ -38,13 +38,16 @@
  *     (y is negative). Rendering blocks BEFORE beams keeps the
  *     stack order intuitive (block THEN what sits on it).
  *
- * `blocking` sits BETWEEN beams and joists:
+ * ## Issue #72 — `blocking` sits BETWEEN beams and joists
  *
- *   - Short lumber pieces between beams for lateral bracing. Same
- *     vertical range as beams (they share the beam y-center), so
- *     the raycast-tiebreak order doesn't matter much — but placing
- *     blocking AFTER beams matches the mental model ("block
- *     between the beams").
+ *   - Solid lumber noggins between ADJACENT JOISTS (not beams) at
+ *     interior mid-span row(s), per IRC R502.7 / R502.7.1
+ *     (≤ 8 ft o.c., ≥ 1 interior row when there are ≥ 2 joists).
+ *   - Same y-plane as the joists it restrains
+ *     (`computeYStack.joistCenterY`), so the raycast tiebreak with
+ *     `joists` is irrelevant — placing blocking BEFORE joists in
+ *     the render order matches the mental model ("blocking IN THE
+ *     joist plane, then the joists themselves").
  *
  * ## Type-safety AND runtime immutability
  *
@@ -71,6 +74,7 @@ export const DECK_LAYER_ORDER = Object.freeze([
   'blocks',
   'posts',
   'beams',
+  'blocking',
   'joists',
   'decking',
 ] as const satisfies readonly (keyof LayerVisibility)[]);

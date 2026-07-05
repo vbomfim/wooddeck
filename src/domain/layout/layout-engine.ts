@@ -70,9 +70,10 @@ import type { SpanTable } from '../spans/span-table';
 import { MM_PER_FOOT, type Mm } from '../units';
 
 import { layoutBeams } from './beam-layout';
+import { layoutBlockingBetweenJoists } from './blocking-layout';
 import { layoutDecking } from './decking-layout';
 import { computeFloatingLayout } from './floating/floating-layout';
-import { layoutJoists } from './joist-layout';
+import { computeJoistXCenters, layoutJoists } from './joist-layout';
 import { layoutPostsAndBlocks, layoutPostsAndFootings } from './post-layout';
 import {
   LayoutError,
@@ -81,7 +82,7 @@ import {
   validateFlushBeamDepth,
   validateJoistSpacing,
 } from './layout-shared';
-import { FOOTING_WIDTH_MM, MIN_POST_HEIGHT_MM, computeFramingStackMm } from './y-stack';
+import { FOOTING_WIDTH_MM, MIN_POST_HEIGHT_MM, computeFramingStackMm, computeYStack } from './y-stack';
 
 // Re-export the shared symbols so the pre-S19 public API surface
 // (`import { LayoutError, MIN_DECK_DIMENSION_MM } from './layout-engine'`)
@@ -357,14 +358,22 @@ function computeElevatedPostsOnFootingsLayout(
     const beams = layoutBeams(design);
     const { posts, footings } = layoutPostsAndFootings(design, beams);
     const boards = layoutDecking(design);
+    // Issue #72 — solid blocking between joists per IRC R502.7.1.
+    // Uses the SAME `computeJoistXCenters` helper the joist layer
+    // used above, so blocking cannot drift from joists. The
+    // elevated y-anchor comes from `computeYStack.joistCenterY`
+    // (co-planar with joists). See `./blocking-layout.ts` for the
+    // row rule and per-member geometry.
+    const blocking = computeBlockingFromDesign(design);
 
     // Order intentionally matches the y-stack top-to-bottom / structural
-    // order (decking-boards, joists, beams, posts, footings). AC7's
-    // determinism assertion is deep-equal on the array, so keeping the
-    // order stable here is important.
+    // order (decking-boards, joists, blocking [co-planar with joists],
+    // beams, posts, footings). AC7's determinism assertion is deep-equal
+    // on the array, so keeping the order stable here is important.
     const members: LayoutMember[] = [
       ...boards,
       ...joists,
+      ...blocking,
       ...beams,
       ...posts,
       ...footings,
@@ -395,6 +404,54 @@ function computeElevatedPostsOnFootingsLayout(
 
 function defaultNow(): string {
   return new Date().toISOString();
+}
+
+/**
+ * Elevated-pipeline adapter to the shared
+ * {@link layoutBlockingBetweenJoists} helper. Extracted so both
+ * elevated variants (`posts-on-footings` and `deck-blocks`) share
+ * ONE derivation of the joist geometry a blocking row depends on
+ * — a future change to the elevated y-stack cannot silently drift
+ * blocking off the joist plane.
+ *
+ * ## Why not thread joists' fields directly
+ *
+ * The `LayoutMember` shape carries `position.y` and `size.y` but
+ * not the raw material triple, so we still need a
+ * `lookupMaterial(design.joist.material)` call to recover the
+ * dressed thickness / depth. And we still need
+ * `computeYStack(design).joistCenterY` for the y-anchor (reading
+ * it off a joist member's `position.y` would work, but at the
+ * cost of the "single source of truth: y-stack" invariant that
+ * every layer honors). So the cleanest form re-derives the four
+ * scalars from the same helpers the joist layer used, and passes
+ * them into `layoutBlockingBetweenJoists`. Byte-identical output.
+ *
+ * @throws {Error} from `lookupMaterial` when the joist material
+ *   triple is not in the catalog. The layout-engine wraps this as
+ *   `LayoutError` at the outer boundary.
+ */
+function computeBlockingFromDesign(design: DeckDesign): readonly LayoutMember[] {
+  const joistMat = lookupMaterial(
+    design.joist.material.nominal,
+    design.joist.material.species,
+    design.joist.material.grade,
+  );
+  const joistThicknessMm = joistMat.actual.widthMm;
+  const joistDepthMm = joistMat.actual.heightMm;
+  const widthMm = design.footprint.widthMm;
+  const spacingMm = design.joist.spacingMm;
+  const joistXCenters = computeJoistXCenters(widthMm, spacingMm, joistThicknessMm);
+  const joistCenterY = computeYStack(design).joistCenterY;
+
+  return layoutBlockingBetweenJoists({
+    joistXCenters,
+    joistCenterY,
+    joistThicknessMm,
+    joistDepthMm,
+    lengthMm: design.footprint.lengthMm,
+    material: { kind: 'lumber', ...design.joist.material },
+  });
 }
 
 /**
@@ -487,10 +544,16 @@ function computeElevatedDeckBlocksLayout(
     const beams = layoutBeams(design);
     const { posts, blocks } = layoutPostsAndBlocks(design, beams);
     const boards = layoutDecking(design);
+    // Issue #72 — solid blocking between joists per IRC R502.7.1.
+    // Same helper as the elevated + posts-on-footings pipeline —
+    // both elevated paths share the y-stack, so the derivation is
+    // identical.
+    const blocking = computeBlockingFromDesign(design);
 
     const members: LayoutMember[] = [
       ...boards,
       ...joists,
+      ...blocking,
       ...beams,
       ...posts,
       ...blocks,

@@ -26,7 +26,7 @@
  *   3. blocks       — foundation blocks (S22 — Epic 2 / FR-029)
  *   4. posts        — vertical members from footing to beam
  *   5. beams        — horizontal supports carrying joists
- *   6. blocking     — short lumber between beams (S22)
+ *   6. blocking     — solid noggins between joists (#72; IRC R502.7)
  *   7. joists       — floor joists carrying decking
  *   8. decking      — top boards, the visually top-most primitives
  *
@@ -57,10 +57,16 @@
  *     plane (negative y). Either way, blocks paint before the
  *     structural framing so a top-down raycast hits the framing
  *     first when both stack up.
- *   - `blocking` between beams and joists: blocking pieces sit at
- *     beam-y (interior between beams in x/z). Painting after beams
- *     matches the mental model ("blocking between beams") and
- *     doesn't affect the raycast tiebreak (they don't overlap).
+ *
+ * ## Issue #72 — `blocking` between beams and joists
+ *
+ *   - `blocking` pieces sit CO-PLANAR with the joists they restrain
+ *     (same `computeYStack.joistCenterY`), between adjacent joists
+ *     in x, at interior mid-span rows in z. Painting AFTER beams
+ *     and BEFORE joists matches the mental model ("blocking IN THE
+ *     joist plane, then the joists themselves"). Blocking sits
+ *     inside the bay between two joists (never overlaps a joist),
+ *     so the raycast tiebreak with joists is coincidental at worst.
  *
  * ## Why NO transparency handling
  *
@@ -75,6 +81,7 @@
 import type { JSX } from 'react';
 
 import { BeamsLayer } from './BeamsLayer';
+import { BlockingLayer } from './BlockingLayer';
 import { BlocksLayer } from './BlocksLayer';
 import { DeckingLayer } from './DeckingLayer';
 import { EnvironmentLayer } from './EnvironmentLayer';
@@ -82,10 +89,12 @@ import { FootingsLayer } from './FootingsLayer';
 import { JoistsLayer } from './JoistsLayer';
 import { PostsLayer } from './PostsLayer';
 
-// S26 FIX #6 (review-gate) — `BlockingLayer` was removed from the
-// scene tree because the current layout emits ZERO `blocking`
-// members (the concept was removed from floating). The dormant
-// component in `./BlockingLayer.tsx` is kept for cheap re-add.
+// Issue #72 — `BlockingLayer` is remounted here between BeamsLayer
+// and JoistsLayer, matching the physical stack order (blocking is
+// co-planar with joists per IRC R502.7). The layout pipelines now
+// emit `blocking` `MemberKind` members via the shared
+// `layoutBlockingBetweenJoists` helper, so the toggle is meaningful
+// again (was dormant post-S26 FIX #6 when zero blocking was emitted).
 
 export function DeckLayers(): JSX.Element {
   return (
@@ -95,6 +104,7 @@ export function DeckLayers(): JSX.Element {
       <BlocksLayer />
       <PostsLayer />
       <BeamsLayer />
+      <BlockingLayer />
       <JoistsLayer />
       <DeckingLayer />
     </>

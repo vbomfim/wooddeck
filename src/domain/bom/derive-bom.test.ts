@@ -37,11 +37,13 @@ import { MM_PER_FOOT, MM_PER_INCH } from '../units';
 import type { Mm } from '../units';
 import type {
   BlockMemberMaterial,
+  DeckDesign,
   Layout,
   LayoutMember,
   LumberMemberMaterial,
   MemberKind,
 } from '../model';
+import { computeLayout } from '../layout/layout-engine';
 
 import { deriveBom, type BomResult } from './derive-bom';
 
@@ -697,5 +699,86 @@ describe("deriveBom — AC7 user's hand-drawn example (15 × 2×8×16)", () => {
     const layout = makeUserExampleLayout();
     const result = deriveBom(layout, {});
     expect(result.foundation).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #72 — blocking-between-joists integration
+// ---------------------------------------------------------------------------
+//
+// Blocking members are emitted by the shared
+// `layoutBlockingBetweenJoists` helper from BOTH `computeLayout`
+// (elevated) and `computeFloatingLayout` (floating). The BOM's
+// per-kind length rule at `derive-bom.ts:132` treats blocking as
+// short pieces that run +x (length = `size.x`) and folds them into
+// the joist SKU's cut pack. This test proves the wiring: a real
+// elevated `computeLayout` yields a BOM whose joist-SKU lumber
+// section CONTAINS blocking-length cuts, so the estimator's cut
+// list will now request enough stock to actually build the code-
+// mandated noggins (IRC R502.7.1) — not just the joists.
+// -------------------------------------------------------------
+
+function makeDefaultElevatedDesign(): DeckDesign {
+  return {
+    id: '00000000-0000-4000-8000-000000000072',
+    createdAt: '2026-07-05T00:00:00.000Z',
+    footprint: { widthMm: 3660, lengthMm: 4880, heightMm: 914 },
+    structure: 'elevated',
+    floatingFraming: 'beams-and-joists',
+    beamConnection: 'drop',
+    foundation: {
+      type: 'posts-on-footings',
+      post: { nominal: '6x6', species: 'PT', grade: 'No2' },
+      footing: { widthMm: 300, depthMm: 300 },
+    },
+    joist: {
+      material: { nominal: '2x10', species: 'PT', grade: 'No2' },
+      spacingMm: 406,
+    },
+    beam: { material: { nominal: '2x10', species: 'PT', grade: 'No2' } },
+    decking: {
+      material: { nominal: '5/4x6', species: 'PT', grade: 'No2' },
+      orientation: 'parallel-to-width',
+    },
+    layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+  };
+}
+
+describe('deriveBom — issue #72 blocking wiring (real computeLayout)', () => {
+  it('BOM built from computeLayout(default) includes blocking members in the joist SKU pack', () => {
+    const layout = computeLayout(makeDefaultElevatedDesign());
+    const blockingMembers = layout.members.filter((m) => m.kind === 'blocking');
+    // Sanity: the layout pipeline emits blocking (proved in
+    // layout-engine.test.ts). If this precondition changes the
+    // assertion below is meaningless.
+    expect(blockingMembers.length).toBeGreaterThan(0);
+
+    const result = deriveBom(layout, {});
+    // The default design uses ONE lumber species/grade across
+    // framing (PT No.2), so joists + beams + posts + boards +
+    // blocking all fold into a small number of lumber SKUs. We
+    // pick the section whose SKU matches the joist nominal —
+    // blocking piggybacks on the joist material (same nominal +
+    // species + grade) so it lives in the joist SKU section.
+    const joistMaterial = layout.members.find(
+      (m) => m.kind === 'joist',
+    )!.material as LumberMemberMaterial;
+    const section = result.lumber.find(
+      (s) =>
+        s.nominal === joistMaterial.nominal &&
+        s.species === joistMaterial.species &&
+        s.grade === joistMaterial.grade,
+    );
+    expect(section).toBeDefined();
+    // Every unique blocking length appears at least once in the
+    // packed cut list — proves nothing was silently dropped en
+    // route from `computeLayout` → `deriveBom` → cut list.
+    const blockingLengths = new Set(blockingMembers.map((m) => m.size.x));
+    const allCuts = section!.pack.stockBoards.flatMap((b) =>
+      b.cuts.map((c) => c.lengthMm),
+    );
+    for (const len of blockingLengths) {
+      expect(allCuts.some((c) => Math.abs(c - len) < 0.01)).toBe(true);
+    }
   });
 });
