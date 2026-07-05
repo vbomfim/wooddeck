@@ -7,7 +7,7 @@
     "footprint": {
       "widthMm": 4876.8,
       "lengthMm": 4267.2,
-      "heightMm": 209
+      "heightMm": 393
     },
     "structure": "floating",
     "foundation": {
@@ -41,15 +41,16 @@
     },
     "layout": {
       "bayRemainderStrategy": "extra-bay-at-end"
-    }
+    },
+    "floatingFraming": "beams-and-joists"
   },
   "expected": {
     "designId": "11111111-1111-4111-8111-000000000019",
     "computedAt": "2026-07-04T00:00:00.000Z",
     "bounds": {
       "widthMm": 5181.8,
-      "lengthMm": 4572.2,
-      "heightMm": 311
+      "lengthMm": 4272.2,
+      "heightMm": 495
     },
     "members": [
       {
@@ -63,7 +64,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": -2063.6
         },
         "size": {
@@ -88,7 +89,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": -1920.6
         },
         "size": {
@@ -113,7 +114,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": -1777.6
         },
         "size": {
@@ -138,7 +139,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": -1634.6
         },
         "size": {
@@ -163,7 +164,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": -1491.6
         },
         "size": {
@@ -188,7 +189,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": -1348.6
         },
         "size": {
@@ -213,7 +214,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": -1205.6
         },
         "size": {
@@ -238,7 +239,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": -1062.6
         },
         "size": {
@@ -263,7 +264,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": -919.5999999999999
         },
         "size": {
@@ -288,7 +289,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": -776.5999999999999
         },
         "size": {
@@ -313,7 +314,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": -633.5999999999999
         },
         "size": {
@@ -338,7 +339,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": -490.5999999999999
         },
         "size": {
@@ -363,7 +364,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": -347.5999999999999
         },
         "size": {
@@ -388,7 +389,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": -204.5999999999999
         },
         "size": {
@@ -413,7 +414,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": -61.59999999999991
         },
         "size": {
@@ -438,7 +439,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": 81.40000000000009
         },
         "size": {
@@ -463,7 +464,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": 224.4000000000001
         },
         "size": {
@@ -488,7 +489,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": 367.4000000000001
         },
         "size": {
@@ -513,7 +514,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": 510.4000000000001
         },
         "size": {
@@ -538,7 +539,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": 653.4000000000001
         },
         "size": {
@@ -563,7 +564,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": 796.4000000000001
         },
         "size": {
@@ -588,7 +589,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": 939.4000000000001
         },
         "size": {
@@ -613,7 +614,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": 1082.4
         },
         "size": {
@@ -638,7 +639,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": 1225.4
         },
         "size": {
@@ -663,7 +664,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": 1368.4
         },
         "size": {
@@ -688,7 +689,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": 1511.4
         },
         "size": {
@@ -713,7 +714,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": 1654.4
         },
         "size": {
@@ -738,7 +739,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": 1797.4
         },
         "size": {
@@ -763,7 +764,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": 1940.4
         },
         "size": {
@@ -788,7 +789,7 @@
         },
         "position": {
           "x": 0,
-          "y": 196.5,
+          "y": 380.5,
           "z": 2073.5000000000005
         },
         "size": {
@@ -803,8 +804,8 @@
         }
       },
       {
-        "id": "blocking-p0-s0",
-        "kind": "blocking",
+        "id": "joist-0",
+        "kind": "joist",
         "material": {
           "kind": "lumber",
           "nominal": "2x8",
@@ -812,158 +813,8 @@
           "grade": "No2"
         },
         "position": {
-          "x": -1219.2,
-          "y": 92,
-          "z": -1066.8
-        },
-        "size": {
-          "x": 2400.4,
-          "y": 184,
-          "z": 38
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "blocking-p0-s1",
-        "kind": "blocking",
-        "material": {
-          "kind": "lumber",
-          "nominal": "2x8",
-          "species": "PT",
-          "grade": "No2"
-        },
-        "position": {
-          "x": -1219.2,
-          "y": 92,
-          "z": 0
-        },
-        "size": {
-          "x": 2400.4,
-          "y": 184,
-          "z": 38
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "blocking-p0-s2",
-        "kind": "blocking",
-        "material": {
-          "kind": "lumber",
-          "nominal": "2x8",
-          "species": "PT",
-          "grade": "No2"
-        },
-        "position": {
-          "x": -1219.2,
-          "y": 92,
-          "z": 1066.7999999999997
-        },
-        "size": {
-          "x": 2400.4,
-          "y": 184,
-          "z": 38
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "blocking-p1-s0",
-        "kind": "blocking",
-        "material": {
-          "kind": "lumber",
-          "nominal": "2x8",
-          "species": "PT",
-          "grade": "No2"
-        },
-        "position": {
-          "x": 1219.2,
-          "y": 92,
-          "z": -1066.8
-        },
-        "size": {
-          "x": 2400.4,
-          "y": 184,
-          "z": 38
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "blocking-p1-s1",
-        "kind": "blocking",
-        "material": {
-          "kind": "lumber",
-          "nominal": "2x8",
-          "species": "PT",
-          "grade": "No2"
-        },
-        "position": {
-          "x": 1219.2,
-          "y": 92,
-          "z": 0
-        },
-        "size": {
-          "x": 2400.4,
-          "y": 184,
-          "z": 38
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "blocking-p1-s2",
-        "kind": "blocking",
-        "material": {
-          "kind": "lumber",
-          "nominal": "2x8",
-          "species": "PT",
-          "grade": "No2"
-        },
-        "position": {
-          "x": 1219.2,
-          "y": 92,
-          "z": 1066.7999999999997
-        },
-        "size": {
-          "x": 2400.4,
-          "y": 184,
-          "z": 38
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "beam-0",
-        "kind": "beam",
-        "material": {
-          "kind": "lumber",
-          "nominal": "2x8",
-          "species": "PT",
-          "grade": "No2"
-        },
-        "position": {
-          "x": -2438.4,
-          "y": 92,
+          "x": -2419.4,
+          "y": 276,
           "z": 0
         },
         "size": {
@@ -978,8 +829,8 @@
         }
       },
       {
-        "id": "beam-1",
-        "kind": "beam",
+        "id": "joist-1",
+        "kind": "joist",
         "material": {
           "kind": "lumber",
           "nominal": "2x8",
@@ -987,8 +838,8 @@
           "grade": "No2"
         },
         "position": {
-          "x": 0,
-          "y": 92,
+          "x": -2016.1666666666667,
+          "y": 276,
           "z": 0
         },
         "size": {
@@ -1003,7 +854,282 @@
         }
       },
       {
-        "id": "beam-2",
+        "id": "joist-2",
+        "kind": "joist",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x8",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -1612.9333333333334,
+          "y": 276,
+          "z": 0
+        },
+        "size": {
+          "x": 38,
+          "y": 184,
+          "z": 4267.2
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "joist-3",
+        "kind": "joist",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x8",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -1209.7,
+          "y": 276,
+          "z": 0
+        },
+        "size": {
+          "x": 38,
+          "y": 184,
+          "z": 4267.2
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "joist-4",
+        "kind": "joist",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x8",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -806.4666666666667,
+          "y": 276,
+          "z": 0
+        },
+        "size": {
+          "x": 38,
+          "y": 184,
+          "z": 4267.2
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "joist-5",
+        "kind": "joist",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x8",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -403.23333333333335,
+          "y": 276,
+          "z": 0
+        },
+        "size": {
+          "x": 38,
+          "y": 184,
+          "z": 4267.2
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "joist-6",
+        "kind": "joist",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x8",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 0,
+          "y": 276,
+          "z": 0
+        },
+        "size": {
+          "x": 38,
+          "y": 184,
+          "z": 4267.2
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "joist-7",
+        "kind": "joist",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x8",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 403.2333333333331,
+          "y": 276,
+          "z": 0
+        },
+        "size": {
+          "x": 38,
+          "y": 184,
+          "z": 4267.2
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "joist-8",
+        "kind": "joist",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x8",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 806.4666666666667,
+          "y": 276,
+          "z": 0
+        },
+        "size": {
+          "x": 38,
+          "y": 184,
+          "z": 4267.2
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "joist-9",
+        "kind": "joist",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x8",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 1209.7000000000003,
+          "y": 276,
+          "z": 0
+        },
+        "size": {
+          "x": 38,
+          "y": 184,
+          "z": 4267.2
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "joist-10",
+        "kind": "joist",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x8",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 1612.9333333333334,
+          "y": 276,
+          "z": 0
+        },
+        "size": {
+          "x": 38,
+          "y": 184,
+          "z": 4267.2
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "joist-11",
+        "kind": "joist",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x8",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 2016.1666666666665,
+          "y": 276,
+          "z": 0
+        },
+        "size": {
+          "x": 38,
+          "y": 184,
+          "z": 4267.2
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "joist-12",
+        "kind": "joist",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x8",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 2419.4,
+          "y": 276,
+          "z": 0
+        },
+        "size": {
+          "x": 38,
+          "y": 184,
+          "z": 4267.2
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "beam-near",
         "kind": "beam",
         "material": {
           "kind": "lumber",
@@ -1012,14 +1138,39 @@
           "grade": "No2"
         },
         "position": {
-          "x": 2438.4,
+          "x": 0,
           "y": 92,
-          "z": 0
+          "z": -1983.6
         },
         "size": {
-          "x": 38,
+          "x": 4876.8,
           "y": 184,
-          "z": 4267.2
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "beam-far",
+        "kind": "beam",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x8",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 0,
+          "y": 92,
+          "z": 1983.6
+        },
+        "size": {
+          "x": 4876.8,
+          "y": 184,
+          "z": 38
         },
         "rotation": {
           "x": 0,
@@ -1037,7 +1188,7 @@
         "position": {
           "x": -2438.4,
           "y": -51,
-          "z": -2133.6
+          "z": -1983.6
         },
         "size": {
           "x": 305,
@@ -1060,7 +1211,7 @@
         "position": {
           "x": 0,
           "y": -51,
-          "z": -2133.6
+          "z": -1983.6
         },
         "size": {
           "x": 305,
@@ -1083,7 +1234,7 @@
         "position": {
           "x": 2438.4,
           "y": -51,
-          "z": -2133.6
+          "z": -1983.6
         },
         "size": {
           "x": 305,
@@ -1106,7 +1257,7 @@
         "position": {
           "x": -2438.4,
           "y": -51,
-          "z": -1524
+          "z": 1983.6
         },
         "size": {
           "x": 305,
@@ -1129,7 +1280,7 @@
         "position": {
           "x": 0,
           "y": -51,
-          "z": -1524
+          "z": 1983.6
         },
         "size": {
           "x": 305,
@@ -1152,421 +1303,7 @@
         "position": {
           "x": 2438.4,
           "y": -51,
-          "z": -1524
-        },
-        "size": {
-          "x": 305,
-          "y": 102,
-          "z": 305
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "block-r2-c0",
-        "kind": "block",
-        "material": {
-          "kind": "block",
-          "productId": "tuffblock-12x12x4"
-        },
-        "position": {
-          "x": -2438.4,
-          "y": -51,
-          "z": -914.3999999999999
-        },
-        "size": {
-          "x": 305,
-          "y": 102,
-          "z": 305
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "block-r2-c1",
-        "kind": "block",
-        "material": {
-          "kind": "block",
-          "productId": "tuffblock-12x12x4"
-        },
-        "position": {
-          "x": 0,
-          "y": -51,
-          "z": -914.3999999999999
-        },
-        "size": {
-          "x": 305,
-          "y": 102,
-          "z": 305
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "block-r2-c2",
-        "kind": "block",
-        "material": {
-          "kind": "block",
-          "productId": "tuffblock-12x12x4"
-        },
-        "position": {
-          "x": 2438.4,
-          "y": -51,
-          "z": -914.3999999999999
-        },
-        "size": {
-          "x": 305,
-          "y": 102,
-          "z": 305
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "block-r3-c0",
-        "kind": "block",
-        "material": {
-          "kind": "block",
-          "productId": "tuffblock-12x12x4"
-        },
-        "position": {
-          "x": -2438.4,
-          "y": -51,
-          "z": -304.7999999999997
-        },
-        "size": {
-          "x": 305,
-          "y": 102,
-          "z": 305
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "block-r3-c1",
-        "kind": "block",
-        "material": {
-          "kind": "block",
-          "productId": "tuffblock-12x12x4"
-        },
-        "position": {
-          "x": 0,
-          "y": -51,
-          "z": -304.7999999999997
-        },
-        "size": {
-          "x": 305,
-          "y": 102,
-          "z": 305
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "block-r3-c2",
-        "kind": "block",
-        "material": {
-          "kind": "block",
-          "productId": "tuffblock-12x12x4"
-        },
-        "position": {
-          "x": 2438.4,
-          "y": -51,
-          "z": -304.7999999999997
-        },
-        "size": {
-          "x": 305,
-          "y": 102,
-          "z": 305
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "block-r4-c0",
-        "kind": "block",
-        "material": {
-          "kind": "block",
-          "productId": "tuffblock-12x12x4"
-        },
-        "position": {
-          "x": -2438.4,
-          "y": -51,
-          "z": 304.8000000000002
-        },
-        "size": {
-          "x": 305,
-          "y": 102,
-          "z": 305
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "block-r4-c1",
-        "kind": "block",
-        "material": {
-          "kind": "block",
-          "productId": "tuffblock-12x12x4"
-        },
-        "position": {
-          "x": 0,
-          "y": -51,
-          "z": 304.8000000000002
-        },
-        "size": {
-          "x": 305,
-          "y": 102,
-          "z": 305
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "block-r4-c2",
-        "kind": "block",
-        "material": {
-          "kind": "block",
-          "productId": "tuffblock-12x12x4"
-        },
-        "position": {
-          "x": 2438.4,
-          "y": -51,
-          "z": 304.8000000000002
-        },
-        "size": {
-          "x": 305,
-          "y": 102,
-          "z": 305
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "block-r5-c0",
-        "kind": "block",
-        "material": {
-          "kind": "block",
-          "productId": "tuffblock-12x12x4"
-        },
-        "position": {
-          "x": -2438.4,
-          "y": -51,
-          "z": 914.4000000000001
-        },
-        "size": {
-          "x": 305,
-          "y": 102,
-          "z": 305
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "block-r5-c1",
-        "kind": "block",
-        "material": {
-          "kind": "block",
-          "productId": "tuffblock-12x12x4"
-        },
-        "position": {
-          "x": 0,
-          "y": -51,
-          "z": 914.4000000000001
-        },
-        "size": {
-          "x": 305,
-          "y": 102,
-          "z": 305
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "block-r5-c2",
-        "kind": "block",
-        "material": {
-          "kind": "block",
-          "productId": "tuffblock-12x12x4"
-        },
-        "position": {
-          "x": 2438.4,
-          "y": -51,
-          "z": 914.4000000000001
-        },
-        "size": {
-          "x": 305,
-          "y": 102,
-          "z": 305
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "block-r6-c0",
-        "kind": "block",
-        "material": {
-          "kind": "block",
-          "productId": "tuffblock-12x12x4"
-        },
-        "position": {
-          "x": -2438.4,
-          "y": -51,
-          "z": 1524.0000000000005
-        },
-        "size": {
-          "x": 305,
-          "y": 102,
-          "z": 305
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "block-r6-c1",
-        "kind": "block",
-        "material": {
-          "kind": "block",
-          "productId": "tuffblock-12x12x4"
-        },
-        "position": {
-          "x": 0,
-          "y": -51,
-          "z": 1524.0000000000005
-        },
-        "size": {
-          "x": 305,
-          "y": 102,
-          "z": 305
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "block-r6-c2",
-        "kind": "block",
-        "material": {
-          "kind": "block",
-          "productId": "tuffblock-12x12x4"
-        },
-        "position": {
-          "x": 2438.4,
-          "y": -51,
-          "z": 1524.0000000000005
-        },
-        "size": {
-          "x": 305,
-          "y": 102,
-          "z": 305
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "block-r7-c0",
-        "kind": "block",
-        "material": {
-          "kind": "block",
-          "productId": "tuffblock-12x12x4"
-        },
-        "position": {
-          "x": -2438.4,
-          "y": -51,
-          "z": 2133.6
-        },
-        "size": {
-          "x": 305,
-          "y": 102,
-          "z": 305
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "block-r7-c1",
-        "kind": "block",
-        "material": {
-          "kind": "block",
-          "productId": "tuffblock-12x12x4"
-        },
-        "position": {
-          "x": 0,
-          "y": -51,
-          "z": 2133.6
-        },
-        "size": {
-          "x": 305,
-          "y": 102,
-          "z": 305
-        },
-        "rotation": {
-          "x": 0,
-          "y": 0,
-          "z": 0
-        }
-      },
-      {
-        "id": "block-r7-c2",
-        "kind": "block",
-        "material": {
-          "kind": "block",
-          "productId": "tuffblock-12x12x4"
-        },
-        "position": {
-          "x": 2438.4,
-          "y": -51,
-          "z": 2133.6
+          "z": 1983.6
         },
         "size": {
           "x": 305,

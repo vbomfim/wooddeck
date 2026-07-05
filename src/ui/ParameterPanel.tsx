@@ -93,6 +93,7 @@ import {
 } from '../state';
 
 import { BlockProductSelector } from './fields/BlockProductSelector';
+import { FloatingFramingSelector } from './fields/FloatingFramingSelector';
 import { FoundationTypeSelector } from './fields/FoundationTypeSelector';
 import { LengthField } from './fields/LengthField';
 import { SelectField, type SelectOption } from './fields/SelectField';
@@ -434,6 +435,7 @@ export function ParameterPanel(): JSX.Element {
         <StructureSelector />
         <FoundationTypeSelector />
         <BlockProductSelector />
+        <FloatingFramingSelector />
       </div>
 
       {errorMessage !== null && (

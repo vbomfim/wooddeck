@@ -173,6 +173,16 @@ export function makeDefaultDesign(id: string, createdAt: string): DeckDesign {
     // byte-identical (6×6 PT No2) — the domain-owned defaults are
     // authoritative going forward.
     structure: 'elevated',
+    // S26 (fix/floating-framing-joists) — the default carries the
+    // Method-A `'beams-and-joists'` framing. The field is IGNORED for
+    // elevated designs (see `DeckDesign.floatingFraming` doc), so
+    // stamping the default here does not change the boot layout.
+    // It only matters when the user later flips `structure` to
+    // `'floating'` — in that case the floating pipeline honors the
+    // pre-stamped value. Placed immediately after `structure` for
+    // field-order consistency across model.ts, model.test golden,
+    // and property fixtures (S26 FIX #7).
+    floatingFraming: 'beams-and-joists',
     foundation: defaultFoundationFor('posts-on-footings'),
     joist: {
       material: { nominal: joistNominal, species, grade },

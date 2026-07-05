@@ -2,27 +2,33 @@
  * `src/scene/layers/BlockingLayer.tsx` — the S22 blocking-mesh
  * layer (Epic 2 / FR-029).
  *
- * ## Responsibility (single)
+ * ## S26 FIX #6 (review-gate) — dormant
  *
- * Render every `LayoutMember` with `kind === 'blocking'` as a
- * {@link BoxMember} inside a `<group visible>` bound to
- * `useUiStore(s => s.layerVisibility.blocking)`. Blocking members
- * are short lumber blocks between beams (or between joists) —
- * they carry a `{kind:'lumber', ...}` material, so the standard
- * `KindLayer` delegation pattern applies unchanged.
+ * S26 removed the floating "blocking between beams" concept: the
+ * new floating layout (`floating-layout.ts`) emits ZERO members
+ * with `kind === 'blocking'`, and no other layout produces them
+ * either. The user-visible checkbox toggled an always-empty layer
+ * (misleading). This component is kept as a DORMANT file — no
+ * user-visible wiring, no LayerVisibility key, no toggle — so a
+ * future "blocking between joists" (mid-joist noggins for lateral
+ * bracing) feature can re-attach it cheaply by:
  *
- * ## Why this file is one line
+ *   1. Re-adding `blocking: boolean` to `LayerVisibility`
+ *      (`state/ui-store.ts`) + the two `ALL_LAYERS_*` frozen
+ *      defaults.
+ *   2. Re-adding `{ key: 'blocking', label: 'Blocking' }` to
+ *      `LAYER_ITEMS` (`ui/layer-toggle-items.ts`).
+ *   3. Restoring `<BlockingLayer />` to `scene/layers/DeckLayers.tsx`.
+ *   4. Replacing the body below with the previous
+ *      `<KindLayer kind="blocking" visibilityKey="blocking" />`.
  *
- * See `JoistsLayer` / `BeamsLayer` — every kind-scoped layer whose
- * members map 1-to-1 to a `BoxMember` delegates to the shared
- * `KindLayer` helper. Only `BlocksLayer` needs a bespoke component
- * (different geometry per productId); `BlockingLayer` looks and
- * behaves exactly like the framing layers.
+ * Rationale for keeping the file: the `blocking` `MemberKind`, the
+ * `part-color` mapping, and the plan-view rendering (`PlanView2D`)
+ * still exist and the ticket owner did NOT delete them. A dormant
+ * component preserves the full re-attachment path in ONE place.
  */
 import type { JSX } from 'react';
 
-import { KindLayer } from './shared/kind-layer';
-
-export function BlockingLayer(): JSX.Element {
-  return <KindLayer kind="blocking" visibilityKey="blocking" />;
+export function BlockingLayer(): JSX.Element | null {
+  return null;
 }

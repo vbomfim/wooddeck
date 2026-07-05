@@ -540,3 +540,105 @@ describe('computeBlockGrid — S25 foundation.blockRowsHint honored', () => {
     expect(uniqueXs.size).toBe(4);
   });
 });
+
+// ---------------------------------------------------------------------------
+// S26 FIX #7 (review-gate: Opus#5) — explicit-centers input validation
+// ---------------------------------------------------------------------------
+//
+// The `explicitColXCenters` / `explicitRowZCenters` JSDoc claims
+// "(validated defensively below)" — before FIX #7 that claim was
+// wrong: `validateInput` silently accepted any array (including
+// NaN, ±Infinity, and values outside the footprint half-extent).
+// A bad caller (or a corrupt persisted design) would silently
+// produce blocks at nonsense positions.
+//
+// These tests pin the actual validation the JSDoc promises:
+//
+//   1. Every element must be a finite number.
+//   2. Every element must lie within `[-widthMm/2, +widthMm/2]`
+//      for `explicitColXCenters` and `[-lengthMm/2, +lengthMm/2]`
+//      for `explicitRowZCenters`.
+
+describe('computeBlockGrid — S26 FIX #7: explicit-centers validation (JSDoc-promised)', () => {
+  const FOOTPRINT_16x12 = {
+    widthMm: 16 * MM_PER_FOOT,
+    lengthMm: 12 * MM_PER_FOOT,
+  };
+
+  it('rejects a NaN entry in explicitColXCenters', () => {
+    expect(() =>
+      computeBlockGrid({
+        footprintMm: FOOTPRINT_16x12,
+        foundation: TUFFBLOCK_FOUNDATION,
+        beamSpanMaxMm: BEAM_SPAN_MAX_MM,
+        joistSpanMaxMm: JOIST_SPAN_MAX_MM,
+        explicitColXCenters: [-1000, Number.NaN, 1000],
+      }),
+    ).toThrow(/explicitColXCenters/);
+  });
+
+  it('rejects an Infinity entry in explicitColXCenters', () => {
+    expect(() =>
+      computeBlockGrid({
+        footprintMm: FOOTPRINT_16x12,
+        foundation: TUFFBLOCK_FOUNDATION,
+        beamSpanMaxMm: BEAM_SPAN_MAX_MM,
+        joistSpanMaxMm: JOIST_SPAN_MAX_MM,
+        explicitColXCenters: [Number.POSITIVE_INFINITY],
+      }),
+    ).toThrow(/explicitColXCenters/);
+  });
+
+  it('rejects an explicitColXCenters entry outside ±widthMm/2', () => {
+    // widthMm/2 = 8 ft = 2438.4 mm. 3000 > 2438.4 → reject.
+    expect(() =>
+      computeBlockGrid({
+        footprintMm: FOOTPRINT_16x12,
+        foundation: TUFFBLOCK_FOUNDATION,
+        beamSpanMaxMm: BEAM_SPAN_MAX_MM,
+        joistSpanMaxMm: JOIST_SPAN_MAX_MM,
+        explicitColXCenters: [-2000, 0, 3000],
+      }),
+    ).toThrow(/explicitColXCenters/);
+  });
+
+  it('rejects a NaN entry in explicitRowZCenters', () => {
+    expect(() =>
+      computeBlockGrid({
+        footprintMm: FOOTPRINT_16x12,
+        foundation: TUFFBLOCK_FOUNDATION,
+        beamSpanMaxMm: BEAM_SPAN_MAX_MM,
+        joistSpanMaxMm: JOIST_SPAN_MAX_MM,
+        explicitRowZCenters: [-1000, Number.NaN, 1000],
+      }),
+    ).toThrow(/explicitRowZCenters/);
+  });
+
+  it('rejects an explicitRowZCenters entry outside ±lengthMm/2', () => {
+    // lengthMm/2 = 6 ft = 1828.8 mm. 2000 > 1828.8 → reject.
+    expect(() =>
+      computeBlockGrid({
+        footprintMm: FOOTPRINT_16x12,
+        foundation: TUFFBLOCK_FOUNDATION,
+        beamSpanMaxMm: BEAM_SPAN_MAX_MM,
+        joistSpanMaxMm: JOIST_SPAN_MAX_MM,
+        explicitRowZCenters: [-2000, 0, 2000],
+      }),
+    ).toThrow(/explicitRowZCenters/);
+  });
+
+  it('accepts finite entries within the footprint half-extent (regression: legit callers still work)', () => {
+    // Method A uses ±(lengthMm/2 − FOOTING_WIDTH_MM/2) — well
+    // inside the ±lengthMm/2 bound. Must NOT throw.
+    const halfLength = FOOTPRINT_16x12.lengthMm / 2;
+    expect(() =>
+      computeBlockGrid({
+        footprintMm: FOOTPRINT_16x12,
+        foundation: TUFFBLOCK_FOUNDATION,
+        beamSpanMaxMm: BEAM_SPAN_MAX_MM,
+        joistSpanMaxMm: JOIST_SPAN_MAX_MM,
+        explicitRowZCenters: [-halfLength + 50, halfLength - 50],
+      }),
+    ).not.toThrow();
+  });
+});

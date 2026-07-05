@@ -76,6 +76,7 @@ import { layoutPostsAndBlocks, layoutPostsAndFootings } from './post-layout';
 import {
   LayoutError,
   MIN_DECK_DIMENSION_MM,
+  validateJoistSpacing,
 } from './layout-shared';
 import { FOOTING_WIDTH_MM, MIN_POST_HEIGHT_MM } from './y-stack';
 
@@ -528,35 +529,15 @@ function validateDesign(design: DeckDesign): void {
     );
   }
 
-  // Joist-spacing min: the joist material's actual thickness. Spacings
-  // smaller than the joist thickness produce OVERLAPPING joists (they
-  // are placed at ≥ actualSpacing centre-to-centre but each joist has
-  // `thickness` extent on x). Fails AC3 silently otherwise; reject
-  // loudly here so S13 can surface the min to the user. Look up the
-  // joist material via the catalog — this also validates the material
-  // triple, but if that fails we surface a specific LayoutError below.
-  let joistThicknessMm: Mm;
-  try {
-    const joistMaterial = lookupMaterial(
-      design.joist.material.nominal,
-      design.joist.material.species,
-      design.joist.material.grade,
-    );
-    joistThicknessMm = joistMaterial.actual.widthMm;
-  } catch (err) {
-    throw new LayoutError(
-      `Invalid joist material: ${err instanceof Error ? err.message : String(err)}`,
-      { cause: err },
-    );
-  }
-  if (!Number.isFinite(design.joist.spacingMm) || design.joist.spacingMm < joistThicknessMm) {
-    throw new LayoutError(
-      `Invalid joist spacing: spacingMm=${design.joist.spacingMm} must be ≥ the joist ` +
-        `thickness of ${joistThicknessMm} mm (spacings smaller than the joist thickness ` +
-        `would produce overlapping joists). Typical values: 305 mm (12″), 406 mm (16″), ` +
-        `508 mm (20″), 610 mm (24″).`,
-    );
-  }
+  // Joist-spacing min: shared with the floating pipeline via the
+  // extracted `validateJoistSpacing` helper. Rejects non-finite,
+  // ≤0, and sub-thickness spacings — see `layout-shared.ts` for
+  // the full failure-mode enumeration. Extracted in S26 so the
+  // floating orchestrator can apply the identical guard (before
+  // S26 only the elevated path did, but the S26 rework made
+  // floating share `computeJoistXCenters` — the same DoS pathway
+  // now exists in both).
+  validateJoistSpacing(design);
 
   // Height min: the y-stack must fit above ground with strictly
   // positive posts. See `computeMinStructuralHeightMm` for the

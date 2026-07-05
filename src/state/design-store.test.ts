@@ -884,9 +884,10 @@ describe('useDesignStore — applyRemediation action (S16 issue #38)', () => {
       footprint: {
         widthMm: 12 * MM_PER_FOOT,
         lengthMm: 12 * MM_PER_FOOT,
-        heightMm: 209,
+        heightMm: 500,
       },
       structure: 'floating',
+      floatingFraming: 'beams-and-joists',
       foundation: {
         type: 'tuffblocks',
         product: { productId: 'tuffblock-12x12x4' },
@@ -1386,6 +1387,7 @@ describe('useDesignStore — S23 QA G3: structure switch + undo has no orphan ke
     // allowed keys (`type`, `product`).
     useDesignStore.getState().applyParameters({
       structure: 'floating',
+      floatingFraming: 'beams-and-joists',
       foundation: {
         type: 'tuffblocks',
         product: { productId: 'tuffblock-12x12x4' },
@@ -1440,6 +1442,7 @@ describe('useDesignStore — S23 QA G3: structure switch + undo has no orphan ke
     resetDesignStoreForTests();
     useDesignStore.getState().applyParameters({
       structure: 'floating',
+      floatingFraming: 'beams-and-joists',
       foundation: {
         type: 'tuffblocks',
         product: { productId: 'tuffblock-12x12x4' },
@@ -1460,6 +1463,7 @@ describe('useDesignStore — S23 QA G3: structure switch + undo has no orphan ke
     // (they're not part of the posts-on-footings variant shape).
     useDesignStore.getState().applyParameters({
       structure: 'elevated',
+      floatingFraming: 'beams-and-joists',
       foundation: {
         type: 'posts-on-footings',
         post: {

@@ -132,6 +132,11 @@ function makeFixture(
     // expected value matches migrateV1ToV2's no-aliasing discipline.
     footprint: { ...design.footprint },
     structure: 'elevated',
+    // S26 (fix/floating-framing-joists) — v1→v2 migration stamps
+    // the default framing method (see `migrateV1ToV2`). Placed
+    // immediately after `structure` for field-order consistency
+    // (S26 FIX #7 / Opus#6).
+    floatingFraming: 'beams-and-joists',
     foundation: {
       type: 'posts-on-footings',
       post: { ...design.post.material },

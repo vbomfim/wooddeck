@@ -32,6 +32,7 @@ function makeDesign(overrides: Partial<{
       heightMm: overrides.heightMm ?? 914,
     },
     structure: 'elevated',
+    floatingFraming: 'beams-and-joists',
     foundation: {
       type: 'posts-on-footings',
       post: { nominal: '6x6', species: 'PT', grade: 'No2' },

@@ -75,13 +75,17 @@
 import type { JSX } from 'react';
 
 import { BeamsLayer } from './BeamsLayer';
-import { BlockingLayer } from './BlockingLayer';
 import { BlocksLayer } from './BlocksLayer';
 import { DeckingLayer } from './DeckingLayer';
 import { EnvironmentLayer } from './EnvironmentLayer';
 import { FootingsLayer } from './FootingsLayer';
 import { JoistsLayer } from './JoistsLayer';
 import { PostsLayer } from './PostsLayer';
+
+// S26 FIX #6 (review-gate) — `BlockingLayer` was removed from the
+// scene tree because the current layout emits ZERO `blocking`
+// members (the concept was removed from floating). The dormant
+// component in `./BlockingLayer.tsx` is kept for cheap re-add.
 
 export function DeckLayers(): JSX.Element {
   return (
@@ -91,7 +95,6 @@ export function DeckLayers(): JSX.Element {
       <BlocksLayer />
       <PostsLayer />
       <BeamsLayer />
-      <BlockingLayer />
       <JoistsLayer />
       <DeckingLayer />
     </>

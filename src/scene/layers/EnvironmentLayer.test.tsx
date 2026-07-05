@@ -34,7 +34,6 @@ function resetLayerVisibility(): void {
       posts: true,
       footings: true,
       blocks: true,
-      blocking: true,
     },
   });
 }

@@ -256,31 +256,58 @@ export interface FoundationBlockRef {
  * The `deck-blocks` / `tuffblocks` variants carry OPTIONAL
  * `blockRowsHint` / `blockColsHint` fields — dimensionless integers
  * that override the derived block-grid count under a floating deck.
- * Semantics:
  *
- *   - `blockRowsHint = N` → the floating layout places EXACTLY N
- *     rows of blocks along +z (deck length axis) under each beam,
- *     regardless of the natural derivation
- *     (`ceil(lengthMm / joistSpanMaxMm) + 1`). Clamped by
- *     `computeBlockGrid` to `[2, floor(lengthMm / MIN_BLOCK_SPACING_MM) + 1]`
- *     so an out-of-range hint never spawns a degenerate or absurd
- *     grid.
- *   - `blockColsHint = M` → same, along +x (deck width axis) —
- *     mirror override for the beam-column axis.
- *   - `undefined` → S19 pre-S25 derivation preserved BYTE-IDENTICALLY.
- *     Every existing golden fixture and layout snapshot is stable
- *     when the hint is omitted.
+ * ## S26 per-method semantics
  *
- * These are the seam the S25 `add-support-row` remediation writes
- * to when the user clicks "Add a row of blocks (N → N+1)" in the
- * WarningsPanel — the hint bumps `numRows` by one, which reduces
- * the beam-to-support span, which clears the over-span-beam
- * warning that triggered the remediation.
+ * After the S26 `floatingFraming` split, the effective hint depends
+ * on which framing method the design uses:
  *
- * NOT MEANINGFUL for `posts-on-footings` (the elevated post grid
+ *   - **Method A (`'beams-and-joists'`, DEFAULT)** — rows are
+ *     PINNED to the two rim-beam z-positions (`explicitRowZCenters`
+ *     is supplied by the layout engine). `blockRowsHint` is a
+ *     **no-op** in this method (the beams dictate the row layout;
+ *     more blocks along +z would sit under nothing structural).
+ *     `blockColsHint` still controls the column count and bounds
+ *     the +x block spacing under each rim beam.
+ *   - **Method B (`'joists-on-blocks'`)** — columns are PINNED to
+ *     the joist x-centers so every joist has a support column
+ *     (`explicitColXCenters` is supplied). `blockColsHint` is a
+ *     **no-op** in this method. `blockRowsHint` still controls the
+ *     row count along +z, which directly shortens the joist span
+ *     between supports.
+ *
+ * ## Legacy (elevated + `posts-on-footings`)
+ *
+ * NOT MEANINGFUL for `posts-on-footings` — the elevated post grid
  * is derived from beam-count math that has no equivalent "add a
- * row" degree of freedom in the MVP scope — the elevated variant
- * of add-support-row is deferred per ticket #47 §16, Q7).
+ * row" degree of freedom in the MVP scope (the elevated variant of
+ * add-support-row is deferred per ticket #47 §16, Q7).
+ *
+ * ## Base semantics (both methods)
+ *
+ *   - `blockRowsHint = N` → place EXACTLY N rows of blocks along
+ *     +z (subject to the pinning rules above), regardless of the
+ *     natural derivation (`ceil(lengthMm / joistSpanMaxMm) + 1`).
+ *     Clamped by `computeBlockGrid` to
+ *     `[2, floor(lengthMm / MIN_BLOCK_SPACING_MM) + 1]` so an
+ *     out-of-range hint never spawns a degenerate or absurd grid.
+ *   - `blockColsHint = M` → same, along +x (mirror override for
+ *     the beam-column axis).
+ *   - `undefined` → S19 pre-S25 derivation preserved
+ *     BYTE-IDENTICALLY. Every existing golden fixture and layout
+ *     snapshot is stable when the hint is omitted.
+ *
+ * ## S25 remediation seam
+ *
+ * These fields are the seam the S25 `add-support-row` remediation
+ * writes to when the user clicks "Add a row of blocks (N → N+1)"
+ * in the WarningsPanel. **S26 rescope (FIX #4):** the remediation
+ * is DISABLED under Method A + `over-span-beam` warnings because
+ * `blockRowsHint` is a no-op there — see the alternative surfaced
+ * via FR-032 (reduce joist spacing / heavier joist / switch to
+ * Method B). Under Method B + `over-span-joist` warnings the
+ * remediation is ENABLED and genuinely shortens the joist span
+ * between supports.
  */
 export type FoundationSpec =
   | { readonly type: 'posts-on-footings'; readonly post: MaterialRef; readonly footing: FootingSpec }
@@ -423,6 +450,64 @@ export interface DeckDesign {
    */
   readonly structure: StructureMode;
   /**
+   * Floating-framing method (S26 — the fix/floating-framing-joists
+   * ticket). Selects HOW a floating deck is framed on top of its
+   * block grid. Only meaningful when `structure === 'floating'` —
+   * the elevated pipeline IGNORES this field entirely (elevated
+   * framing is fixed: joists on rim beams on posts).
+   *
+   * ## Method A — `'beams-and-joists'` (default)
+   *
+   * Elevated-style framing resting on blocks. The framing plane
+   * carries EXACTLY 2 rim beams (near/far) running along +x at
+   * each z-end, mirrored from the elevated `layoutBeams`. Joists
+   * run along +z on top of the beams, spaced across +x at
+   * `design.joist.spacingMm` — identical count/pitch to the
+   * elevated `layoutJoists`. Blocks sit under the two rim beams.
+   *
+   * y-stack (bottom-up): block → beam → joist → decking.
+   *
+   * This is the DEFAULT because it is the framing method every
+   * DIY floating-deck tutorial (Simpson, Home Depot, TuffBlock
+   * install guide) describes — rim beams distribute load laterally
+   * across the block grid, joists at the user's chosen o.c.
+   * spacing support the decking.
+   *
+   * ## Method B — `'joists-on-blocks'`
+   *
+   * Beam-less framing. Joists run along +z at
+   * `design.joist.spacingMm` DIRECTLY on top of the block grid.
+   * No beams. Blocks are arranged in rows along the joist length
+   * (bounded by the joist's allowable span) with columns aligned
+   * to the joist x-positions — each joist bears on a column of
+   * blocks. Lower profile than Method A (saves one lumber layer).
+   *
+   * y-stack (bottom-up): block → joist → decking.
+   *
+   * Both methods honor `design.joist.spacingMm` (the pre-S26 bug
+   * ignored spacing entirely — decking rested directly on widely-
+   * spaced beams). Both use the shared `computeJoistXCenters`
+   * helper so floating joist pitch is byte-identical to elevated
+   * joist pitch for a given width + spacing.
+   *
+   * See `src/domain/layout/floating/floating-layout.ts` for the
+   * dispatch site and `src/ui/fields/FloatingFramingSelector.tsx`
+   * for the user-facing selector.
+   *
+   * ## Placement rationale (S26 FIX #7)
+   *
+   * This field is a **sub-discriminator** of `structure` — its
+   * meaning is defined only when `structure === 'floating'`. Placed
+   * IMMEDIATELY AFTER `structure` in the interface, in
+   * `default-design.ts`, in the model.test golden fixture, and in
+   * all test/property fixtures so a code-reader encounters the
+   * qualifier alongside the field it qualifies. Field-order
+   * consistency (Opus#6) is enforced by convention across those
+   * files; a byte-order test in `model.test.ts` locks the JSON
+   * key order.
+   */
+  readonly floatingFraming: FloatingFraming;
+  /**
    * Epic 2 / S17 addition (FR-026) — foundation TYPE + parameters.
    * Discriminated on `.type` so an omitted branch in a downstream
    * `switch` fails-compile. See `FoundationSpec`.
@@ -452,6 +537,15 @@ export interface DeckDesign {
     readonly bayRemainderStrategy: 'extra-bay-at-end' | 'centered';
   };
 }
+
+/**
+ * The two S26 floating-framing methods. Exported as a named type
+ * alias so the UI selector, application-layer patch handlers,
+ * persistence schemas, and property-based test arbitraries can
+ * refer to the union by name (never inline the literal union — a
+ * future third method would require re-fanning-out otherwise).
+ */
+export type FloatingFraming = 'beams-and-joists' | 'joists-on-blocks';
 
 // ==========================================================
 // LAYOUT COORDINATE FRAME — the binding contract for S4 & S10

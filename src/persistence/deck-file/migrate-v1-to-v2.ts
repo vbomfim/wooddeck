@@ -138,6 +138,25 @@ function migrateDesign(v1Design: V1LegacyDesign): DeckDesign {
     createdAt: v1Design.createdAt,
     footprint: { ...v1Design.footprint },
     structure: 'elevated',
+    // S26 (fix/floating-framing-joists) — every migrated v1 design
+    // is elevated by definition (see FR-027 default) and the floating
+    // framing field is IGNORED for elevated. We stamp
+    // `'beams-and-joists'` (the schema default) so downstream
+    // consumers can rely on the field being present. Choosing the
+    // default value here matches the on-disk schema-v2's default
+    // for the missing case — see `deck-file-schema-v2.json`.
+    //
+    // S26 FIX #3 (review-gate) — `deserialize` in `schema-v2.ts` also
+    // routes the migrated design through the shared
+    // `finalizeFloatingFraming` helper (idempotent on an already-
+    // present valid enum value), guaranteeing the invariant "every
+    // loaded design has a validated `floatingFraming`" is enforced by
+    // ONE code path regardless of load source (v1 or v2).
+    //
+    // S26 FIX #7 / Opus#6 — placed immediately after `structure` for
+    // field-order consistency across model.ts / default-design.ts /
+    // model.test golden / persistence fixtures.
+    floatingFraming: 'beams-and-joists',
     foundation,
     joist: {
       material: { ...v1Design.joist.material },

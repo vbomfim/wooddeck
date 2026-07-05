@@ -139,8 +139,17 @@ export function layoutJoists(design: DeckDesign): LayoutMember[] {
  * S=508 produced two joists 1mm apart on-center).
  *
  * Complexity: O(joistCount). No hidden allocations beyond the result.
+ *
+ * ## Public surface (S26 — fix/floating-framing-joists)
+ *
+ * Exported so the floating-layout pipeline (which now honors
+ * `design.joist.spacingMm` for both framing methods) can reuse the
+ * IDENTICAL anchor formula — that way a floating joist grid has
+ * byte-identical x-centers to the elevated joist grid for a given
+ * width + spacing + thickness. Any drift between the two would be a
+ * regression the "spacing not working" ticket was created to fix.
  */
-function computeJoistXCenters(
+export function computeJoistXCenters(
   widthMm: Mm,
   spacingMm: Mm,
   thicknessMm: Mm,

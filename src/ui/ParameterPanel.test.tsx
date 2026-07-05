@@ -766,6 +766,7 @@ describe('ParameterPanel — S23 issue #45 AC1 (atomic structure switch)', () =>
     act(() => {
       useDesignStore.getState().applyParameters({
         structure: 'floating',
+        floatingFraming: 'beams-and-joists',
         foundation: {
           type: 'tuffblocks',
           product: { productId: 'tuffblock-12x12x4' },
@@ -808,6 +809,7 @@ describe('ParameterPanel — S23 issue #45 AC4 (compat rejection inline banner)'
     act(() => {
       useDesignStore.getState().applyParameters({
         structure: 'elevated',
+        floatingFraming: 'beams-and-joists',
         foundation: {
           type: 'tuffblocks',
           product: { productId: 'tuffblock-12x12x4' },
@@ -845,6 +847,7 @@ describe('ParameterPanel — S23 QA G1 (compat-error → fix via FoundationTypeS
     act(() => {
       useDesignStore.getState().applyParameters({
         structure: 'elevated',
+        floatingFraming: 'beams-and-joists',
         foundation: {
           type: 'tuffblocks',
           product: { productId: 'tuffblock-12x12x4' },

@@ -44,6 +44,7 @@ function makeDesign(overrides: Partial<{
       heightMm: overrides.heightMm ?? 914,
     },
     structure: 'elevated',
+    floatingFraming: 'beams-and-joists',
     foundation: {
       type: 'posts-on-footings',
       post: { nominal: '6x6', species: 'PT', grade: 'No2' },
@@ -299,6 +300,7 @@ function makeDeckBlocksDesign(overrides: Partial<{
       heightMm: overrides.heightMm ?? 1200,
     },
     structure: 'elevated',
+    floatingFraming: 'beams-and-joists',
     foundation: OLDCASTLE_FOUNDATION,
     joist: {
       material: { nominal: '2x10', species: 'PT', grade: 'No2' },

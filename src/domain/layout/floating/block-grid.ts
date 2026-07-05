@@ -137,6 +137,33 @@ export interface BlockGridInput {
    * conservative default. Must be strictly positive.
    */
   readonly joistSpanMaxMm: Mm;
+  /**
+   * S26 override — explicit column x-centers. When provided, the
+   * caller has already computed the exact x-positions the blocks
+   * should occupy (e.g. Method B aligns block columns to joist
+   * x-centers). Bypasses `beamSpanMaxMm` + `blockColsHint` +
+   * `computeAxisCenters` for this axis. When omitted, the axis
+   * uses the derived + hinted anchor formula (S19 behavior).
+   *
+   * Trust boundary: every entry MUST be finite AND lie within
+   * `[-widthMm/2, +widthMm/2]`. `validateInput` enforces this and
+   * throws with a diagnostic message naming the offending
+   * index + value if a caller passes NaN / ±Infinity / out-of-range
+   * values. S26 FIX #7 (review-gate: Opus#5) — pre-fix, the JSDoc
+   * *claimed* validation without actually performing any.
+   */
+  readonly explicitColXCenters?: readonly Mm[];
+  /**
+   * S26 override — explicit row z-centers. Same semantics as
+   * `explicitColXCenters` for the length axis. Method A supplies
+   * this to place blocks directly under the rim beams (at
+   * ±(lengthMm/2 - FOOTING_WIDTH_MM/2)) instead of at
+   * ±lengthMm/2.
+   *
+   * Trust boundary: every entry MUST be finite AND lie within
+   * `[-lengthMm/2, +lengthMm/2]`; enforced by `validateInput`.
+   */
+  readonly explicitRowZCenters?: readonly Mm[];
 }
 
 /**
@@ -158,27 +185,29 @@ export function computeBlockGrid(input: BlockGridInput): readonly LayoutMember[]
   const productDepthMm = product.actual.depthMm;
   const yCenter = -productHeightMm / 2; // block TOP at y=0
 
-  // S25 (ticket #47): honor `foundation.blockColsHint` /
-  // `blockRowsHint` when set. Undefined → derive as before (S19
-  // behavior preserved byte-identically). See module header + the
-  // FoundationSpec doc-block in `model.ts`.
-  const numCols = resolveGridCount(
-    foundation.blockColsHint,
-    widthMm,
-    beamSpanMaxMm,
-  );
-  const numRows = resolveGridCount(
-    foundation.blockRowsHint,
-    lengthMm,
-    joistSpanMaxMm,
-  );
-
-  const xCenters = computeAxisCenters(widthMm, numCols);
-  const zCenters = computeAxisCenters(lengthMm, numRows);
+  // S26 — honor explicit-center overrides first (used by Method A
+  // to place rows under rim beams, and Method B to align columns
+  // to joist x-positions). When absent, fall back to the S19
+  // resolve-hint-or-derive path so the elevated + pre-S26 paths
+  // stay byte-identical.
+  const xCenters =
+    input.explicitColXCenters !== undefined
+      ? [...input.explicitColXCenters]
+      : computeAxisCenters(
+          widthMm,
+          resolveGridCount(foundation.blockColsHint, widthMm, beamSpanMaxMm),
+        );
+  const zCenters =
+    input.explicitRowZCenters !== undefined
+      ? [...input.explicitRowZCenters]
+      : computeAxisCenters(
+          lengthMm,
+          resolveGridCount(foundation.blockRowsHint, lengthMm, joistSpanMaxMm),
+        );
 
   const members: LayoutMember[] = [];
-  for (let row = 0; row < numRows; row++) {
-    for (let col = 0; col < numCols; col++) {
+  for (let row = 0; row < zCenters.length; row++) {
+    for (let col = 0; col < xCenters.length; col++) {
       members.push({
         id: `block-r${row}-c${col}`,
         kind: 'block',
@@ -324,5 +353,62 @@ function validateInput(input: BlockGridInput): void {
       `computeBlockGrid: invalid joistSpanMaxMm=${input.joistSpanMaxMm} ` +
         `(must be a positive finite number; controls the # of block rows under each beam).`,
     );
+  }
+
+  // S26 FIX #7 (review-gate: Opus#5) — validate the S26
+  // "explicit-centers" overrides that the JSDoc claims are
+  // "validated defensively below". Each entry must be finite AND
+  // lie within the footprint half-extent so nonsense positions
+  // (NaN, ±Infinity, or coordinates off the deck) cannot silently
+  // emit blocks at bogus x/z. A caller with a legitimate override
+  // (Method A rim-beam z-centers, Method B joist x-centers) is
+  // always well inside these bounds.
+  const halfWidth = widthMm / 2;
+  const halfLength = lengthMm / 2;
+  validateExplicitCenters(
+    input.explicitColXCenters,
+    halfWidth,
+    'explicitColXCenters',
+    'footprintMm.widthMm',
+  );
+  validateExplicitCenters(
+    input.explicitRowZCenters,
+    halfLength,
+    'explicitRowZCenters',
+    'footprintMm.lengthMm',
+  );
+}
+
+/**
+ * Shared helper for `explicitColXCenters` / `explicitRowZCenters`
+ * defensive checks. Each entry must be finite (rejects NaN,
+ * ±Infinity) and lie within the corresponding footprint
+ * half-extent (`±halfExtentMm`). Throws with a message that
+ * names the offending field + value so a callsite bug is
+ * traceable.
+ *
+ * S26 FIX #7 (review-gate: Opus#5).
+ */
+function validateExplicitCenters(
+  centers: readonly Mm[] | undefined,
+  halfExtentMm: Mm,
+  fieldName: 'explicitColXCenters' | 'explicitRowZCenters',
+  extentFieldName: 'footprintMm.widthMm' | 'footprintMm.lengthMm',
+): void {
+  if (centers === undefined) return;
+  for (let i = 0; i < centers.length; i += 1) {
+    const value = centers[i];
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      throw new Error(
+        `computeBlockGrid: invalid ${fieldName}[${i}]=${String(value)} ` +
+          `(must be a finite number).`,
+      );
+    }
+    if (value < -halfExtentMm || value > halfExtentMm) {
+      throw new Error(
+        `computeBlockGrid: ${fieldName}[${i}]=${value} out of range ` +
+          `[${-halfExtentMm}, ${halfExtentMm}] (half of ${extentFieldName}).`,
+      );
+    }
   }
 }

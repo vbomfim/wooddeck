@@ -40,10 +40,12 @@
  *
  * ### Joist span
  *
- * A joist's span is the center-to-center distance between the two
- * beams that support it. In the MVP layout there are exactly two
- * beams (`beam-near` at −z, `beam-far` at +z — see
- * `beam-layout.ts`). The joist span is therefore:
+ * In the ELEVATED and Method-A floating layouts, a joist's span is
+ * the center-to-center distance between the two beams that support
+ * it. In the MVP layout there are exactly two beams (`beam-near`
+ * at −z, `beam-far` at +z — see `beam-layout.ts` for elevated,
+ * `floating-beam-layout.ts` for the S26 rim beams). The joist
+ * span is therefore:
  *
  *     joistSpanMm = max(beam.z) − min(beam.z)
  *
@@ -58,8 +60,16 @@
  * AWC DCA-6 Figure 2 "Non-Ledger Deck". This is why the checker
  * derives span from beam positions rather than from `joist.size.z`.
  *
- * If the layout has fewer than 2 beams (defensive against future
- * layouts or a hand-built fixture), the joist check is skipped —
+ * In Method-B floating layouts (`floatingFraming =
+ * 'joists-on-blocks'`) there are NO beams — the joists rest
+ * directly on blocks. Each joist's span is derived from the block
+ * grid UNDER THAT JOIST: blocks with `position.x` matching the
+ * joist's `position.x`, sorted by z, max adjacent-z gap. See
+ * `deriveJoistSpanFromBlocks` — S26 FIX #1. Pre-fix, Method-B
+ * joists silently escaped the span check.
+ *
+ * If the layout has fewer than 2 beams AND fewer than 2 blocks
+ * match the joist, the joist check is skipped for that joist —
  * there is no defensible span value to compare against.
  *
  * ### Joist spacing
@@ -205,29 +215,43 @@ export function spanCheck(layout: Layout, table: SpanTable): Warning[] {
   const joistSpanMm = deriveJoistSpanMm(beams);
   const joistSpacingMm = deriveJoistSpacingMm(joists);
 
-  if (joistSpanMm !== null && joists.length > 0) {
-    for (const joist of joists) {
-      // Joist members are ALWAYS stamped with kind='lumber' by the
-      // layout engine (see S17 MemberMaterialRef widening). Review-gate
-      // FIX 4 replaced the pre-fix silent `continue` with a fail-safe
-      // warning (`allowableMm: 0`, "not rated" message) so a future
-      // producer bug that stamps a block material on a joist surfaces
-      // in the UI instead of hiding a real span violation.
-      if (joist.material.kind !== 'lumber') {
-        warnings.push(buildUnexpectedMaterialWarning(joist, 'over-span-joist'));
-        continue;
-      }
-      const allowableMm = table.lookupJoistMaxSpan(joist.material, joistSpacingMm);
-      const citation = table.citationFor('joist', joist.material, joistSpacingMm);
-      const warning = evaluateSpan({
-        memberId: joist.id,
-        kind: 'over-span-joist',
-        actualMm: joistSpanMm,
-        allowableMm,
-        tableReference: citation,
-      });
-      if (warning !== null) warnings.push(warning);
+  for (const joist of joists) {
+    // Joist members are ALWAYS stamped with kind='lumber' by the
+    // layout engine (see S17 MemberMaterialRef widening). Review-gate
+    // FIX 4 replaced the pre-fix silent `continue` with a fail-safe
+    // warning (`allowableMm: 0`, "not rated" message) so a future
+    // producer bug that stamps a block material on a joist surfaces
+    // in the UI instead of hiding a real span violation.
+    if (joist.material.kind !== 'lumber') {
+      warnings.push(buildUnexpectedMaterialWarning(joist, 'over-span-joist'));
+      continue;
     }
+    // Derive THIS joist's span:
+    //   - Elevated / Method A (beams present): the beam-to-beam +z
+    //     span, shared across every joist. `joistSpanMm` is the
+    //     max-z − min-z of the beams; skip the joist check when
+    //     there are < 2 beams (`joistSpanMm === null`) UNLESS we
+    //     can fall back to block-derived per-joist spans.
+    //   - Method B (no beams; joists rest directly on blocks): the
+    //     block-to-block +z gap under THIS joist, matched by shared
+    //     +x with a small tolerance. Guarantees joist span-checks
+    //     work for beam-less framing — FIX #1 (safety-critical).
+    const perJoistSpanMm =
+      joistSpanMm !== null
+        ? joistSpanMm
+        : deriveJoistSpanFromBlocks(joist, blocks);
+    if (perJoistSpanMm === null) continue; // no defensible span
+
+    const allowableMm = table.lookupJoistMaxSpan(joist.material, joistSpacingMm);
+    const citation = table.citationFor('joist', joist.material, joistSpacingMm);
+    const warning = evaluateSpan({
+      memberId: joist.id,
+      kind: 'over-span-joist',
+      actualMm: perJoistSpanMm,
+      allowableMm,
+      tableReference: citation,
+    });
+    if (warning !== null) warnings.push(warning);
   }
 
   // ---- Beam checks -------------------------------------------------------
@@ -326,6 +350,53 @@ function deriveJoistSpacingMm(joists: readonly LayoutMember[]): Mm {
 }
 
 /**
+ * S26 FIX #1 (safety-critical) — derive a Method-B joist's span from
+ * the BLOCK grid under it. In Method B (`floatingFraming =
+ * 'joists-on-blocks'`) the joists rest directly on blocks — there
+ * are NO beams — and each joist's between-supports span is the max
+ * adjacent-z gap of the blocks under that joist.
+ *
+ * Matching rule — blocks under a joist share the joist's +x within
+ * a small tolerance (`POST_Z_TOLERANCE_MM`, reused here for the
+ * same round-trip-ε rationale). Every Method-B block column is
+ * placed at a joist x-center by `computeMethodB` (see
+ * `floating-layout.ts`), so an EXACT `===` match would work today —
+ * the tolerance defends against a future `.deck` round-trip that
+ * introduces float drift.
+ *
+ * Returns `null` when fewer than 2 blocks match (a single-block
+ * joist has no defensible span; the check falls back to the
+ * existing "abstain rather than fabricate" pattern).
+ *
+ * ## Why this fix is safety-critical
+ *
+ * Pre-fix, `spanCheck` derived every joist's span from the beam
+ * positions — Method B emits ZERO beams → `joistSpanMm === null`
+ * → the entire joist-check block was skipped. A QA probe on a
+ * 12 × 40 ft Method-B deck with `blockRowsHint = 2` produced ZERO
+ * warnings even though the 40-ft joist span was ~3.3× the IRC
+ * allowable. The IRC span check is the app's core safety value;
+ * silently skipping it is the worst possible failure mode.
+ */
+function deriveJoistSpanFromBlocks(
+  joist: LayoutMember,
+  blocks: readonly LayoutMember[],
+): Mm | null {
+  const joistBlocks = blocks.filter(
+    (b) => Math.abs(b.position.x - joist.position.x) < POST_Z_TOLERANCE_MM,
+  );
+  if (joistBlocks.length < 2) return null;
+
+  const zs = joistBlocks.map((b) => b.position.z).sort((a, b) => a - b);
+  let maxGap = 0;
+  for (let i = 1; i < zs.length; i++) {
+    const gap = zs[i]! - zs[i - 1]!;
+    if (gap > maxGap) maxGap = gap;
+  }
+  return maxGap;
+}
+
+/**
  * Support-derivation info for a beam. The `.source` field discriminates
  * elevated ('post') from floating ('block') support layouts so the
  * beam check can pick the right tributary-span source (Review-gate
@@ -390,10 +461,19 @@ function deriveFloatingBeamTributaryMm(
   beams: readonly LayoutMember[],
 ): Mm | null {
   if (beams.length < 2) return null;
-  const xs = beams.map((b) => b.position.x).sort((a, b) => a - b);
+  // Detect beam orientation. Pre-S26: beams ran along +z, spaced
+  // along +x — tributary = max +x gap. S26 Method-A: rim beams run
+  // along +x, spaced along +z — tributary = max +z gap. Detect
+  // via the FIRST beam's long-axis. All floating beams in a given
+  // layout share the same orientation by construction.
+  const first = beams[0]!;
+  const runsAlongX = first.size.x >= first.size.z;
+  const coords = beams
+    .map((b) => (runsAlongX ? b.position.z : b.position.x))
+    .sort((a, b) => a - b);
   let maxGap = 0;
-  for (let i = 1; i < xs.length; i++) {
-    const gap = xs[i]! - xs[i - 1]!;
+  for (let i = 1; i < coords.length; i++) {
+    const gap = coords[i]! - coords[i - 1]!;
     if (gap > maxGap) maxGap = gap;
   }
   return maxGap;
@@ -444,15 +524,32 @@ function deriveBeamBlockToBlockSpanMm(
   beam: LayoutMember,
   blocks: readonly LayoutMember[],
 ): Mm | null {
-  const beamBlocks = blocks.filter(
-    (b) => Math.abs(b.position.x - beam.position.x) < POST_Z_TOLERANCE_MM,
-  );
+  // Beam orientation — S26 rework:
+  //   - pre-S26 floating beams ran along +z (long axis = z), and
+  //     their supporting blocks shared beam.position.x.
+  //   - S26 Method-A rim beams run along +x (long axis = x), and
+  //     their supporting blocks share beam.position.z.
+  //
+  // Detect the long-axis from `beam.size` (the model's canonical
+  // orientation carrier — see model.ts LAYOUT COORDINATE FRAME).
+  // The block-gap axis is the beam's LONG axis (the direction the
+  // beam spans, i.e. the direction adjacent supports are spaced).
+  const beamRunsAlongX = beam.size.x >= beam.size.z;
+
+  const beamBlocks = blocks.filter((b) => {
+    const matchCoord = beamRunsAlongX
+      ? b.position.z - beam.position.z
+      : b.position.x - beam.position.x;
+    return Math.abs(matchCoord) < POST_Z_TOLERANCE_MM;
+  });
   if (beamBlocks.length < 2) return null;
 
-  const zs = beamBlocks.map((b) => b.position.z).sort((a, b) => a - b);
+  const coords = beamBlocks
+    .map((b) => (beamRunsAlongX ? b.position.x : b.position.z))
+    .sort((a, b) => a - b);
   let maxGap = 0;
-  for (let i = 1; i < zs.length; i++) {
-    const gap = zs[i]! - zs[i - 1]!;
+  for (let i = 1; i < coords.length; i++) {
+    const gap = coords[i]! - coords[i - 1]!;
     if (gap > maxGap) maxGap = gap;
   }
   return maxGap;

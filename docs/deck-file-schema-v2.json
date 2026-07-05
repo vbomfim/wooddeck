@@ -96,6 +96,11 @@
               "enum": ["extra-bay-at-end", "centered"]
             }
           }
+        },
+        "floatingFraming": {
+          "description": "S26 (fix/floating-framing-joists) — OPTIONAL discriminator that selects the framing method for a floating deck. `beams-and-joists` (default) puts rim beams over blocks with joists on top at `joist.spacingMm`; `joists-on-blocks` places joists directly on blocks with no beam layer. IGNORED for elevated designs — the loader always sets the field to `beams-and-joists` (the default) if it is absent, so downstream consumers can treat it as required after `deserialize`. Optional so v2 files written before S26 remain load-compatible; when omitted the loader stamps the default (see `src/persistence/deck-file/schema-v2.ts`).",
+          "type": "string",
+          "enum": ["beams-and-joists", "joists-on-blocks"]
         }
       }
     },

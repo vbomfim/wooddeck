@@ -42,7 +42,10 @@ import { spanCheck } from './span-check';
 const PT_2X8: MaterialRef = { nominal: '2x8', species: 'PT', grade: 'No2' };
 const PT_54: MaterialRef = { nominal: '5/4x6', species: 'PT', grade: 'No2' };
 
-const TUFFBLOCK_FOUNDATION: FoundationSpec = {
+const TUFFBLOCK_FOUNDATION: Extract<
+  FoundationSpec,
+  { type: 'deck-blocks' | 'tuffblocks' }
+> = {
   type: 'tuffblocks',
   product: { productId: 'tuffblock-12x12x4' },
 };
@@ -58,9 +61,10 @@ function makeFloating(overrides: Partial<{
     footprint: {
       widthMm: (overrides.widthFt ?? 16) * MM_PER_FOOT,
       lengthMm: (overrides.lengthFt ?? 14) * MM_PER_FOOT,
-      heightMm: 300,
+      heightMm: 500,
     },
     structure: 'floating',
+    floatingFraming: 'beams-and-joists',
     foundation: TUFFBLOCK_FOUNDATION,
     joist: { material: overrides.beam ?? PT_2X8, spacingMm: 406 },
     beam: { material: overrides.beam ?? PT_2X8 },
@@ -74,16 +78,14 @@ function makeFloating(overrides: Partial<{
 // ---------------------------------------------------------------------------
 
 describe('spanCheck (floating) — AC8', () => {
-  it('a floating layout with 3 beams over a block grid produces one Warning per over-span beam when the table is tiny', () => {
-    // 16 ft × 14 ft floating deck → 3 beams, blocks along +z spaced
-    // ~610 mm apart (the JOIST_SPAN_MAX_MM default). Force EVERY beam
+  it('a floating Method-A layout with 2 rim beams over a block grid produces one Warning per over-span beam when the table is tiny', () => {
+    // S26 Method A: 16 ft × 14 ft floating deck → 2 rim beams
+    // (near / far, along +x); blocks under each beam spaced along
+    // +x ~7 ft (8-ft cap width / 2 spans). Force EVERY beam
     // over-span by returning a 100 mm max via the mock table.
     const design = makeFloating({ widthFt: 16, lengthFt: 14 });
     const layout = computeLayout(design, { now: () => design.createdAt });
 
-    // Fail-safe joist path — return a large value so joist checks
-    // never fire; we only want to prove BEAM checks fire from blocks.
-    // No joists exist in a floating layout, so this is defensive.
     const tinyBeamTable: SpanTable = {
       edition: 'MOCK-AC8',
       lookupJoistMaxSpan: () => 10000,
@@ -93,14 +95,13 @@ describe('spanCheck (floating) — AC8', () => {
 
     const warnings = spanCheck(layout, tinyBeamTable);
     const beamCount = layout.members.filter((m) => m.kind === 'beam').length;
-    expect(beamCount).toBe(3);
-    // One Warning per beam, all `over-span-beam` kind.
+    expect(beamCount).toBe(2); // S26 rim beams
     const beamWarnings = warnings.filter((w) => w.kind === 'over-span-beam');
     expect(beamWarnings.length).toBe(beamCount);
     for (const w of beamWarnings) {
       expect(w.tableReference).toBe('MOCK-AC8-CITATION');
-      // Actual span is the max block-to-block +z gap (~610 mm) —
-      // well above the mock's 100 mm allowable.
+      // Actual span is the max block-to-block +x gap under a rim
+      // beam (~half deck width = ~2.4 m) — well above 100 mm.
       expect(w.actualMm).toBeGreaterThan(100);
       expect(w.allowableMm).toBe(100);
     }
@@ -137,16 +138,9 @@ describe('spanCheck (floating) — AC8', () => {
     };
 
     spanCheck(layout, spyTable);
-    // 3 beams → 3 calls to lookupBeamMaxSpan.
-    expect(seenBeamMaterials.length).toBe(3);
+    // S26: 2 rim beams → 2 calls to lookupBeamMaxSpan.
+    expect(seenBeamMaterials.length).toBe(2);
     for (const m of seenBeamMaterials) {
-      // `beam.material` is the widened `LumberMemberMaterial =
-      // {kind:'lumber', ...MaterialRef}` (S17 discriminator). The
-      // SpanTable interface types the param as `MaterialRef` but
-      // TypeScript accepts the widened superset unchanged. Compare
-      // the base MaterialRef fields via toMatchObject to be
-      // deliberately agnostic about whether span-check strips the
-      // discriminator before the lookup call.
       expect(m).toMatchObject(PT_2X8);
     }
   });
@@ -166,14 +160,15 @@ describe('spanCheck (floating) — AC8', () => {
 // end-to-end against the actual IRC-2018 data.
 
 describe('spanCheck (floating) — REAL IrcSpanTable e2e (FIX 1)', () => {
-  it('a compliant floating deck (~610 mm block spacing under 2×8 PT beams) fires ZERO span warnings', () => {
-    // Layout produces ~610 mm block-to-block spacing along +z; the
-    // beam-to-beam +x delta is 8 ft (2438 mm) = 8-ft IRC column.
-    // 2×8 PT 2-ply at 8-ft joist span allowable = 7 ft 4 in (2235 mm).
-    // 610 << 2235 → no beam warning. Also proves the mock-vs-real
-    // wiring: a compliant deck must genuinely not warn with the real
-    // table (regression guard against a future "warn always" bug).
-    const design = makeFloating({ widthFt: 16, lengthFt: 14, beam: PT_2X8 });
+  it('a small compliant floating deck (Method A, 4×4, 2×8 rim beams) fires ZERO span warnings', () => {
+    // S26 Method A: 4 ft × 4 ft floating deck → 2 rim beams at
+    // ±(length/2 - FOOTING_WIDTH_MM/2). Beam-to-beam +z delta ≈
+    // 4 ft - 300 mm = 918.6 mm — snaps to 6-ft IRC joist-span
+    // column (the smallest). 2×8 PT 2-ply @ 6-ft column = 8 ft 6 in
+    // (2591 mm). Block-to-block +x under each rim beam = deck
+    // widthMm/2 = 610 mm (2 columns for 4-ft width). 610 << 2591 →
+    // no beam warning. Proves the compliant path with a real table.
+    const design = makeFloating({ widthFt: 4, lengthFt: 4, beam: PT_2X8 });
     const layout = computeLayout(design, { now: () => design.createdAt });
     const table = new IrcSpanTable();
 
@@ -353,24 +348,18 @@ describe('spanCheck (floating) — REAL IrcSpanTable e2e (FIX 1)', () => {
     }
   });
 
-  it('QA probe reproduction: a 30 ft × 14 ft floating deck no longer produces ZERO warnings when the tributary should trigger — but IS compliant with real table', () => {
-    // QA's original bug report: on a 30×14 deck the OLD implementation
-    // (joistSpanMm=0 → snap to 6-ft col → 2591 mm allowable) hid
-    // every over-span. With FIX 1 the tributary = beam-to-beam +x
-    // delta, computed from actual layout: 30/(4-1) = 10 ft or
-    // similar. This isn't a warning test — the block-row spacing is
-    // still 610 mm, well within the 8/10-ft column allowables (1676
-    // to 2235 mm). It's a REGRESSION guard: the tributary must be
-    // > 0 so the citation names a REALISTIC column. We assert that
-    // the citation does NOT snap to 6 ft (the old false-permissive).
-    const design = makeFloating({ widthFt: 30, lengthFt: 14 });
+  it('QA probe reproduction: floating deck under S26 rim-beam model → tributary is beam-to-beam +z delta (~length), not the pre-S26 false-permissive 0', () => {
+    // QA's original bug report (pre-S26): the OLD implementation
+    // passed joistSpanMm=0 to lookupBeamMaxSpan → snap to 6-ft col
+    // → 2591 mm allowable, hiding every real over-span. FIX 1
+    // restored the real tributary. This test proves the S26 rework
+    // preserves that fix: the tributary passed to
+    // lookupBeamMaxSpan for rim beams is the beam-to-beam +z delta
+    // (length - FOOTING_WIDTH_MM), NOT the false-permissive 0.
+    const design = makeFloating({ widthFt: 4, lengthFt: 14 });
     const layout = computeLayout(design, { now: () => design.createdAt });
     const table = new IrcSpanTable();
 
-    // Probe: force a beam-check code path by using a real table and
-    // observing citations recorded on any warnings. If NO warnings,
-    // instrument via a spy that captures the tributary passed to
-    // lookupBeamMaxSpan. That's what we do here.
     const seenTributaries: number[] = [];
     const spy: SpanTable = {
       edition: 'SPY',
@@ -383,17 +372,148 @@ describe('spanCheck (floating) — REAL IrcSpanTable e2e (FIX 1)', () => {
     };
     spanCheck(layout, spy);
 
-    // Every beam-check must have received a tributary > 0. The pre-
-    // FIX-1 code passed 0 (which snapped to 6 ft = 1829 mm and
-    // returned 2591 mm allowable — the false-permissive bug). All
-    // seen tributaries must exceed the 6-ft row so we KNOW the
-    // fix propagated.
-    expect(seenTributaries.length).toBeGreaterThan(0);
+    // S26 Method A: 2 rim beams. Tributary = beam-to-beam +z
+    // delta = lengthMm - FOOTING_WIDTH_MM = 4267.2 - 300 = 3967.2
+    // mm. Every recorded tributary must equal this (both beams
+    // share the same beam-to-beam delta).
+    expect(seenTributaries.length).toBe(2);
     for (const t of seenTributaries) {
-      // 30 ft / (numBeams - 1) with 8-ft max spacing → 5 beams →
-      // 30/4 = 7.5 ft = 2286 mm, or 4 beams → 30/3 = 10 ft = 3048 mm.
-      // Either way > 1829 mm (6-ft column boundary).
+      // > 1829 (6-ft column) proves we're not snapping to the
+      // false-permissive column that hid the QA bug.
       expect(t).toBeGreaterThan(1829);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX #1 (S26 review-gate, safety-critical) — Method B joist span check
+// ---------------------------------------------------------------------------
+//
+// Regression target: pre-fix, `spanCheck` derived every joist's span
+// from the beam positions (`deriveJoistSpanMm(beams) = max-z − min-z
+// of beams`). Method B (`floatingFraming = 'joists-on-blocks'`) emits
+// NO beams, so `beams.length < 2` → `joistSpanMm === null` → joist
+// checks were SILENTLY SKIPPED for every Method-B design. A 12 × 40
+// ft Method-B deck with a sparse block grid produced ZERO warnings
+// even though every joist spanned ~3.3× the IRC allowable.
+//
+// The fix: when a floating design has NO beams, derive each joist's
+// span from the BLOCK positions under that joist — blocks matching
+// the joist's x, sorted by z, max adjacent-z gap. This is the
+// direct analog of the elevated beam-to-block block-to-block
+// derivation used for Method A rim beams.
+
+describe('spanCheck (floating Method B) — FIX #1 joist span from blocks', () => {
+  function makeFloatingB(overrides: Partial<{
+    widthFt: number;
+    lengthFt: number;
+    joist: MaterialRef;
+    blockRowsHint: number;
+  }> = {}): DeckDesign {
+    const foundation: FoundationSpec =
+      overrides.blockRowsHint !== undefined
+        ? { ...TUFFBLOCK_FOUNDATION, blockRowsHint: overrides.blockRowsHint }
+        : TUFFBLOCK_FOUNDATION;
+    return {
+      id: '00000000-0000-4000-8000-0000000000b1',
+      createdAt: '2026-07-04T00:00:00.000Z',
+      footprint: {
+        widthMm: (overrides.widthFt ?? 12) * MM_PER_FOOT,
+        lengthMm: (overrides.lengthFt ?? 40) * MM_PER_FOOT,
+        // Method B min height = joistDepth + deckingThickness
+        // = 184 + 25 = 209 mm. 300 comfortably clears.
+        heightMm: 300,
+      },
+      structure: 'floating',
+      floatingFraming: 'joists-on-blocks',
+      foundation,
+      joist: { material: overrides.joist ?? PT_2X8, spacingMm: 406 },
+      beam: { material: PT_2X8 }, // ignored for Method B
+      decking: { material: PT_54, orientation: 'parallel-to-width' },
+      layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+    };
+  }
+
+  it('the QA probe: 12×40 Method B with widely-spaced block rows FIRES over-span-joist warnings (was ZERO pre-fix)', () => {
+    // With blockRowsHint=2, blocks sit only at the two z-ends;
+    // each joist spans the ~40 ft between them = ~12192 mm. IRC
+    // allowable for 2×8 PT No.2 @ 16″ o.c. is ~2565 mm (8 ft 5 in).
+    // Pre-fix: NO warning (bug). Post-fix: one warning per joist.
+    const design = makeFloatingB({
+      widthFt: 12,
+      lengthFt: 40,
+      blockRowsHint: 2,
+    });
+    const layout = computeLayout(design, { now: () => design.createdAt });
+    const table = new IrcSpanTable();
+
+    const warnings = spanCheck(layout, table);
+    const joistWarnings = warnings.filter(
+      (w) => w.kind === 'over-span-joist',
+    );
+    expect(joistWarnings.length).toBeGreaterThan(0);
+    // Every warning must name a joist member id.
+    for (const w of joistWarnings) {
+      expect(w.memberId).toMatch(/^joist-/);
+      // Actual span > allowable (that's why the warning fired).
+      expect(w.actualMm).toBeGreaterThan(w.allowableMm);
+    }
+  });
+
+  it('a compliant Method B deck (tight block rows, low span) fires ZERO joist warnings', () => {
+    // Small 4 × 4 ft Method B → blocks at each z-end → joist
+    // span = length − footing inset ≈ 4 ft − ~1 ft = ~918 mm. IRC
+    // 2×8 PT @ 16″ o.c. allows ~2565 mm. 918 << 2565 → no warning.
+    const design = makeFloatingB({ widthFt: 4, lengthFt: 4 });
+    const layout = computeLayout(design, { now: () => design.createdAt });
+    const table = new IrcSpanTable();
+    const warnings = spanCheck(layout, table);
+    const joistWarnings = warnings.filter(
+      (w) => w.kind === 'over-span-joist',
+    );
+    expect(joistWarnings).toEqual([]);
+  });
+
+  it('warnings cite the IRC-2018 joist span table (not the beam table)', () => {
+    const design = makeFloatingB({
+      widthFt: 8,
+      lengthFt: 40,
+      blockRowsHint: 2,
+    });
+    const layout = computeLayout(design, { now: () => design.createdAt });
+    const table = new IrcSpanTable();
+    const warnings = spanCheck(layout, table);
+    const jw = warnings.find((w) => w.kind === 'over-span-joist');
+    expect(jw).toBeDefined();
+    if (!jw) return;
+    expect(jw.tableReference).toMatch(/R507\.6/);
+    expect(jw.tableReference).toContain('2x8');
+  });
+
+  it('SPY: table.lookupJoistMaxSpan IS called for a Method-B design (proves the code path activates)', () => {
+    // Pre-fix code path: joistSpanMm=null → the joist-check block
+    // was skipped entirely → lookupJoistMaxSpan NEVER called.
+    // Post-fix: called once per joist (per-joist span derived
+    // from blocks).
+    const design = makeFloatingB({
+      widthFt: 4,
+      lengthFt: 4,
+    });
+    const layout = computeLayout(design, { now: () => design.createdAt });
+    const table = new IrcSpanTable();
+
+    let joistLookupCallCount = 0;
+    const spy: SpanTable = {
+      edition: 'SPY',
+      lookupJoistMaxSpan: (mat, sp) => {
+        joistLookupCallCount++;
+        return table.lookupJoistMaxSpan(mat, sp);
+      },
+      lookupBeamMaxSpan: (mat, tributary, ply) =>
+        table.lookupBeamMaxSpan(mat, tributary, ply),
+      citationFor: (kind, mat, sp) => table.citationFor(kind, mat, sp),
+    };
+    spanCheck(layout, spy);
+    expect(joistLookupCallCount).toBeGreaterThan(0);
   });
 });

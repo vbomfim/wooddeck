@@ -54,6 +54,7 @@ export const GOLDEN_DECK_DESIGN: DeckDesign = {
   createdAt: '2026-07-02T21:00:00.000Z',
   footprint: { widthMm: 3658, lengthMm: 4877, heightMm: 914 },
   structure: 'elevated',
+  floatingFraming: 'beams-and-joists',
   foundation: {
     type: 'posts-on-footings',
     post: { nominal: '6x6', species: 'PT', grade: 'No2' },
@@ -89,6 +90,7 @@ export const SECOND_GOLDEN_DECK_DESIGN: DeckDesign = {
   createdAt: '2026-07-03T09:15:30.000Z',
   footprint: { widthMm: 6100, lengthMm: 9144, heightMm: 1219 },
   structure: 'elevated',
+  floatingFraming: 'beams-and-joists',
   foundation: {
     type: 'posts-on-footings',
     post: { nominal: '4x4', species: 'PT', grade: 'No2' },

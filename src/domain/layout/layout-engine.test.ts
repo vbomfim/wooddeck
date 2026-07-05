@@ -43,6 +43,7 @@ function makeDesign(overrides: Partial<{
       heightMm: overrides.heightMm ?? 914,
     },
     structure: 'elevated',
+    floatingFraming: 'beams-and-joists',
     foundation: {
       type: 'posts-on-footings',
       post: { nominal: '6x6', species: 'PT', grade: 'No2' },
@@ -385,6 +386,7 @@ describe('computeLayout — FR-030 compat matrix (FIX 1)', () => {
     const illegal: DeckDesign = {
       ...design,
       structure: 'elevated',
+      floatingFraming: 'beams-and-joists',
       foundation: {
         type: 'tuffblocks',
         product: { productId: 'tuffblock-12x12x4' },
@@ -399,6 +401,7 @@ describe('computeLayout — FR-030 compat matrix (FIX 1)', () => {
     const illegal: DeckDesign = {
       ...design,
       structure: 'floating',
+      floatingFraming: 'beams-and-joists',
       foundation: {
         type: 'posts-on-footings',
         post: { nominal: '6x6', species: 'PT', grade: 'No2' },
@@ -422,6 +425,7 @@ describe('computeLayout — support-gate for not-yet-implemented combos (FIX 1)'
     const impl: DeckDesign = {
       ...design,
       structure: 'floating',
+      floatingFraming: 'beams-and-joists',
       foundation: { type: 'deck-blocks', product: { productId: 'oldcastle-11x11x7' } },
     };
     const layout = computeLayout(impl);
@@ -438,6 +442,7 @@ describe('computeLayout — support-gate for not-yet-implemented combos (FIX 1)'
     const impl: DeckDesign = {
       ...design,
       structure: 'floating',
+      floatingFraming: 'beams-and-joists',
       foundation: { type: 'tuffblocks', product: { productId: 'tuffblock-12x12x4' } },
       // TuffBlock accepts 2x6 / 2x8 only (foundation-catalog.ts).
       // makeDesign() defaults to 2x10 which is FR-028-invalid here,
@@ -504,6 +509,7 @@ function makeDeckBlocksDesign(overrides: Partial<{
       heightMm: overrides.heightMm ?? 1200,
     },
     structure: 'elevated',
+    floatingFraming: 'beams-and-joists',
     foundation: {
       type: 'deck-blocks',
       product: { productId: overrides.productId ?? 'oldcastle-11x11x7' },

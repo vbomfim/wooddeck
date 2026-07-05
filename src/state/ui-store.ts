@@ -66,22 +66,29 @@ import { create } from 'zustand';
 export type CameraPreset = 'orbit' | 'top' | 'front' | 'side' | 'iso';
 
 /**
- * The eight visual LAYERS a user can toggle. Names match the domain
+ * The seven visual LAYERS a user can toggle. Names match the domain
  * `MemberKind` set (`joist` / `beam` / `post` / `footing` / `board` /
- * `block` / `blocking`) plus `environment` (ground plane + shadows).
+ * `block`) plus `environment` (ground plane + shadows).
  * `board` is renamed to `decking` here to match user-facing
  * vocabulary; `block` is pluralized to `blocks` for the same reason.
  * Layer maps to scene-graph visibility toggles in S9/S10/S22.
  *
- * ## S22 additions (Epic 2 / FR-029)
+ * ## S22 addition (Epic 2 / FR-029)
  *
  *   - `blocks`   — foundation blocks (Oldcastle precast concrete or
- *     TuffBlock polypropylene). Rendered by the new S22 `BlocksLayer`.
- *   - `blocking` — short lumber blocks between beams for lateral
- *     bracing. Rendered by the new S22 `BlockingLayer`.
+ *     TuffBlock polypropylene). Rendered by the S22 `BlocksLayer`.
  *
- * S26 will add the LayerTogglePanel checkbox rows for both flags.
- * The state + visibility wiring lives here (this story S22).
+ * ## S26 FIX #6 (review-gate) — `blocking` REMOVED
+ *
+ * S22 originally added a `blocking` key for "short lumber blocks
+ * between beams for lateral bracing." S26's floating rework removed
+ * that concept from the layout (`floating-layout.ts` emits ZERO
+ * `blocking` members), leaving the toggle wired to an
+ * always-empty layer — misleading UI. The key is removed from
+ * `LayerVisibility` + `LAYER_ITEMS`; the dormant `BlockingLayer`
+ * component and the `blocking` `MemberKind` are preserved so a
+ * future "blocking between joists" feature can cheaply re-add the
+ * toggle. See `scene/layers/BlockingLayer.tsx` for the re-add path.
  */
 export interface LayerVisibility {
   readonly environment: boolean;
@@ -91,7 +98,6 @@ export interface LayerVisibility {
   readonly posts: boolean;
   readonly footings: boolean;
   readonly blocks: boolean;
-  readonly blocking: boolean;
 }
 
 /**
@@ -245,11 +251,14 @@ export interface UiStoreActions {
 }
 
 /**
- * All eight layers on — the boot-time default. Extracted so both the
- * store initializer and `showAllLayers()` can share the same value
- * (DRY — a new layer added to the union means updating ONE place).
+ * All seven layers on — the boot-time default. Extracted so both
+ * the store initializer and `showAllLayers()` can share the same
+ * value (DRY — a new layer added to the union means updating ONE
+ * place).
  *
- * S22 addition — `blocks` and `blocking` join the six S10 layers.
+ * S22 addition — `blocks` joins the six S10 layers.
+ * S26 FIX #6 — `blocking` REMOVED from LayerVisibility (see
+ * interface doc); the dormant scene layer + MemberKind remain.
  */
 const ALL_LAYERS_VISIBLE: LayerVisibility = Object.freeze({
   environment: true,
@@ -259,11 +268,10 @@ const ALL_LAYERS_VISIBLE: LayerVisibility = Object.freeze({
   posts: true,
   footings: true,
   blocks: true,
-  blocking: true,
 });
 
 /**
- * All eight layers off — utility for `hideAllLayers()`. Kept as a
+ * All seven layers off — utility for `hideAllLayers()`. Kept as a
  * module-scope frozen literal so every `hideAllLayers()` invocation
  * returns the same reference; consumers that key on referential
  * equality see a stable value.
@@ -276,7 +284,6 @@ const ALL_LAYERS_HIDDEN: LayerVisibility = Object.freeze({
   posts: false,
   footings: false,
   blocks: false,
-  blocking: false,
 });
 
 export const useUiStore = create<UiStoreState & UiStoreActions>((set) => ({

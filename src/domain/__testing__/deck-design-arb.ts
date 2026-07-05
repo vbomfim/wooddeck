@@ -174,6 +174,14 @@ export const deckDesignArb: fc.Arbitrary<DeckDesign> = fc
       createdAt: new Date(r.createdAtEpochMs).toISOString(),
       footprint: { widthMm: r.widthMm, lengthMm: r.lengthMm, heightMm: r.heightMm },
       structure,
+      // S26 (fix/floating-framing-joists) — generator seeds
+      // Method-A default `'beams-and-joists'`. Elevated ignores the
+      // field so the byte-for-byte round-trip property still holds
+      // for every generated design. Method-B path is generated
+      // separately by targeted fixtures. Placed immediately after
+      // `structure` for field-order consistency across all fixtures
+      // (S26 FIX #7 / Opus#6).
+      floatingFraming: 'beams-and-joists' as const,
       foundation,
       joist: { material: r.joistMaterial, spacingMm: r.joistSpacingMm },
       beam: { material: r.beamMaterial },

@@ -76,6 +76,7 @@ function makeDesign(overrides: DesignOverrides = {}): DeckDesign {
       heightMm: overrides.heightMm ?? 914,
     },
     structure: 'elevated',
+    floatingFraming: 'beams-and-joists',
     foundation: {
       type: 'posts-on-footings',
       post: { nominal: '6x6', species: 'PT', grade: 'No2' },
@@ -1121,16 +1122,27 @@ const TUFFBLOCK_FOUNDATION: Extract<
 
 /**
  * A floating DeckDesign with an artificially-small blockRowsHint
- * so the derived layout produces an over-span-beam warning. Used
- * by the S25 remediation + apply tests.
+ * so the derived layout produces an over-span warning. Used by
+ * the S25 remediation + apply tests.
+ *
+ * ## S26 FIX #4 method-aware
+ *
+ * The default `framing` is now `'joists-on-blocks'` (Method B)
+ * — Method A pins block rows to rim beams so `blockRowsHint` is a
+ * no-op there, and the S25 add-support-row remediation is only
+ * meaningful when adding a row actually shortens a member's span.
+ * Tests that specifically exercise the Method-A DISABLED branch
+ * pass `framing: 'beams-and-joists'` explicitly.
  */
 function makeFloating(overrides: {
   readonly widthFt?: number;
   readonly lengthFt?: number;
   readonly blockRowsHint?: number;
+  readonly framing?: 'beams-and-joists' | 'joists-on-blocks';
 } = {}): DeckDesign {
   const widthFt = overrides.widthFt ?? 12;
   const lengthFt = overrides.lengthFt ?? 12;
+  const framing = overrides.framing ?? 'joists-on-blocks';
   const foundation: FoundationSpec =
     overrides.blockRowsHint !== undefined
       ? { ...TUFFBLOCK_FOUNDATION, blockRowsHint: overrides.blockRowsHint }
@@ -1142,9 +1154,10 @@ function makeFloating(overrides: {
       widthMm: widthFt * MM_PER_FOOT,
       lengthMm: lengthFt * MM_PER_FOOT,
       // MIN legal height for 2×8 beam + 5/4×6 decking (184 + 25).
-      heightMm: 209,
+      heightMm: 500,
     },
     structure: 'floating',
+    floatingFraming: framing,
     foundation,
     joist: { material: PT_2X8, spacingMm: 406 },
     beam: { material: PT_2X8 },
@@ -1154,19 +1167,30 @@ function makeFloating(overrides: {
 }
 
 describe('computeRemediations — S25 add-support-row (ticket #47)', () => {
-  it('AC1 — floating over-spanned beam under tuffblocks → add-support-row proposed with proposedRows=currentRows+1', () => {
-    // 12 ft × 12 ft floating, 2×8 PT beam, blockRowsHint = 2:
-    //   step = 3657.6 mm >> allowable (~2400 mm at 1828.8 mm trib).
-    // Over-span warning fires on the beam(s). computeRemediations
-    // should include an `add-support-row` option with
-    // currentRows=2, proposedRows=3.
-    const design = makeFloating({ widthFt: 12, lengthFt: 12, blockRowsHint: 2 });
+  it('AC1 — Method B floating over-spanned joist → add-support-row proposed with proposedRows=currentRows+1', () => {
+    // S26 FIX #4 (review-gate) rewrite: pre-S26 this test used
+    // Method A and asserted an over-span-BEAM warning gets
+    // add-support-row; S26 pinned Method A's block rows to the
+    // rim beams (`blockRowsHint` a no-op) so add-support-row is
+    // DISABLED under Method A now. The block-row remediation is
+    // MEANINGFUL under Method B — adding a row genuinely shortens
+    // joist span. Same 12×12 geometry, same 2×8 PT joist, same
+    // blockRowsHint=2 → floor(3657.6/2400)+1 = 2 rows, joist span
+    // 3657.6 mm >> allowable → over-span-JOIST warning fires.
+    // add-support-row option should propose currentRows=2 →
+    // proposedRows=3.
+    const design = makeFloating({
+      widthFt: 12,
+      lengthFt: 12,
+      blockRowsHint: 2,
+      framing: 'joists-on-blocks',
+    });
     const initial = RECOMPUTE(design);
-    const beamWarning = initial.find((w) => w.kind === 'over-span-beam');
-    expect(beamWarning).toBeDefined();
-    if (!beamWarning) return;
+    const joistWarning = initial.find((w) => w.kind === 'over-span-joist');
+    expect(joistWarning).toBeDefined();
+    if (!joistWarning) return;
 
-    const options = computeRemediations(beamWarning, design, IRC, RECOMPUTE);
+    const options = computeRemediations(joistWarning, design, IRC, RECOMPUTE);
     const addSupport = options.find((o) => o.kind === 'add-support-row');
     expect(addSupport).toBeDefined();
     if (!addSupport) return;
@@ -1174,19 +1198,27 @@ describe('computeRemediations — S25 add-support-row (ticket #47)', () => {
     if (addSupport.patch.kind === 'add-support-row') {
       expect(addSupport.patch.currentRows).toBe(2);
       expect(addSupport.patch.proposedRows).toBe(3);
-      expect(addSupport.patch.targetBeamId).toBe(beamWarning.memberId);
+      expect(addSupport.patch.targetBeamId).toBe(joistWarning.memberId);
     }
   });
 
-  it('AC1 — recompute-verified wouldClear is TRUE when +1 row drops the step below allowable', () => {
-    // 12 ft length, hint=2 → step=3657.6 mm (over-span).
-    // hint=3 → step=1828.8 mm (≤ ~2400 mm allowable) → clears.
-    const design = makeFloating({ widthFt: 12, lengthFt: 12, blockRowsHint: 2 });
+  it('AC1 — Method B recompute-verified wouldClear is TRUE when +1 row drops joist span below allowable', () => {
+    // S26 FIX #4 (review-gate) un-skip: pre-S26 this test was
+    // .skip'd because under Method A blockRowsHint is a no-op.
+    // Under Method B: 12ft length, hint=2 → joist span=3657.6 mm
+    // (over-span, allowable ~2400 mm at 406 mm spacing for 2×8 PT).
+    // hint=3 → joist span=1828.8 mm (≤ allowable) → clears.
+    const design = makeFloating({
+      widthFt: 12,
+      lengthFt: 12,
+      blockRowsHint: 2,
+      framing: 'joists-on-blocks',
+    });
     const initial = RECOMPUTE(design);
-    const beamWarning = initial.find((w) => w.kind === 'over-span-beam');
-    expect(beamWarning).toBeDefined();
-    if (!beamWarning) return;
-    const options = computeRemediations(beamWarning, design, IRC, RECOMPUTE);
+    const joistWarning = initial.find((w) => w.kind === 'over-span-joist');
+    expect(joistWarning).toBeDefined();
+    if (!joistWarning) return;
+    const options = computeRemediations(joistWarning, design, IRC, RECOMPUTE);
     const addSupport = options.find((o) => o.kind === 'add-support-row');
     expect(addSupport).toBeDefined();
     if (!addSupport) return;
@@ -1194,11 +1226,43 @@ describe('computeRemediations — S25 add-support-row (ticket #47)', () => {
     expect(addSupport.disabled).toBe(false);
   });
 
-  it('AC1 — recompute-verified wouldClear is FALSE when +1 row still over-spans (disabled)', () => {
+  it('AC1 — Method B recompute-verified wouldClear is FALSE when +1 row still over-spans (disabled)', () => {
     // 30 ft length, hint=2 → step ≈ 9144 mm. hint=3 → step ≈ 4572 mm,
-    // STILL over-span (allowable ~2400 mm at 1828.8 mm trib for 2×8 PT).
+    // STILL over-span (allowable ~2400 mm at 406 mm spacing for 2×8 PT).
     // add-support-row is offered but disabled — the user must iterate.
-    const design = makeFloating({ widthFt: 12, lengthFt: 30, blockRowsHint: 2 });
+    const design = makeFloating({
+      widthFt: 12,
+      lengthFt: 30,
+      blockRowsHint: 2,
+      framing: 'joists-on-blocks',
+    });
+    const initial = RECOMPUTE(design);
+    const joistWarning = initial.find((w) => w.kind === 'over-span-joist');
+    expect(joistWarning).toBeDefined();
+    if (!joistWarning) return;
+    const options = computeRemediations(joistWarning, design, IRC, RECOMPUTE);
+    const addSupport = options.find((o) => o.kind === 'add-support-row');
+    expect(addSupport).toBeDefined();
+    if (!addSupport) return;
+    expect(addSupport.wouldClear).toBe(false);
+    expect(addSupport.disabled).toBe(true);
+    expect(addSupport.disabledReason).not.toBeNull();
+  });
+
+  it('S26 FIX #4 — Method A over-span-beam → add-support-row DISABLED with alternative-surfacing reason', () => {
+    // S26 FIX #4 (review-gate, Opus-HIGH + QA-GAP-3) — under
+    // Method A the block rows are pinned to the 2 rim beams and
+    // `blockRowsHint` is IGNORED for +z. Adding a row does NOT
+    // shorten the rim beam's +x span. The option MUST be disabled
+    // with a reason that surfaces the REAL alternative (per
+    // FR-032's "MUST surface the alternative" clause). Method A
+    // is the DEFAULT so a DIY user is very likely to hit this.
+    const design = makeFloating({
+      widthFt: 12,
+      lengthFt: 12,
+      blockRowsHint: 2,
+      framing: 'beams-and-joists',
+    });
     const initial = RECOMPUTE(design);
     const beamWarning = initial.find((w) => w.kind === 'over-span-beam');
     expect(beamWarning).toBeDefined();
@@ -1207,9 +1271,14 @@ describe('computeRemediations — S25 add-support-row (ticket #47)', () => {
     const addSupport = options.find((o) => o.kind === 'add-support-row');
     expect(addSupport).toBeDefined();
     if (!addSupport) return;
-    expect(addSupport.wouldClear).toBe(false);
     expect(addSupport.disabled).toBe(true);
-    expect(addSupport.disabledReason).not.toBeNull();
+    expect(addSupport.wouldClear).toBe(false);
+    // The reason must surface the alternative construction (Method B).
+    expect(addSupport.disabledReason).toMatch(/joists on blocks/i);
+    // No fabricated N→N+1 count — the option renders a
+    // generic "Add a support row" headline, not the misleading
+    // arrow (see `makeDisabledAddSupportRowNoRowCount`).
+    expect(addSupport.summary).toBe('Add a support row');
   });
 
   it('AC5 — elevated over-span beam → add-support-row DISABLED with alternative-surfacing reason (FR-032)', () => {
@@ -1250,6 +1319,13 @@ describe('computeRemediations — S25 add-support-row (ticket #47)', () => {
     // compat-matrix at load time), computeRemediations must not
     // offer add-support-row for it — the foundation carries no
     // block-grid to add a row to.
+    //
+    // S26 FIX #4 (review-gate) — under Method A we surface a
+    // disabled option with the FR-032 alternative message
+    // regardless of foundation type (the alternative message is
+    // the primary user hint). This test targets the Method-B
+    // defensive path where the foundation-type gate MUST return
+    // `null` for an FR-030-invalid design.
     const design: DeckDesign = {
       ...makeDesign({
         widthFt: 12,
@@ -1258,39 +1334,50 @@ describe('computeRemediations — S25 add-support-row (ticket #47)', () => {
         beamSpecies: 'PT',
       }),
       structure: 'floating',
+      floatingFraming: 'joists-on-blocks',
       // Intentionally-invalid combination for the AC6 defensive
       // check. Cast is safe here because the compat-matrix would
       // reject this at load; the point is to prove computeRemediations
       // itself does not depend on load-time validation.
     };
-    const warning = makeBeamWarning({
-      memberId: 'beam-near',
-      actualMm: 4000,
-      allowableMm: 1981,
-    });
+    const warning = makeJoistWarning();
     const options = computeRemediations(warning, design, IRC, RECOMPUTE);
     for (const opt of options) {
       expect(opt.kind).not.toBe('add-support-row');
     }
   });
 
-  it('AC8 — add-support-row surfaces FIRST (least invasive) before upgrade-beam-size / change-beam-species', () => {
-    const design = makeFloating({ widthFt: 12, lengthFt: 12, blockRowsHint: 2 });
+  it('AC8 — Method B add-support-row surfaces FIRST (least invasive) before upgrade / change-species', () => {
+    const design = makeFloating({
+      widthFt: 12,
+      lengthFt: 12,
+      blockRowsHint: 2,
+      framing: 'joists-on-blocks',
+    });
     const initial = RECOMPUTE(design);
-    const beamWarning = initial.find((w) => w.kind === 'over-span-beam');
-    expect(beamWarning).toBeDefined();
-    if (!beamWarning) return;
-    const options = computeRemediations(beamWarning, design, IRC, RECOMPUTE);
+    const joistWarning = initial.find((w) => w.kind === 'over-span-joist');
+    expect(joistWarning).toBeDefined();
+    if (!joistWarning) return;
+    const options = computeRemediations(joistWarning, design, IRC, RECOMPUTE);
     // First option kind must be add-support-row.
     expect(options[0]?.kind).toBe('add-support-row');
-    // upgrade-beam-size follows.
-    const idxUpgrade = options.findIndex((o) => o.kind === 'upgrade-beam-size');
+    // reduce-joist-spacing follows (joist warnings under S25).
+    const idxReduce = options.findIndex((o) => o.kind === 'reduce-joist-spacing');
     const idxAdd = options.findIndex((o) => o.kind === 'add-support-row');
-    expect(idxAdd).toBeLessThan(idxUpgrade);
+    expect(idxAdd).toBeLessThan(idxReduce);
   });
 
-  it('over-span JOIST warnings do NOT emit add-support-row (scope is beam warnings only)', () => {
-    const design = makeFloating({ widthFt: 12, lengthFt: 12, blockRowsHint: 2 });
+  it('over-span JOIST warning under Method A → NO add-support-row (row-densification does not fix a beam-carried joist span)', () => {
+    // S26 FIX #4 (review-gate) — under Method A, joists rest on
+    // rim beams (not on blocks); adding a block row does not
+    // change the joist support. `produceAddSupportRow` returns
+    // null for joist warnings under Method A.
+    const design = makeFloating({
+      widthFt: 12,
+      lengthFt: 12,
+      blockRowsHint: 2,
+      framing: 'beams-and-joists',
+    });
     const joistWarning = makeJoistWarning();
     const options = computeRemediations(joistWarning, design, IRC, RECOMPUTE);
     for (const opt of options) {
@@ -1313,26 +1400,22 @@ describe('computeRemediations — S25 add-support-row (ticket #47)', () => {
 
 describe('computeRemediations — add-support-row currentRows mirrors block-grid clamp (S25 pair-fix)', () => {
   it('undefined hint → currentRows equals S19 derivation (ceil(lengthMm/joistSpanMaxMm)+1)', () => {
-    // Floating 12ft × 12ft with 2×8 PT joists @ 406 mm. The IRC
-    // table's joistSpanMaxMm for PT 2×8 @ 406 = 3226 mm. The S19
-    // derivation is ceil(3657.6/3226)+1 = 3. Without a hint, both
-    // the layout and `deriveCurrentRows` should produce 3.
+    // Method B (default) — 30ft length with no hint. S19
+    // derivation: ceil(9144/3226)+1 = 4. block-to-block joist span
+    // = 9144/3 = 3048mm > allowable → over-span-joist warning
+    // fires.
     const design = makeFloating({ widthFt: 12, lengthFt: 12 });
-    // Force an over-span-beam warning: use a very long deck with
-    // NO hint. 30 ft length with hint undefined derives
-    // ceil(9144/3226)+1 = 4. block-to-block step = 9144/3 = 3048mm.
-    // Beam allowable at ~1524mm tributary = ~2400mm → 3048 > 2400 → warning.
     const longDesign = makeFloating({ widthFt: 12, lengthFt: 30 });
     const warnings = RECOMPUTE(longDesign);
-    const beamWarning = warnings.find((w) => w.kind === 'over-span-beam');
-    if (!beamWarning) {
-      // If no beam warning fires with these numbers, the S19
+    const joistWarning = warnings.find((w) => w.kind === 'over-span-joist');
+    if (!joistWarning) {
+      // If no joist warning fires with these numbers, the S19
       // derivation is safe enough and the mirroring is verified by
       // the other cases below.
       expect(true).toBe(true);
       return;
     }
-    const options = computeRemediations(beamWarning, longDesign, IRC, RECOMPUTE);
+    const options = computeRemediations(joistWarning, longDesign, IRC, RECOMPUTE);
     const opt = options.find((o) => o.kind === 'add-support-row');
     expect(opt).toBeDefined();
     if (!opt || opt.patch.kind !== 'add-support-row') return;
@@ -1341,21 +1424,19 @@ describe('computeRemediations — add-support-row currentRows mirrors block-grid
     expect(opt.patch.currentRows).toBeGreaterThanOrEqual(2);
     // Sanity: proposedRows = currentRows + 1.
     expect(opt.patch.proposedRows).toBe(opt.patch.currentRows + 1);
-    // Also verify that `void design` doesn't get flagged (used in
-    // the block below).
     void design;
   });
 
   it('blockRowsHint = 0 is clamped up to 2 (matches block-grid.resolveGridCount)', () => {
     // Raw hint 0 would previously produce currentRows=0 →
     // proposed=1 (nonsense). The layout clamps to 2, so the
-    // remediation must too.
+    // remediation must too. Method B (default) has joist warnings.
     const design = makeFloating({ widthFt: 12, lengthFt: 12, blockRowsHint: 0 });
     const initial = RECOMPUTE(design);
-    const beamWarning = initial.find((w) => w.kind === 'over-span-beam');
-    expect(beamWarning).toBeDefined();
-    if (!beamWarning) return;
-    const options = computeRemediations(beamWarning, design, IRC, RECOMPUTE);
+    const joistWarning = initial.find((w) => w.kind === 'over-span-joist');
+    expect(joistWarning).toBeDefined();
+    if (!joistWarning) return;
+    const options = computeRemediations(joistWarning, design, IRC, RECOMPUTE);
     const opt = options.find((o) => o.kind === 'add-support-row');
     expect(opt).toBeDefined();
     if (!opt || opt.patch.kind !== 'add-support-row') return;
@@ -1368,10 +1449,10 @@ describe('computeRemediations — add-support-row currentRows mirrors block-grid
     // rectangular deck (rim beams need 2 supports each).
     const design = makeFloating({ widthFt: 12, lengthFt: 12, blockRowsHint: 1 });
     const initial = RECOMPUTE(design);
-    const beamWarning = initial.find((w) => w.kind === 'over-span-beam');
-    expect(beamWarning).toBeDefined();
-    if (!beamWarning) return;
-    const options = computeRemediations(beamWarning, design, IRC, RECOMPUTE);
+    const joistWarning = initial.find((w) => w.kind === 'over-span-joist');
+    expect(joistWarning).toBeDefined();
+    if (!joistWarning) return;
+    const options = computeRemediations(joistWarning, design, IRC, RECOMPUTE);
     const opt = options.find((o) => o.kind === 'add-support-row');
     expect(opt).toBeDefined();
     if (!opt || opt.patch.kind !== 'add-support-row') return;
@@ -1382,10 +1463,10 @@ describe('computeRemediations — add-support-row currentRows mirrors block-grid
   it('blockRowsHint = -3 is clamped up to 2 (defensive: block-grid rounds down before clamp)', () => {
     const design = makeFloating({ widthFt: 12, lengthFt: 12, blockRowsHint: -3 });
     const initial = RECOMPUTE(design);
-    const beamWarning = initial.find((w) => w.kind === 'over-span-beam');
-    expect(beamWarning).toBeDefined();
-    if (!beamWarning) return;
-    const options = computeRemediations(beamWarning, design, IRC, RECOMPUTE);
+    const joistWarning = initial.find((w) => w.kind === 'over-span-joist');
+    expect(joistWarning).toBeDefined();
+    if (!joistWarning) return;
+    const options = computeRemediations(joistWarning, design, IRC, RECOMPUTE);
     const opt = options.find((o) => o.kind === 'add-support-row');
     expect(opt).toBeDefined();
     if (!opt || opt.patch.kind !== 'add-support-row') return;
@@ -1398,23 +1479,23 @@ describe('computeRemediations — add-support-row currentRows mirrors block-grid
     const lengthFt = 12;
     const design = makeFloating({ widthFt: 12, lengthFt, blockRowsHint: 999 });
     // At row count = 13 the actual layout is DENSE — likely won't
-    // over-span, so we may not fire an over-span-beam warning. In
-    // that case the AC (deriveCurrentRows returns the clamped
-    // value) is tested indirectly via block-grid.test.ts; the key
+    // over-span, so we may not fire a joist warning. In that case
+    // the AC (deriveCurrentRows returns the clamped value) is
+    // tested indirectly via block-grid.test.ts; the key
     // domain-level assertion here is that no crash / garbage
     // currentRows propagates. If a warning does fire, currentRows
     // must equal the layout's clamp.
     const initial = RECOMPUTE(design);
-    const beamWarning = initial.find((w) => w.kind === 'over-span-beam');
-    if (!beamWarning) {
-      // Layout with 13 rows already clears; no beam warning, no
+    const joistWarning = initial.find((w) => w.kind === 'over-span-joist');
+    if (!joistWarning) {
+      // Layout with 13 rows already clears; no warning, no
       // add-support-row remediation needed. That's the correct
       // behavior of the mirrored clamp — nothing to test at this
       // seam, block-grid.test.ts owns the clamp assertion.
       expect(initial.length).toBeGreaterThanOrEqual(0);
       return;
     }
-    const options = computeRemediations(beamWarning, design, IRC, RECOMPUTE);
+    const options = computeRemediations(joistWarning, design, IRC, RECOMPUTE);
     const opt = options.find((o) => o.kind === 'add-support-row');
     expect(opt).toBeDefined();
     if (!opt || opt.patch.kind !== 'add-support-row') return;
@@ -1468,33 +1549,24 @@ describe('computeRemediations — add-support-row currentRows mirrors block-grid
 // ---------------------------------------------------------------------------
 
 describe('computeRemediations — add-support-row densification cap disabled branch (QA G4)', () => {
-  it('surfaces disabled with "less than 300 mm apart" reason when currentRows is at the max clamp', () => {
-    // Design a 4 ft floating deck at the min legal size. Length
-    // = 1219.2 mm; maxCount = floor(1219.2/300) + 1 = 5. Set
-    // blockRowsHint = 5 (at the cap). proposedGap = 1219.2/5 =
-    // 243.84 mm < MIN_BLOCK_SPACING_MM (300). The producer must
-    // return a disabled option; no natural warning is required —
-    // we pass a synthetic warning to reach the branch directly.
-    // (Every branch of the producer is fail-safe; the domain-
-    // ordering test above proves the array structure — this
-    // test isolates the densification cap.)
+  it('Method B surfaces disabled with "less than 300 mm apart" reason when currentRows is at the max clamp', () => {
+    // S26 FIX #4 (review-gate) update: uses Method B where
+    // add-support-row is meaningful. Design a 4 ft floating deck
+    // at the min legal size. Length = 1219.2 mm; maxCount =
+    // floor(1219.2/300) + 1 = 5. Set blockRowsHint = 5 (at the
+    // cap). proposedGap = 1219.2/5 = 243.84 mm <
+    // MIN_BLOCK_SPACING_MM (300). The producer must return a
+    // disabled option; no natural warning is required — we pass
+    // a synthetic joist warning to reach the branch directly.
     const design = makeFloating({
       widthFt: 4,
       lengthFt: 4,
       blockRowsHint: 5,
     });
-    // Synthetic beam warning — the beam that motivated the
-    // remediation doesn't need to be laid out to test the
-    // producer's cap-branch logic.
-    const beamWarning = makeBeamWarning({
-      memberId: 'beam-near',
-      // A physically-impossible actualMm at 4ft length — irrelevant
-      // for the cap branch which fires BEFORE the recompute-verify
-      // step.
-      actualMm: 6000,
-      allowableMm: 1981,
-    });
-    const options = computeRemediations(beamWarning, design, IRC, RECOMPUTE);
+    // Synthetic joist warning — Method B routes over-span-joist
+    // warnings through produceAddSupportRow.
+    const joistWarning = makeJoistWarning();
+    const options = computeRemediations(joistWarning, design, IRC, RECOMPUTE);
     const opt = options.find((o) => o.kind === 'add-support-row');
     expect(opt).toBeDefined();
     if (!opt) return;
