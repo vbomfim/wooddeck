@@ -40,9 +40,12 @@
  *     `spacingMm`).
  *   - No two joists overlap for any legal input — the algorithm
  *     mathematically cannot place joists closer than `actualSpacing`,
- *     and `actualSpacing ≥ thicknessMm` for every realistic
- *     `widthMm/spacingMm` combination (the MIN_DECK_DIMENSION_MM
- *     guard in `layout-engine.ts` ensures this).
+ *     and the `validateJoistSpacing` guard in `layout-shared.ts`
+ *     rejects any design whose achievable `actualSpacing` would fall
+ *     below `joistThicknessMm` (issue #25: pre-#25 the guard only
+ *     checked the REQUESTED `spacingMm`, but with `spacingMm == thickness`
+ *     and a narrow deck, `actualSpacing = usable/ceil(usable/spacingMm)`
+ *     could come out just below `thickness` → ~1 mm overlap).
  *
  * ## Ticket-formula reconciliation
  *
