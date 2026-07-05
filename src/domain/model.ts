@@ -308,6 +308,27 @@ export interface FoundationBlockRef {
  * Method B). Under Method B + `over-span-joist` warnings the
  * remediation is ENABLED and genuinely shortens the joist span
  * between supports.
+ *
+ * ## Optional user-controlled block grid pitch (feat/block-spacing)
+ *
+ * `blockSpacingMm` — distance between adjacent foundation blocks
+ * (grid PITCH, mm) for FLOATING `'joists-on-blocks'` framing
+ * (Method B); IGNORED for Method A (`'beams-and-joists'`) and for
+ * elevated designs. When PRESENT it drives both the +x column
+ * count AND the +z row count of the Method B block grid via
+ * `computeBlockGrid` — clamped to
+ * `[MIN_BLOCK_SPACING_MM, MAX_BLOCK_SPACING_MM]` and further
+ * capped so the total block count never exceeds
+ * `MAX_METHOD_B_BLOCK_COUNT` (see `block-grid.ts`). When ABSENT
+ * the Method B layout applies `DEFAULT_METHOD_B_BLOCK_SPACING_MM`
+ * (1220 mm ≈ 4 ft — see `floating-layout.ts`).
+ *
+ * This field replaces the pre-fix "one block per joist × N rows"
+ * Method B model, which produced ~150 blocks for a 16 ft deck
+ * (one column per joist × many rows). The new grid model
+ * decouples block count from joist count so the user can dial in
+ * the density they actually need (typically ~25 blocks for a
+ * 16 × 16 ft deck at the 1220 mm default).
  */
 export type FoundationSpec =
   | { readonly type: 'posts-on-footings'; readonly post: MaterialRef; readonly footing: FootingSpec }
@@ -318,6 +339,12 @@ export type FoundationSpec =
       readonly blockRowsHint?: number;
       /** S25: override for the derived block-column count. See doc-block above. */
       readonly blockColsHint?: number;
+      /**
+       * feat/block-spacing: distance between adjacent foundation
+       * blocks (grid PITCH, mm) for Method B floating framing;
+       * IGNORED for Method A and elevated. See doc-block above.
+       */
+      readonly blockSpacingMm?: Mm;
     }
   | {
       readonly type: 'tuffblocks';
@@ -326,6 +353,12 @@ export type FoundationSpec =
       readonly blockRowsHint?: number;
       /** S25: override for the derived block-column count. See doc-block above. */
       readonly blockColsHint?: number;
+      /**
+       * feat/block-spacing: distance between adjacent foundation
+       * blocks (grid PITCH, mm) for Method B floating framing;
+       * IGNORED for Method A and elevated. See doc-block above.
+       */
+      readonly blockSpacingMm?: Mm;
     };
 
 // ==========================================================

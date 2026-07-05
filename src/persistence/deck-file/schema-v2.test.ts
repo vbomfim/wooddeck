@@ -744,6 +744,140 @@ describe('deserialize — S25 blockRowsHint schema tightening', () => {
 });
 
 // ---------------------------------------------------------------------------
+// feat/block-spacing — foundation.blockSpacingMm schema round-trip
+// ---------------------------------------------------------------------------
+//
+// The new user-controllable Method B block-grid pitch field:
+//
+//   - `type: number` (mm) with `minimum: 300` (mirrors the runtime
+//     MIN_BLOCK_SPACING_MM density cap) and `maximum: 2438.4`
+//     (mirrors the runtime MAX_BLOCK_SPACING_MM = 8 ft practical
+//     upper bound).
+//   - Applies to `deck-blocks` AND `tuffblocks` variants
+//     (`posts-on-footings` does not carry the field).
+//   - OPTIONAL — existing files without it still load; layout
+//     applies DEFAULT_METHOD_B_BLOCK_SPACING_MM (1220 mm).
+//
+// The schema layer is the first trust boundary — a `.deck` file
+// with `blockSpacingMm: -5` or `blockSpacingMm: "10 ft"` MUST
+// be rejected here before it reaches apply-parameters or the
+// layout engine.
+
+describe('deserialize — feat/block-spacing blockSpacingMm schema round-trip', () => {
+  const OPTS = {
+    createdAt: '2026-07-04T00:00:00.000Z',
+    generatorVersion: '1.0.0',
+  } as const;
+
+  function floatingTuffWithSpacing(
+    overrides: Record<string, unknown>,
+  ): string {
+    const base = {
+      ...GOLDEN_DECK_DESIGN,
+      structure: 'floating' as const,
+      floatingFraming: 'joists-on-blocks' as const,
+      foundation: {
+        type: 'tuffblocks' as const,
+        product: { productId: 'tuffblock-12x12x4' as const },
+      },
+    };
+    const s = serialize(base, OPTS);
+    const parsed = JSON.parse(s) as DeckFileV2;
+    const patched = {
+      ...parsed,
+      design: {
+        ...parsed.design,
+        foundation: { ...parsed.design.foundation, ...overrides },
+      },
+    };
+    return JSON.stringify(patched);
+  }
+
+  it('rejects blockSpacingMm = 299 (below minimum 300 — the MIN_BLOCK_SPACING_MM density cap)', () => {
+    const rogue = floatingTuffWithSpacing({ blockSpacingMm: 299 });
+    expect(() => deserialize(rogue)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  it('rejects blockSpacingMm = 3000 (above maximum 2438.4 — the MAX_BLOCK_SPACING_MM 8-ft practical cap)', () => {
+    const rogue = floatingTuffWithSpacing({ blockSpacingMm: 3000 });
+    expect(() => deserialize(rogue)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  it('rejects blockSpacingMm = "1220" (wrong type — string)', () => {
+    const rogue = floatingTuffWithSpacing({ blockSpacingMm: '1220' });
+    expect(() => deserialize(rogue)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  it('rejects blockSpacingMm = -1 (negative)', () => {
+    const rogue = floatingTuffWithSpacing({ blockSpacingMm: -1 });
+    expect(() => deserialize(rogue)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  it('round-trip: floating + tuffblocks with blockSpacingMm = 1220 deep-equals the original', () => {
+    const withSpacing = {
+      ...GOLDEN_DECK_DESIGN,
+      structure: 'floating' as const,
+      floatingFraming: 'joists-on-blocks' as const,
+      foundation: {
+        type: 'tuffblocks' as const,
+        product: { productId: 'tuffblock-12x12x4' as const },
+        blockSpacingMm: 1220,
+      },
+    };
+    const json = serialize(withSpacing, OPTS);
+    const { design, migrated } = deserialize(json);
+    expect(migrated).toBe(false);
+    expect(design.foundation).toEqual(withSpacing.foundation);
+  });
+
+  it('round-trip: floating + deck-blocks with blockSpacingMm = 1830 (6 ft) preserved end-to-end', () => {
+    const withSpacing = {
+      ...GOLDEN_DECK_DESIGN,
+      structure: 'floating' as const,
+      floatingFraming: 'joists-on-blocks' as const,
+      foundation: {
+        type: 'deck-blocks' as const,
+        product: { productId: 'oldcastle-11x11x7' as const },
+        blockSpacingMm: 1830,
+      },
+    };
+    const json = serialize(withSpacing, OPTS);
+    const { design } = deserialize(json);
+    expect(design.foundation).toEqual(withSpacing.foundation);
+  });
+
+  it('legacy load: a v2 file WITHOUT blockSpacingMm still loads (field is OPTIONAL — backward compat)', () => {
+    // The `GOLDEN_DECK_DESIGN` fixture does not carry the field.
+    // Deserialization must succeed and the runtime layout will
+    // apply DEFAULT_METHOD_B_BLOCK_SPACING_MM (see floating-layout.ts).
+    const withoutSpacing = {
+      ...GOLDEN_DECK_DESIGN,
+      structure: 'floating' as const,
+      floatingFraming: 'joists-on-blocks' as const,
+      foundation: {
+        type: 'tuffblocks' as const,
+        product: { productId: 'tuffblock-12x12x4' as const },
+      },
+    };
+    const json = serialize(withoutSpacing, OPTS);
+    const { design } = deserialize(json);
+    expect(design.foundation).toEqual(withoutSpacing.foundation);
+    // Field absent — no undefined key crept in from a stray default.
+    expect(
+      Object.hasOwn(design.foundation as object, 'blockSpacingMm'),
+    ).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // S26 FIX #3 (review-gate, DATA-LOSS) — pre-S26 floating decks load
 // ---------------------------------------------------------------------------
 //

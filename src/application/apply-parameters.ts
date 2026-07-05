@@ -316,6 +316,16 @@ const KNOWN_OPTIONAL_LEAF_PATHS: ReadonlySet<string> = new Set([
   // doc-block in `src/domain/model.ts`.
   'foundation.blockRowsHint',
   'foundation.blockColsHint',
+  // feat/block-spacing — user-controlled Method B block grid pitch
+  // (mm). OPTIONAL on the `deck-blocks` / `tuffblocks` variants,
+  // patched in by the UI's BlockSpacingField on a design whose
+  // initial foundation subtree does not carry the field. Same
+  // full-dotted-path scoping rationale as the two hint fields
+  // above — the exemption applies only to the ONE subtree where
+  // the field is declared on `FoundationSpec`; a stray
+  // `{ joist: { blockSpacingMm: 999 } }` or a typo like
+  // `foundation.blockSpacing` is still rejected as unknown.
+  'foundation.blockSpacingMm',
 ]);
 
 /**
@@ -639,8 +649,8 @@ function assertFoundationReplacementShape(
  * Derived from `FoundationSpec` in `src/domain/model.ts`:
  *
  *   - `posts-on-footings` : { type, post, footing }
- *   - `deck-blocks`       : { type, product, blockRowsHint?, blockColsHint? }
- *   - `tuffblocks`        : { type, product, blockRowsHint?, blockColsHint? }
+ *   - `deck-blocks`       : { type, product, blockRowsHint?, blockColsHint?, blockSpacingMm? }
+ *   - `tuffblocks`        : { type, product, blockRowsHint?, blockColsHint?, blockSpacingMm? }
  *
  * The two hint keys are declared OPTIONAL on the block variants
  * (S25 / ticket #47) — they belong in the allow set because a
@@ -657,8 +667,8 @@ function assertFoundationReplacementShape(
  */
 const FOUNDATION_VARIANT_ALLOWED_KEYS: Readonly<Record<string, ReadonlySet<string>>> = {
   'posts-on-footings': new Set(['type', 'post', 'footing']),
-  'deck-blocks': new Set(['type', 'product', 'blockRowsHint', 'blockColsHint']),
-  'tuffblocks': new Set(['type', 'product', 'blockRowsHint', 'blockColsHint']),
+  'deck-blocks': new Set(['type', 'product', 'blockRowsHint', 'blockColsHint', 'blockSpacingMm']),
+  'tuffblocks': new Set(['type', 'product', 'blockRowsHint', 'blockColsHint', 'blockSpacingMm']),
 };
 
 /**
@@ -707,8 +717,9 @@ const FOUNDATION_NESTED_ALLOWED_KEYS: Readonly<Record<string, ReadonlySet<string
  * `assertFoundationReplacementShape` in the dispatcher — the
  * top-level variant check already guarantees `patchValue`'s keys
  * are a subset of `{type,post,footing,product,blockRowsHint,
- * blockColsHint}` for the target variant, so we only need to
- * inspect the ones that appear in this nested-allowed map.
+ * blockColsHint,blockSpacingMm}` for the target variant, so we
+ * only need to inspect the ones that appear in this nested-
+ * allowed map.
  *
  * @throws {ApplyParametersError} naming the FULL dotted path to
  *   the offending nested key (e.g. `foundation.product.orphan`)

@@ -235,6 +235,40 @@ describe('applyParameters — S25 path-scoped optional-leaf allowlist', () => {
     expect(bundle.design.foundation.blockColsHint).toBe(2);
   });
 
+  it('legitimate `{ foundation: { blockSpacingMm: 1220 } }` patch succeeds on a spacing-less floating tuffblock design (feat/block-spacing)', () => {
+    // Mirror-image of the blockRowsHint case above — the new
+    // Method B user-controllable field must merge cleanly into a
+    // design whose initial foundation subtree omits it.
+    const patch = {
+      foundation: { blockSpacingMm: 1220 },
+    } as unknown as DeepPartial<DeckDesign>;
+    const bundle = applyParameters(floatingFixture, patch, table);
+    if (
+      bundle.design.foundation.type !== 'tuffblocks' &&
+      bundle.design.foundation.type !== 'deck-blocks'
+    ) {
+      throw new Error('expected block foundation on floating fixture');
+    }
+    expect(bundle.design.foundation.blockSpacingMm).toBe(1220);
+  });
+
+  it('rejects wrong-subtree write `{ joist: { blockSpacingMm: 999 } }` with the dotted path (feat/block-spacing)', () => {
+    // Path-scoped allowlist confines `blockSpacingMm` to
+    // `foundation.blockSpacingMm`. A leaf-only allowlist would
+    // silently accept a stray `joist.blockSpacingMm` — the deep
+    // dotted-path check catches it.
+    const patch = {
+      joist: { blockSpacingMm: 999 },
+    } as unknown as DeepPartial<DeckDesign>;
+    try {
+      applyParameters(floatingFixture, patch, table);
+      throw new Error('expected ApplyParametersError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApplyParametersError);
+      expect((err as ApplyParametersError).path).toBe('joist.blockSpacingMm');
+    }
+  });
+
   it('rejects wrong-subtree write `{ joist: { blockRowsHint: 999 } }` with the dotted path', () => {
     // The leaf key `blockRowsHint` is legitimate ONLY at
     // `foundation.blockRowsHint`. Writing it into `joist` is a

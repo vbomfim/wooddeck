@@ -107,6 +107,73 @@ import type { Mm } from '../../units';
 export const MIN_BLOCK_SPACING_MM: Mm = 300;
 
 /**
+ * MAXIMUM user-selectable adjacent-block spacing (mm) accepted by
+ * the Method B block-spacing input (feat/block-spacing).
+ *
+ * ## Value rationale (2438.4 mm = 8 ft)
+ *
+ * 8 ft matches the elevated `MAX_BEAM_SPAN_MM` constant AND the
+ * `BLOCK_COL_MAX_SPACING_MM` Method A default — the practical
+ * upper bound for a DIY 2× lumber block-under-beam layout. Above
+ * this the joist span between supports exceeds every tabulated
+ * IRC 2×8/2×10/2×12 allowable (R507.6), and the design becomes
+ * one of large discrete piers rather than the "gridded ground
+ * blocks" model this app supports.
+ *
+ * Values ABOVE this clamp cleanly to `MAX_BLOCK_SPACING_MM` so a
+ * pathologically wide user input (`blockSpacingMm: 100000`) still
+ * produces a defensible perimeter-two grid rather than a runtime
+ * error. Values BELOW `MIN_BLOCK_SPACING_MM` clamp UP.
+ *
+ * Autonomous decision — reversible by editing this constant.
+ */
+export const MAX_BLOCK_SPACING_MM: Mm = 8 * 304.8;
+
+/**
+ * Feat/block-spacing pure helper — clamp a requested Method B
+ * block spacing (mm) into the layout-safe range
+ * `[MIN_BLOCK_SPACING_MM, MAX_BLOCK_SPACING_MM]`.
+ *
+ * Non-finite input (NaN, ±Infinity) returns `null` so the caller
+ * can substitute the DEFAULT_METHOD_B_BLOCK_SPACING_MM. Negative /
+ * zero input clamps to `MIN_BLOCK_SPACING_MM` (fail-loud sanity —
+ * a 0 mm block spacing would spawn an infinite grid). Values in
+ * the legal range pass through unchanged.
+ *
+ * Kept as a pure module-level export so tests can assert the clamp
+ * boundary behavior against the exported constants directly, and
+ * `floating-layout.ts` can reuse it without duplicating the range.
+ */
+export function clampBlockSpacingMm(spacingMm: number): Mm | null {
+  if (!Number.isFinite(spacingMm)) return null;
+  if (spacingMm < MIN_BLOCK_SPACING_MM) return MIN_BLOCK_SPACING_MM;
+  if (spacingMm > MAX_BLOCK_SPACING_MM) return MAX_BLOCK_SPACING_MM;
+  return spacingMm;
+}
+
+/**
+ * Feat/block-spacing pure helper — count of blocks along ONE axis
+ * for a REGULAR grid at pitch `spacingMm`, with the outer block
+ * centers anchored at the axis ends (`computeAxisCenters` convention).
+ *
+ * Formula: `max(2, ceil(spanMm / spacingMm) + 1)`.
+ *
+ *   - `ceil` (not `round`) so the resulting adjacent-block gap
+ *     `spanMm / (count - 1)` is ALWAYS ≤ `spacingMm` — the
+ *     user-facing invariant ("blocks are no farther apart than
+ *     the number I set").
+ *   - `max(…, 2)` enforces the perimeter-two minimum shared with
+ *     `resolveGridCount` (a one-block-per-axis grid collapses the
+ *     layout into a single row).
+ *
+ * Trust boundary: caller must have already validated `spanMm > 0`
+ * and `spacingMm > 0` (both guaranteed by upstream clamps).
+ */
+export function blockCountForAxis(spanMm: Mm, spacingMm: Mm): number {
+  return Math.max(2, Math.ceil(spanMm / spacingMm) + 1);
+}
+
+/**
  * Input for `computeBlockGrid`. `foundation` is narrowed to the two
  * floating-legal foundation variants (`deck-blocks` / `tuffblocks`)
  * — a `posts-on-footings` foundation has no `.product` field and is
@@ -299,8 +366,17 @@ export function resolveGridCount(
  * `centers.length === N`; `centers[0] === -spanMm/2` (for N≥2);
  * `centers[N-1] === +spanMm/2` (for N≥2); adjacent-gap = spanMm /
  * (N-1) — constant.
+ *
+ * ## Public surface (feat/block-spacing)
+ *
+ * Exported so `floating-layout.ts` `computeMethodB` can build the
+ * Method B block grid centers directly at pitch `blockSpacingMm`
+ * without duplicating the anchor formula. Pre-fix this helper
+ * was private to `computeBlockGrid`; the export widens the seam
+ * but keeps the module dependency cycle-safe (block-grid depends
+ * on nothing new, floating-layout already depends on block-grid).
  */
-function computeAxisCenters(spanMm: Mm, count: number): number[] {
+export function computeAxisCenters(spanMm: Mm, count: number): number[] {
   if (count < 1) {
     // Should be unreachable — `computeBlockGrid` guards against
     // `spanMm ≤ 0`, and `ceil(positive/positive) + 1 ≥ 2`. Kept as
