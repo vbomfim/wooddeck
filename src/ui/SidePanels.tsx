@@ -1,7 +1,7 @@
 /**
  * `src/ui/SidePanels.tsx` — S14 issue #15 §2 wrapper.
  *
- * Composes the four right-panel sections into a single vertical
+ * Composes the five right-panel sections into a single vertical
  * stack passed to AppShell's `rightPanel` slot. Each nested
  * `<section>` carries its own `<h2>`, satisfying the AppShell
  * landmark invariant.
@@ -30,10 +30,28 @@
  * the export menu or the warnings panel — defense-in-depth on a
  * per-panel granularity.
  *
+ * ## S15 (issue #16) addition — 2D plan view
+ *
+ * `<PlanView2D />` is appended as the FIFTH section (below export
+ * menu). Placement decision + rationale:
+ *
+ *   - Ticket suggests "within the right tools <aside> (below the
+ *     existing tools)". SidePanels IS that aside's content, so
+ *     appending a fifth section here is the literal fulfillment.
+ *   - Concurrency: AppShell.tsx is being modified by S23
+ *     (MigrationToast). Mounting here — NOT in AppShell — means
+ *     the S15 branch adds ZERO lines to AppShell, so the S23
+ *     rebase is a clean fast-forward with no manual merge.
+ *   - Defense-in-depth: wrapping in a `<PanelErrorBoundary>` is
+ *     consistent with every other panel and prevents any
+ *     projection-math bug in a future revision from taking down
+ *     the whole side stack.
+ *
  * ## Boundary
  *
  *   - `./LayerTogglePanel` / `./WarningsPanel` / `./BomPanel` /
- *     `./ExportMenu` / `./PanelErrorBoundary` — sibling ui modules.
+ *     `./ExportMenu` / `./PanelErrorBoundary` / `./PlanView2D` —
+ *     sibling ui modules.
  *   - NO state / domain / etc. — this is pure composition.
  */
 import type { JSX } from 'react';
@@ -42,6 +60,7 @@ import { BomPanel } from './BomPanel';
 import { ExportMenu } from './ExportMenu';
 import { LayerTogglePanel } from './LayerTogglePanel';
 import { PanelErrorBoundary } from './PanelErrorBoundary';
+import { PlanView2D } from './PlanView2D';
 import { WarningsPanel } from './WarningsPanel';
 
 import './styles/tokens.css';
@@ -49,8 +68,10 @@ import './styles/side-panels.css';
 
 /**
  * The right-panel composition. Ordered: view controls → warnings
- * → BOM → export. Rationale: users tweak view first, react to
- * warnings, review the material list, then save/export.
+ * → BOM → export → plan view. Rationale: users tweak view first,
+ * react to warnings, review the material list, then save/export;
+ * the plan view sits LAST as a supplementary reference (§16
+ * "read-only" — no need for interaction priority).
  */
 export function SidePanels(): JSX.Element {
   return (
@@ -66,6 +87,9 @@ export function SidePanels(): JSX.Element {
       </PanelErrorBoundary>
       <PanelErrorBoundary>
         <ExportMenu />
+      </PanelErrorBoundary>
+      <PanelErrorBoundary>
+        <PlanView2D />
       </PanelErrorBoundary>
     </div>
   );

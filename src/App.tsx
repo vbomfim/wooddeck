@@ -125,8 +125,9 @@ function SceneFallback(): JSX.Element {
 /**
  * S13 placeholder REPLACED — the leftPanel now hosts the real
  * `<ParameterPanel />`. S14 placeholder REPLACED — the rightPanel
- * now hosts `<SidePanels />` (a wrapper composing four sections:
- * layer toggles + camera presets, warnings, BOM, export menu).
+ * now hosts `<SidePanels />` (a wrapper composing FIVE sections
+ * as of S15: layer toggles + camera presets, warnings, BOM,
+ * export menu, and the read-only 2D plan view).
  * Both real panels carry their own `<h2>` titles so the aside
  * landmarks keep accessible names.
  */
