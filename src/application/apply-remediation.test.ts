@@ -270,7 +270,10 @@ describe('applyRemediation — AC8 error contract', () => {
 describe('applyRemediation — S25 add-support-row', () => {
   const table25 = new IrcSpanTable();
 
-  function makeFloatingDesign(blockRowsHint: number | undefined): DeckDesign {
+  function makeFloatingDesign(
+    blockRowsHint: number | undefined,
+    framing: 'beams-and-joists' | 'joists-on-blocks' = 'joists-on-blocks',
+  ): DeckDesign {
     return {
       id: '00000000-0000-4000-8000-000000000025',
       createdAt: '2026-07-04T00:00:00.000Z',
@@ -280,7 +283,7 @@ describe('applyRemediation — S25 add-support-row', () => {
         heightMm: 500,
       },
       structure: 'floating',
-      floatingFraming: 'beams-and-joists',
+      floatingFraming: framing,
       foundation:
         blockRowsHint !== undefined
           ? {
@@ -342,29 +345,29 @@ describe('applyRemediation — S25 add-support-row', () => {
     });
   });
 
-  it.skip('S26 NOTE — END-TO-END PAYOFF — floating over-spanned beam cleared by add-support-row', () => {
-    // S26 (fix/floating-framing-joists): see the sibling remediations.test.ts
-    // NOTE for full context. Under Method A (default), block rows
-    // are pinned to the 2 rim beams; `blockRowsHint` no longer
-    // reduces the block-to-block +x gap under a rim beam. The S25
-    // add-support-row remediation therefore has no effect on the
-    // beam over-span for a Method-A design. Re-scoping S25 to
-    // Method A ("add a block column" or "add mid-joist blocking")
-    // is out of scope for this ticket per the spec's "note it,
-    // don't necessarily fix here" guidance.
+  it('S26 FIX #4 — END-TO-END PAYOFF: Method B over-spanned joist cleared by add-support-row', () => {
+    // S26 FIX #4 (review-gate) un-skip: pre-S26 this test used
+    // Method A where blockRowsHint controlled the beam grid. S26
+    // pinned Method A rows to the rim beams (hint ignored). The
+    // block-row remediation is MEANINGFUL under Method B — adding
+    // a row of blocks along +z genuinely shortens the joist span
+    // (blocks sit directly under joists in Method B).
     //
-    // Reference S25 payoff (kept for future re-enablement):
-    const design = makeFloatingDesign(2);
-    // Sanity: the initial design has an over-span-beam warning.
+    // Same 12×12 geometry, same 2×8 PT joist, blockRowsHint=2:
+    // joist span 3657.6 mm >> allowable ~2400 mm → over-span-joist
+    // warning fires. Apply add-support-row → hint=3 → joist span
+    // = 1828.8 mm < allowable → warning clears.
+    const design = makeFloatingDesign(2, 'joists-on-blocks');
+    // Sanity: the initial design has an over-span-joist warning.
     const initial = spanCheck(computeLayout(design), table25);
-    const beamWarning = initial.find((w) => w.kind === 'over-span-beam');
-    expect(beamWarning).toBeDefined();
-    if (!beamWarning) return;
+    const joistWarning = initial.find((w) => w.kind === 'over-span-joist');
+    expect(joistWarning).toBeDefined();
+    if (!joistWarning) return;
 
     const recompute = (d: DeckDesign): readonly Warning[] =>
       spanCheck(computeLayout(d), table25);
     const options = computeRemediations(
-      beamWarning,
+      joistWarning,
       design,
       table25,
       recompute,
@@ -375,11 +378,12 @@ describe('applyRemediation — S25 add-support-row', () => {
     expect(addSupport.wouldClear).toBe(true);
 
     // Apply → the bundle's warnings must NOT contain an over-span
-    // for the same beam id.
+    // for the same joist id.
     const bundle = applyRemediation(design, addSupport, table25);
     const stillOverSpanning = bundle.warnings.some(
       (w) =>
-        w.kind === 'over-span-beam' && w.memberId === beamWarning.memberId,
+        w.kind === 'over-span-joist' &&
+        w.memberId === joistWarning.memberId,
     );
     expect(stillOverSpanning).toBe(false);
     // The hint made it into the design.
@@ -388,17 +392,18 @@ describe('applyRemediation — S25 add-support-row', () => {
     }
   });
 
-  it.skip('S26 NOTE — setting blockRowsHint to undefined restores the derived count', () => {
-    // S26 (fix/floating-framing-joists): under Method A (default),
-    // block rows are PINNED to the two rim beams via
-    // `explicitRowZCenters` — the hint no longer determines row
-    // count for Method A. Test kept for future S26-B remediation
-    // re-scope. See sibling `END-TO-END PAYOFF` skip for details.
-    // Sanity: a design without hint and a design with hint=undefined
-    // produce the same layout — the recompute treats them
-    // interchangeably.
-    const a = spanCheck(computeLayout(makeFloatingDesign(undefined)), table25);
-    // No hint set → auto-derived → no over-span.
-    expect(a.find((w) => w.kind === 'over-span-beam')).toBeUndefined();
+  it('S26 FIX #4 — Method B: setting blockRowsHint to undefined derives a safe count that produces no over-span', () => {
+    // S26 FIX #4 (review-gate) un-skip: pre-S26 this test was
+    // .skip'd because Method A ignores blockRowsHint. Under
+    // Method B, `undefined` hint falls back to the S19 derivation
+    // (ceil(lengthMm/joistSpanMaxMm)+1 — same as elevated joist
+    // count). For 12ft × 12ft with 2×8 PT @ 406mm: joistSpanMax =
+    // 3226 mm, so derivation = ceil(3657.6/3226)+1 = 3 rows → joist
+    // span = 1828.8 mm < allowable → no over-span.
+    const a = spanCheck(
+      computeLayout(makeFloatingDesign(undefined, 'joists-on-blocks')),
+      table25,
+    );
+    expect(a.find((w) => w.kind === 'over-span-joist')).toBeUndefined();
   });
 });

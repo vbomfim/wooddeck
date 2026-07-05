@@ -42,7 +42,10 @@ import { spanCheck } from './span-check';
 const PT_2X8: MaterialRef = { nominal: '2x8', species: 'PT', grade: 'No2' };
 const PT_54: MaterialRef = { nominal: '5/4x6', species: 'PT', grade: 'No2' };
 
-const TUFFBLOCK_FOUNDATION: FoundationSpec = {
+const TUFFBLOCK_FOUNDATION: Extract<
+  FoundationSpec,
+  { type: 'deck-blocks' | 'tuffblocks' }
+> = {
   type: 'tuffblocks',
   product: { productId: 'tuffblock-12x12x4' },
 };
@@ -379,5 +382,138 @@ describe('spanCheck (floating) — REAL IrcSpanTable e2e (FIX 1)', () => {
       // false-permissive column that hid the QA bug.
       expect(t).toBeGreaterThan(1829);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX #1 (S26 review-gate, safety-critical) — Method B joist span check
+// ---------------------------------------------------------------------------
+//
+// Regression target: pre-fix, `spanCheck` derived every joist's span
+// from the beam positions (`deriveJoistSpanMm(beams) = max-z − min-z
+// of beams`). Method B (`floatingFraming = 'joists-on-blocks'`) emits
+// NO beams, so `beams.length < 2` → `joistSpanMm === null` → joist
+// checks were SILENTLY SKIPPED for every Method-B design. A 12 × 40
+// ft Method-B deck with a sparse block grid produced ZERO warnings
+// even though every joist spanned ~3.3× the IRC allowable.
+//
+// The fix: when a floating design has NO beams, derive each joist's
+// span from the BLOCK positions under that joist — blocks matching
+// the joist's x, sorted by z, max adjacent-z gap. This is the
+// direct analog of the elevated beam-to-block block-to-block
+// derivation used for Method A rim beams.
+
+describe('spanCheck (floating Method B) — FIX #1 joist span from blocks', () => {
+  function makeFloatingB(overrides: Partial<{
+    widthFt: number;
+    lengthFt: number;
+    joist: MaterialRef;
+    blockRowsHint: number;
+  }> = {}): DeckDesign {
+    const foundation: FoundationSpec =
+      overrides.blockRowsHint !== undefined
+        ? { ...TUFFBLOCK_FOUNDATION, blockRowsHint: overrides.blockRowsHint }
+        : TUFFBLOCK_FOUNDATION;
+    return {
+      id: '00000000-0000-4000-8000-0000000000b1',
+      createdAt: '2026-07-04T00:00:00.000Z',
+      footprint: {
+        widthMm: (overrides.widthFt ?? 12) * MM_PER_FOOT,
+        lengthMm: (overrides.lengthFt ?? 40) * MM_PER_FOOT,
+        // Method B min height = joistDepth + deckingThickness
+        // = 184 + 25 = 209 mm. 300 comfortably clears.
+        heightMm: 300,
+      },
+      structure: 'floating',
+      floatingFraming: 'joists-on-blocks',
+      foundation,
+      joist: { material: overrides.joist ?? PT_2X8, spacingMm: 406 },
+      beam: { material: PT_2X8 }, // ignored for Method B
+      decking: { material: PT_54, orientation: 'parallel-to-width' },
+      layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+    };
+  }
+
+  it('the QA probe: 12×40 Method B with widely-spaced block rows FIRES over-span-joist warnings (was ZERO pre-fix)', () => {
+    // With blockRowsHint=2, blocks sit only at the two z-ends;
+    // each joist spans the ~40 ft between them = ~12192 mm. IRC
+    // allowable for 2×8 PT No.2 @ 16″ o.c. is ~2565 mm (8 ft 5 in).
+    // Pre-fix: NO warning (bug). Post-fix: one warning per joist.
+    const design = makeFloatingB({
+      widthFt: 12,
+      lengthFt: 40,
+      blockRowsHint: 2,
+    });
+    const layout = computeLayout(design, { now: () => design.createdAt });
+    const table = new IrcSpanTable();
+
+    const warnings = spanCheck(layout, table);
+    const joistWarnings = warnings.filter(
+      (w) => w.kind === 'over-span-joist',
+    );
+    expect(joistWarnings.length).toBeGreaterThan(0);
+    // Every warning must name a joist member id.
+    for (const w of joistWarnings) {
+      expect(w.memberId).toMatch(/^joist-/);
+      // Actual span > allowable (that's why the warning fired).
+      expect(w.actualMm).toBeGreaterThan(w.allowableMm);
+    }
+  });
+
+  it('a compliant Method B deck (tight block rows, low span) fires ZERO joist warnings', () => {
+    // Small 4 × 4 ft Method B → blocks at each z-end → joist
+    // span = length − footing inset ≈ 4 ft − ~1 ft = ~918 mm. IRC
+    // 2×8 PT @ 16″ o.c. allows ~2565 mm. 918 << 2565 → no warning.
+    const design = makeFloatingB({ widthFt: 4, lengthFt: 4 });
+    const layout = computeLayout(design, { now: () => design.createdAt });
+    const table = new IrcSpanTable();
+    const warnings = spanCheck(layout, table);
+    const joistWarnings = warnings.filter(
+      (w) => w.kind === 'over-span-joist',
+    );
+    expect(joistWarnings).toEqual([]);
+  });
+
+  it('warnings cite the IRC-2018 joist span table (not the beam table)', () => {
+    const design = makeFloatingB({
+      widthFt: 8,
+      lengthFt: 40,
+      blockRowsHint: 2,
+    });
+    const layout = computeLayout(design, { now: () => design.createdAt });
+    const table = new IrcSpanTable();
+    const warnings = spanCheck(layout, table);
+    const jw = warnings.find((w) => w.kind === 'over-span-joist');
+    expect(jw).toBeDefined();
+    if (!jw) return;
+    expect(jw.tableReference).toMatch(/R507\.6/);
+    expect(jw.tableReference).toContain('2x8');
+  });
+
+  it('SPY: table.lookupJoistMaxSpan IS called for a Method-B design (proves the code path activates)', () => {
+    // Pre-fix code path: joistSpanMm=null → the joist-check block
+    // was skipped entirely → lookupJoistMaxSpan NEVER called.
+    // Post-fix: called once per joist (per-joist span derived
+    // from blocks).
+    const design = makeFloatingB({
+      widthFt: 4,
+      lengthFt: 4,
+    });
+    const layout = computeLayout(design, { now: () => design.createdAt });
+    const table = new IrcSpanTable();
+
+    let joistLookupCallCount = 0;
+    const spy: SpanTable = {
+      edition: 'SPY',
+      lookupJoistMaxSpan: (mat, sp) => {
+        joistLookupCallCount++;
+        return table.lookupJoistMaxSpan(mat, sp);
+      },
+      lookupBeamMaxSpan: (mat, tributary, ply) =>
+        table.lookupBeamMaxSpan(mat, tributary, ply),
+      citationFor: (kind, mat, sp) => table.citationFor(kind, mat, sp),
+    };
+    spanCheck(layout, spy);
+    expect(joistLookupCallCount).toBeGreaterThan(0);
   });
 });

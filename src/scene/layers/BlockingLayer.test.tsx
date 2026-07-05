@@ -1,109 +1,38 @@
 /**
  * Unit tests for `src/scene/layers/BlockingLayer.tsx` — the S22
- * blocking-mesh layer (Epic 2 / FR-029).
+ * blocking-mesh layer, made DORMANT in S26 FIX #6 (review-gate).
  *
- * ## Why this file is short
+ * ## What this file used to cover
  *
- * `BlockingLayer` is a `KindLayer` delegator (same three-line body
- * as `JoistsLayer` / `BeamsLayer` — see those files for the
- * rationale). It renders lumber-material `blocking`-kind members
- * as `BoxMember` boxes: same primitive, same material picker
- * (`materialForMember` accepts lumber), just a different `kind`.
+ * Pre-FIX #6 this file registered the shared `layer-suite`
+ * (`registerLayerSuite` with `visibilityKey: 'blocking'`) plus a
+ * blocking-specific "lumber-material rendering" case. Both hinged
+ * on `BlockingLayer` being a `KindLayer` delegate reading
+ * `layerVisibility.blocking`.
  *
- * The shared `layer-suite.tsx` factory (AC1 / AC2 / AC3 / AC6 /
- * QA-G6) applies unchanged — the assertions are identical to every
- * other kind-scoped layer. We register it here and add ONE
- * blocking-specific test at the end: the members explicitly use
- * `LumberMemberMaterial` (not block material), so `materialForMember`
- * does NOT throw when the layer renders them.
+ * ## What it covers now
+ *
+ * S26 FIX #6 removed the `blocking` key from `LayerVisibility` (no
+ * layout produces `blocking` members, so the toggle was misleading).
+ * `BlockingLayer` is now a dormant `() => null` — kept in the tree
+ * so a future "blocking between joists" feature can cheaply re-add
+ * it. This test pins that behavior: the component MUST render
+ * nothing so a stray reintroduction to `DeckLayers.tsx` cannot
+ * silently emit anything visible or claim scene-graph slots.
  */
-import { describe, expect, it, beforeEach } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import ReactThreeTestRenderer from '@react-three/test-renderer';
-import { Mesh, MeshStandardMaterial } from 'three';
-
-import { useDesignStore, useUiStore } from '../../state';
-import { resetDesignStoreForTests } from '../../state/design-store';
 
 import { BlockingLayer } from './BlockingLayer';
-import { registerLayerSuite } from './__testing__/layer-suite';
-import {
-  FIXTURE_MATERIAL_PT,
-  makeLayout,
-  makeMember,
-} from './__testing__/fixtures';
 
-registerLayerSuite({
-  Layer: BlockingLayer,
-  kind: 'blocking',
-  visibilityKey: 'blocking',
-  displayName: 'BlockingLayer',
-});
-
-// ---------------------------------------------------------------------------
-// Blocking-specific: lumber material path (no throw from materialForMember)
-// ---------------------------------------------------------------------------
-
-function resetLayerVisibility(): void {
-  useUiStore.setState({
-    layerVisibility: {
-      environment: true,
-      decking: true,
-      joists: true,
-      beams: true,
-      posts: true,
-      footings: true,
-      blocks: true,
-      blocking: true,
-    },
-  });
-}
-
-describe('<BlockingLayer /> — lumber-material rendering (matches beams/joists)', () => {
-  beforeEach(() => {
-    resetLayerVisibility();
-    resetDesignStoreForTests();
-  });
-
-  it('each mesh binds a MeshStandardMaterial from the lumber palette', async () => {
-    // Blocking members carry `material.kind === 'lumber'` (matches
-    // the joist SKU — same species so they nest inside the same
-    // material shared-cache). If the layer accidentally routed
-    // through the block picker, `materialForMember` would throw
-    // and the test would fail — this documents the wiring.
-    const members = [
-      makeMember({
-        id: 'blocking-0',
-        kind: 'blocking',
-        material: FIXTURE_MATERIAL_PT,
-        position: { x: 0, y: 200, z: 0 },
-        size: { x: 300, y: 200, z: 38 },
-      }),
-      makeMember({
-        id: 'blocking-1',
-        kind: 'blocking',
-        material: FIXTURE_MATERIAL_PT,
-        position: { x: 0, y: 200, z: 500 },
-        size: { x: 300, y: 200, z: 38 },
-      }),
-    ];
-    const cur = useDesignStore.getState().bundle;
-    useDesignStore.setState({ bundle: { ...cur, layout: makeLayout(members) } });
-
+describe('<BlockingLayer /> — S26 FIX #6 dormant (returns null)', () => {
+  it('renders no scene-graph nodes (dormant — kept for future re-attachment)', async () => {
     const renderer = await ReactThreeTestRenderer.create(<BlockingLayer />);
-    const meshes = renderer.scene.findAllByType('Mesh').map((n) => n.instance as Mesh);
-    expect(meshes).toHaveLength(2);
-    for (const m of meshes) {
-      const mat = Array.isArray(m.material) ? m.material[0] : m.material;
-      expect(mat).toBeInstanceOf(MeshStandardMaterial);
-    }
-    // The two blocking meshes share the SAME PT species material —
-    // referential-equality on the material pointer. Same discipline
-    // as JoistsLayer.
-    const [a, b] = meshes;
-    const matA = Array.isArray(a!.material) ? a!.material[0] : a!.material;
-    const matB = Array.isArray(b!.material) ? b!.material[0] : b!.material;
-    expect(matA).toBe(matB);
-
+    // The r3f test-renderer's scene root has children only when
+    // the component emits something. A dormant `() => null`
+    // produces an empty scene subtree.
+    expect(renderer.scene.findAllByType('Mesh')).toHaveLength(0);
+    expect(renderer.scene.findAllByType('Group')).toHaveLength(0);
     await renderer.unmount();
   });
 });

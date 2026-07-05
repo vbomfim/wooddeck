@@ -71,7 +71,6 @@ export const DECK_LAYER_ORDER = Object.freeze([
   'blocks',
   'posts',
   'beams',
-  'blocking',
   'joists',
   'decking',
 ] as const satisfies readonly (keyof LayerVisibility)[]);

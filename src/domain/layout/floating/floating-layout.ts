@@ -76,7 +76,12 @@ import type { DeckDesign, Layout, LayoutMember } from '../../model';
 import { lookupFoundationProduct } from '../../foundation-catalog';
 import type { SpanTable } from '../../spans/span-table';
 import { MM_PER_FOOT, type Mm } from '../../units';
-import { LayoutError, MIN_DECK_DIMENSION_MM } from '../layout-shared';
+import { assertNever } from '../../assert-never';
+import {
+  LayoutError,
+  MIN_DECK_DIMENSION_MM,
+  validateJoistSpacing,
+} from '../layout-shared';
 import { FOOTING_WIDTH_MM } from '../y-stack';
 
 import { computeBlockGrid } from './block-grid';
@@ -178,10 +183,26 @@ export function computeFloatingLayout(
       );
     }
 
-    const members: LayoutMember[] =
-      design.floatingFraming === 'beams-and-joists'
-        ? computeMethodA(design)
-        : computeMethodB(design);
+    // Exhaustive switch on `design.floatingFraming` — TypeScript's
+    // control-flow narrowing proves the `default:` branch is
+    // unreachable at compile time (via `assertNever(x: never)`);
+    // it also fails LOUD at runtime if the union ever widens via
+    // a bad `as` cast or corrupt persisted data. S26 FIX #7
+    // (review-gate: Security#2) — replaces a two-branch ternary.
+    let members: LayoutMember[];
+    switch (design.floatingFraming) {
+      case 'beams-and-joists':
+        members = computeMethodA(design);
+        break;
+      case 'joists-on-blocks':
+        members = computeMethodB(design);
+        break;
+      default:
+        assertNever(
+          design.floatingFraming,
+          'computeFloatingLayout: design.floatingFraming',
+        );
+    }
 
     return {
       designId: design.id,
@@ -393,6 +414,17 @@ function validateFloatingDesign(design: DeckDesign): void {
         `outside the MVP layout engine's supported range.`,
     );
   }
+
+  // FIX #2 (S26 review-gate) — joist-spacing DoS + overlap guard.
+  // Shared with the elevated orchestrator via `validateJoistSpacing`
+  // in `layout-shared.ts`. MUST run BEFORE any joist-layout call
+  // (both Method A and Method B feed spacingMm into
+  // `computeJoistXCenters` → `Math.ceil(x / spacingMm)`; a zero /
+  // NaN / negative value there hangs the anchor loop). Pre-S26 the
+  // floating pipeline skipped this guard because it did not use
+  // `computeJoistXCenters` — S26 makes both methods share the
+  // joist layer, so the guard must apply to both.
+  validateJoistSpacing(design);
 
   let minHeightMm: Mm;
   try {

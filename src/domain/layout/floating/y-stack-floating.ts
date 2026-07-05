@@ -71,6 +71,7 @@ import { lookupFoundationProduct } from '../../foundation-catalog';
 import { lookupMaterial } from '../../materials-catalog';
 import type { DeckDesign } from '../../model';
 import type { Mm } from '../../units';
+import { assertNever } from '../../assert-never';
 
 /**
  * The y-anchor bundle for a floating layout. Every field is a
@@ -195,13 +196,28 @@ export function computeYStackFloating(design: DeckDesign): FloatingYStack {
     design.decking.material.grade,
   );
 
-  // Method A includes a beam layer between blocks and joists.
-  // Method B skips the beam layer — `beamDepthMm = 0` collapses
-  // the stack.
-  const beamDepthMm =
-    design.floatingFraming === 'beams-and-joists'
-      ? beam.actual.heightMm
-      : 0;
+  // Exhaustive switch on `design.floatingFraming` — Method A
+  // includes a beam layer between blocks and joists; Method B
+  // skips the beam layer (`beamDepthMm = 0` collapses the stack).
+  // TypeScript's control-flow narrowing proves the `default:`
+  // branch is unreachable at compile time (via `assertNever`);
+  // it also fails LOUD at runtime if the union widens via a bad
+  // cast or corrupt persisted data. S26 FIX #7 (Security#2) —
+  // replaces a two-branch ternary.
+  let beamDepthMm: Mm;
+  switch (design.floatingFraming) {
+    case 'beams-and-joists':
+      beamDepthMm = beam.actual.heightMm;
+      break;
+    case 'joists-on-blocks':
+      beamDepthMm = 0;
+      break;
+    default:
+      assertNever(
+        design.floatingFraming,
+        'computeMinFloatingHeightMm: design.floatingFraming',
+      );
+  }
   const joistDepthMm = joist.actual.heightMm;
   const deckingThicknessMm = decking.actual.widthMm;
 

@@ -11,28 +11,36 @@
 import type { CameraPreset, LayerVisibility } from '../state';
 
 /**
- * The eight MVP layer keys with wired UI toggles — plus their
+ * The seven MVP layer keys with wired UI toggles — plus their
  * user-facing labels. Order matches the ticket §2 field listing
- * (environment → decking → framing → footings → blocks → blocking).
+ * (environment → decking → framing → footings → blocks).
  * Extracted as a module constant so tests can walk the list without
  * duplicating the copy.
  *
- * ## S26 addition — blocks + blocking rows (issue #48)
+ * ## S26 addition — blocks row (issue #48)
  *
- * S22 (Epic 2 / FR-029) added `blocks` and `blocking` to the
- * `LayerVisibility` union and wired their VISIBILITY at the scene
- * layer. S26 (this file) adds the matching CHECKBOX rows here —
- * the panel iterates `LAYER_ITEMS` to render one row per key, so
- * the two additions light up automatically. Placement is after
+ * S22 (Epic 2 / FR-029) added `blocks` to the `LayerVisibility`
+ * union and wired VISIBILITY at the scene layer. S26 (this file)
+ * adds the matching CHECKBOX row here — the panel iterates
+ * `LAYER_ITEMS` to render one row per key. Placement is after
  * `footings` per ticket §2 (foundation-layer members grouped
  * together at the bottom of the toggle list).
+ *
+ * ## S26 FIX #6 (review-gate) — `blocking` row REMOVED
+ *
+ * The S26 review found the "Blocking" checkbox toggled an
+ * always-empty layer (the new floating layout emits no `blocking`
+ * members and no other layout produces them). Removing the row
+ * here — and the key from `LayerVisibility` — eliminates the dead
+ * UI. See `state/ui-store.ts` `LayerVisibility` doc-block for the
+ * re-add path.
  *
  * ## Type shape — `as const satisfies` (S26 pair-fix Review #1)
  *
  * Declared with `as const satisfies …` (NOT a widening `: readonly
  * { key: keyof LayerVisibility; label: string }[]` annotation) so
  * each element's `key` stays a LITERAL string type
- * (`'environment' | 'decking' | … | 'blocking'`) rather than being
+ * (`'environment' | 'decking' | … | 'blocks'`) rather than being
  * widened to `keyof LayerVisibility`. The literal-preserving form
  * is what makes the `_ITEMS_ARE_EXHAUSTIVE` compile-time guard
  * below meaningful — without it,
@@ -51,7 +59,6 @@ export const LAYER_ITEMS = [
   { key: 'posts', label: 'Posts' },
   { key: 'footings', label: 'Footings' },
   { key: 'blocks', label: 'Blocks' },
-  { key: 'blocking', label: 'Blocking' },
 ] as const satisfies readonly { key: keyof LayerVisibility; label: string }[];
 
 /**

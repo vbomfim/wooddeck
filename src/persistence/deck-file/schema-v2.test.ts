@@ -43,6 +43,7 @@ import { deserialize, serialize } from './schema-v2';
 import type { DeckFileV2 } from './envelope-types';
 import { DeckFileError } from './errors';
 import { GOLDEN_DECK_DESIGN, deckDesignArb } from './__fixtures__/deck-designs';
+import { computeLayout } from '../../domain/layout/layout-engine';
 
 // ---------------------------------------------------------------------------
 // AC1 — honest round-trip contract (golden fixture + property test)
@@ -738,5 +739,113 @@ describe('deserialize — S25 blockRowsHint schema tightening', () => {
     const json = serialize(withColsHint, HINT_OPTS);
     const { design } = deserialize(json);
     expect(design.foundation).toEqual(withColsHint.foundation);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S26 FIX #3 (review-gate, DATA-LOSS) — pre-S26 floating decks load
+// ---------------------------------------------------------------------------
+//
+// Regression target: pre-fix, `withFloatingFramingDefault` stamped
+// `'beams-and-joists'` unconditionally when the v2 payload omitted
+// `floatingFraming`. Method A's stack is TALLER than Method B's
+// (adds a beam layer), so a pre-S26 floating design with
+// `heightMm ∈ [209, 393) mm` — the range that was VALID pre-S26
+// (Method B min = 209 mm) but became INVALID for Method A
+// (min = 393 mm) — throws `LayoutError` on the first `computeLayout`
+// call after load. The user's saved `.deck` / localStorage design
+// silently breaks with no way to open it.
+//
+// Fix: when the payload lacks `floatingFraming`, choose Method B
+// (`'joists-on-blocks'`) IFF `heightMm` is below the Method-A min
+// AND ≥ the Method-B min. Otherwise choose Method A (the default).
+// This keeps every pre-S26 file loadable with a sensible geometry
+// and NEVER silently bumps the user's `heightMm`.
+
+describe('deserialize — S26 FIX #3: pre-S26 floating decks default to Method B when heightMm is short', () => {
+  const OPTS = {
+    createdAt: '2026-07-04T00:00:00.000Z',
+    generatorVersion: '1.0.0',
+  } as const;
+
+  function makeV2EnvelopeMissingFraming(
+    designPatch: Record<string, unknown>,
+  ): string {
+    // Build a valid v2 envelope from GOLDEN_DECK_DESIGN, then strip
+    // `floatingFraming` from the design payload (the field is
+    // OPTIONAL in the v2 schema exactly so this is a legal payload).
+    const s = serialize(GOLDEN_DECK_DESIGN, OPTS);
+    const parsed = JSON.parse(s) as DeckFileV2;
+    const rawDesign = { ...parsed.design, ...designPatch } as Record<string, unknown>;
+    delete rawDesign['floatingFraming'];
+    const patchedEnv = { ...parsed, design: rawDesign };
+    return JSON.stringify(patchedEnv);
+  }
+
+  it('pre-S26 floating design at heightMm=209 loads with floatingFraming="joists-on-blocks" (Method B — the low-profile pre-S26 min)', () => {
+    // 209 mm = joistDepth (2×8 = 184) + deckingThickness (5/4×6 = 25).
+    // This was a legal pre-S26 floating min height (there were no
+    // joists in the stack). Method A min = 393; Method B min = 209.
+    const rogue = makeV2EnvelopeMissingFraming({
+      structure: 'floating',
+      foundation: {
+        type: 'tuffblocks',
+        product: { productId: 'tuffblock-12x12x4' },
+      },
+      footprint: {
+        widthMm: 4 * 304.8,
+        lengthMm: 4 * 304.8,
+        heightMm: 209,
+      },
+    });
+    const { design } = deserialize(rogue);
+    expect(design.floatingFraming).toBe('joists-on-blocks');
+    // And crucially: the loaded design MUST NOT throw on
+    // computeLayout — the data-loss claim was "silently unopenable."
+    expect(() =>
+      computeLayout(design, { now: () => '2026-07-04T00:00:00.000Z' }),
+    ).not.toThrow();
+  });
+
+  it('pre-S26 floating design at heightMm=500 (comfortably clearing Method A) defaults to Method A', () => {
+    // At a comfortable heightMm, the default remains Method A —
+    // ONLY the low-profile pre-S26 files get auto-selected Method B.
+    const rogue = makeV2EnvelopeMissingFraming({
+      structure: 'floating',
+      foundation: {
+        type: 'tuffblocks',
+        product: { productId: 'tuffblock-12x12x4' },
+      },
+      footprint: {
+        widthMm: 4 * 304.8,
+        lengthMm: 4 * 304.8,
+        heightMm: 500,
+      },
+    });
+    const { design } = deserialize(rogue);
+    expect(design.floatingFraming).toBe('beams-and-joists');
+  });
+
+  it('pre-S26 ELEVATED design defaults to Method A (floatingFraming is IGNORED for elevated but must be stamped for type-safety)', () => {
+    // Elevated designs read no `floatingFraming`; the default stamp
+    // should still be a valid enum value. Method A is the canonical
+    // default per model.ts doc-block.
+    const rogue = makeV2EnvelopeMissingFraming({}); // elevated is GOLDEN default
+    const { design } = deserialize(rogue);
+    expect(design.structure).toBe('elevated');
+    expect(design.floatingFraming).toBe('beams-and-joists');
+  });
+
+  it('an INVALID floatingFraming enum value is REJECTED by Ajv (Security-INFO#1 / QA-GAP-1 defensive gate)', () => {
+    const rogue = makeV2EnvelopeMissingFraming({});
+    // Re-inject a bogus value.
+    const parsed = JSON.parse(rogue) as DeckFileV2;
+    const patched = {
+      ...parsed,
+      design: { ...parsed.design, floatingFraming: 'bogus-value' },
+    };
+    expect(() => deserialize(JSON.stringify(patched))).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
   });
 });

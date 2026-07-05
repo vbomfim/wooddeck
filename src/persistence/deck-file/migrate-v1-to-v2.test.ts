@@ -312,3 +312,25 @@ describe('deserialize — FIX 5f hostile __proto__ splice in v1 payload', () => 
     expect((Object.prototype as { polluted?: unknown }).polluted).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// S26 FIX #3 (review-gate, DATA-LOSS) — v1 → v2 defaulting is safe
+// ---------------------------------------------------------------------------
+//
+// A v1 envelope has no `structure` field (v1 is elevated-only by
+// definition). The migration stamps `structure: 'elevated'` and
+// `floatingFraming: 'beams-and-joists'`. Both are IGNORED at layout
+// time for elevated designs, so this pathway is safe by
+// construction — the fix's data-loss concern is v2 files that
+// PREDATE S26 (see `schema-v2.test.ts`). This test PINS the
+// migration default so a future ticket touching the migration
+// doesn't accidentally stamp Method B on a migrated v1 design.
+
+describe('migrateV1ToV2 — S26 FIX #3: default floatingFraming stamped consistently', () => {
+  for (const fixture of V1_FIXTURES) {
+    it(`(${fixture.label}) migrated design has floatingFraming='beams-and-joists' (default)`, () => {
+      const v2 = migrateV1ToV2(fixture.v1Envelope);
+      expect(v2.design.floatingFraming).toBe('beams-and-joists');
+    });
+  }
+});

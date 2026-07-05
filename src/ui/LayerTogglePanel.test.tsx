@@ -58,7 +58,6 @@ beforeEach(() => {
         posts: true,
         footings: true,
         blocks: true,
-        blocking: true,
       },
     });
   });
@@ -94,7 +93,6 @@ describe('<LayerTogglePanel /> — heading + checkboxes (AC1)', () => {
           posts: true,
           footings: true,
           blocks: true,
-          blocking: true,
         },
       });
     });
@@ -211,12 +209,13 @@ describe('<LayerTogglePanel /> — camera presets (AC4)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// S26 issue #48 — Blocks + Blocking toggle rows
+// S26 issue #48 — Blocks toggle row
+// (`blocking` row removed in S26 FIX #6 — see LayerVisibility doc)
 // ---------------------------------------------------------------------------
 
-describe('<LayerTogglePanel /> — S26 blocks + blocking toggles (AC1 rendering)', () => {
-  it('LAYER_ITEMS contains exactly EIGHT rows (six original + blocks + blocking)', () => {
-    expect(LAYER_ITEMS).toHaveLength(8);
+describe('<LayerTogglePanel /> — S26 blocks toggle (AC1 rendering)', () => {
+  it('LAYER_ITEMS contains exactly SEVEN rows (six original + blocks; S26 FIX #6 removed blocking)', () => {
+    expect(LAYER_ITEMS).toHaveLength(7);
   });
 
   it('renders a "Blocks" checkbox (AC1)', () => {
@@ -224,20 +223,21 @@ describe('<LayerTogglePanel /> — S26 blocks + blocking toggles (AC1 rendering)
     expect(screen.getByRole('checkbox', { name: 'Blocks' })).toBeInTheDocument();
   });
 
-  it('renders a "Blocking" checkbox (AC1)', () => {
+  it('does NOT render a "Blocking" checkbox — dead toggle removed in S26 FIX #6', () => {
     render(<LayerTogglePanel />);
-    expect(screen.getByRole('checkbox', { name: 'Blocking' })).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'Blocking' })).toBeNull();
   });
 
-  it('renders a total of eight checkboxes in the panel (AC1)', () => {
+  it('renders a total of seven checkboxes in the panel (AC1)', () => {
     render(<LayerTogglePanel />);
-    expect(screen.getAllByRole('checkbox')).toHaveLength(8);
+    expect(screen.getAllByRole('checkbox')).toHaveLength(7);
   });
 
-  it('places blocks/blocking right after footings, in ticket-§2 order (AC1)', () => {
+  it('places blocks right after footings, in ticket-§2 order (AC1)', () => {
     // The panel iterates LAYER_ITEMS to render rows — the array
-    // order IS the visual order. Ticket §2: environment → decking
-    // → joists → beams → posts → footings → blocks → blocking.
+    // order IS the visual order. Ticket §2 order (post-S26 FIX #6):
+    // environment → decking → joists → beams → posts → footings →
+    // blocks.
     const orderedKeys = LAYER_ITEMS.map((item) => item.key);
     expect(orderedKeys).toEqual([
       'environment',
@@ -247,12 +247,11 @@ describe('<LayerTogglePanel /> — S26 blocks + blocking toggles (AC1 rendering)
       'posts',
       'footings',
       'blocks',
-      'blocking',
     ]);
   });
 });
 
-describe('<LayerTogglePanel /> — S26 blocks + blocking toggles (AC2 dispatch)', () => {
+describe('<LayerTogglePanel /> — S26 blocks toggle (AC2 dispatch)', () => {
   it('clicking "Blocks" flips ONLY layerVisibility.blocks (true→false, AC2)', async () => {
     const user = userEvent.setup();
     render(<LayerTogglePanel />);
@@ -264,27 +263,9 @@ describe('<LayerTogglePanel /> — S26 blocks + blocking toggles (AC2 dispatch)'
 
     const after = useUiStore.getState().layerVisibility;
     expect(after.blocks).toBe(false);
-    // Every other slice, including `blocking`, is untouched.
+    // Every other slice is untouched.
     for (const key of Object.keys(before) as (keyof LayerVisibility)[]) {
       if (key === 'blocks') continue;
-      expect(after[key]).toBe(before[key]);
-    }
-  });
-
-  it('clicking "Blocking" flips ONLY layerVisibility.blocking (true→false, AC2)', async () => {
-    const user = userEvent.setup();
-    render(<LayerTogglePanel />);
-
-    const before = { ...useUiStore.getState().layerVisibility };
-    expect(before.blocking).toBe(true);
-
-    await user.click(screen.getByRole('checkbox', { name: 'Blocking' }));
-
-    const after = useUiStore.getState().layerVisibility;
-    expect(after.blocking).toBe(false);
-    // Every other slice, including `blocks`, is untouched.
-    for (const key of Object.keys(before) as (keyof LayerVisibility)[]) {
-      if (key === 'blocking') continue;
       expect(after[key]).toBe(before[key]);
     }
   });
@@ -333,19 +314,8 @@ describe('<LayerTogglePanel /> — S26 blocks + blocking toggles (AC3 undo neutr
     expect(historyAfter).toBe(historyBefore);
   });
 
-  it('toggling "Blocking" does NOT push a new entry onto design-store zundo history (AC3)', async () => {
-    const user = userEvent.setup();
-    resetDesignStoreForTests();
-    const historyBefore =
-      useDesignStore.temporal.getState().pastStates.length;
-
-    render(<LayerTogglePanel />);
-    await user.click(screen.getByRole('checkbox', { name: 'Blocking' }));
-
-    const historyAfter =
-      useDesignStore.temporal.getState().pastStates.length;
-    expect(historyAfter).toBe(historyBefore);
-  });
+  // S26 FIX #6 — "Blocking" undo-neutrality test removed with the
+  // row (see LayerVisibility doc).
 });
 
 describe('<LayerTogglePanel /> — S26 blocks + blocking toggles (AC4 keyboard)', () => {
@@ -361,32 +331,25 @@ describe('<LayerTogglePanel /> — S26 blocks + blocking toggles (AC4 keyboard)'
     expect(useUiStore.getState().layerVisibility.blocks).toBe(false);
   });
 
-  it('Space on a focused "Blocking" checkbox toggles the slice (AC4)', async () => {
-    const user = userEvent.setup();
-    render(<LayerTogglePanel />);
-
-    const box = screen.getByRole('checkbox', { name: 'Blocking' });
-    box.focus();
-    expect(box).toHaveFocus();
-
-    await user.keyboard(' ');
-    expect(useUiStore.getState().layerVisibility.blocking).toBe(false);
-  });
+  // S26 FIX #6 (review-gate) — "Blocking" keyboard test removed
+  // (the row was deleted from LAYER_ITEMS and the key from
+  // LayerVisibility; the row no longer renders).
 });
 
-describe('<LayerTogglePanel /> — S26 blocks + blocking toggles (AC8 empty layers)', () => {
-  it('renders "Blocks" and "Blocking" even for a default design with zero blocks in its layout (AC8)', () => {
+describe('<LayerTogglePanel /> — S26 blocks toggle (AC8 empty layers)', () => {
+  it('renders "Blocks" even for a default design with zero blocks in its layout (AC8)', () => {
     // Reset the design store to its default bundle. The MVP default
     // is a floating (post-on-footing) deck — layout has zero
-    // `blocks`/`blocking` members. The toggle rows MUST still
-    // render (UI stays consistent regardless of design mode).
+    // `blocks` members. The toggle row MUST still render (UI stays
+    // consistent regardless of design mode).
     act(() => {
       resetDesignStoreForTests();
     });
 
     render(<LayerTogglePanel />);
     expect(screen.getByRole('checkbox', { name: 'Blocks' })).toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: 'Blocking' })).toBeInTheDocument();
+    // S26 FIX #6 — "Blocking" checkbox was removed.
+    expect(screen.queryByRole('checkbox', { name: 'Blocking' })).toBeNull();
   });
 });
 

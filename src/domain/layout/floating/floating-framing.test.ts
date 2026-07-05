@@ -33,6 +33,7 @@ import { describe, expect, it } from 'vitest';
 import type { DeckDesign, FoundationSpec, MaterialRef } from '../../model';
 import { MM_PER_FOOT, type Mm } from '../../units';
 import { computeLayout } from '../layout-engine';
+import { LayoutError } from '../layout-shared';
 
 import { computeFloatingLayout } from './floating-layout';
 
@@ -348,6 +349,96 @@ describe('Determinism — floating layout is a pure function of (design, now)', 
       const a = computeFloatingLayout(design, { now });
       const b = computeFloatingLayout(design, { now });
       expect(a).toEqual(b);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX #2 — Floating joist-spacing validation (safety-critical)
+// ---------------------------------------------------------------------------
+//
+// Regression target: pre-fix the floating orchestrator did NOT
+// validate `design.joist.spacingMm`. Because floating joists now
+// reuse `computeJoistXCenters`, `spacingMm = 0` produced
+// `bayCount = ceil(x/0) = Infinity` → the anchor loop never
+// terminated (DoS). `spacingMm < joistThicknessMm` produced
+// OVERLAPPING joists. Elevated already rejects both cases in
+// `validateDesign`; floating must apply the SAME guard.
+//
+// Both methods (A + B) must reject — the joist layer is shared.
+
+describe('FIX #2 — floating joist-spacing validation (safety guard)', () => {
+  for (const framing of [
+    'beams-and-joists',
+    'joists-on-blocks',
+  ] as const) {
+    describe(`Method ${framing === 'beams-and-joists' ? 'A' : 'B'} (${framing})`, () => {
+      it('REJECTS spacingMm = 0 with a typed LayoutError (does not hang)', () => {
+        const design = makeFloatingDesign({
+          floatingFraming: framing,
+          spacingMm: 0,
+        });
+        expect(() => computeFloatingLayout(design)).toThrowError(LayoutError);
+      });
+
+      it('REJECTS non-finite spacingMm (NaN / Infinity)', () => {
+        for (const bad of [Number.NaN, Number.POSITIVE_INFINITY]) {
+          const design = makeFloatingDesign({
+            floatingFraming: framing,
+            spacingMm: bad,
+          });
+          expect(() => computeFloatingLayout(design)).toThrowError(LayoutError);
+        }
+      });
+
+      it('REJECTS spacingMm below joist thickness (would overlap joists)', () => {
+        // 2×8 dressed widthMm = 38 → spacing < 38 must be rejected.
+        const design = makeFloatingDesign({
+          floatingFraming: framing,
+          spacingMm: 30,
+        });
+        expect(() => computeFloatingLayout(design)).toThrowError(LayoutError);
+      });
+
+      it('ACCEPTS typical spacings (305, 406, 610 mm) unchanged', () => {
+        for (const good of [305, 406, 610]) {
+          const design = makeFloatingDesign({
+            floatingFraming: framing,
+            spacingMm: good,
+          });
+          expect(() => computeFloatingLayout(design)).not.toThrow();
+        }
+      });
+    });
+  }
+
+  it('elevated path STILL rejects the same spacing cases (guard is shared, no elevated behavior change)', () => {
+    const base: DeckDesign = {
+      id: '22222222-2222-4222-8222-000000000002',
+      createdAt: '2026-07-04T00:00:00.000Z',
+      footprint: {
+        widthMm: 12 * MM_PER_FOOT,
+        lengthMm: 12 * MM_PER_FOOT,
+        heightMm: 3 * MM_PER_FOOT,
+      },
+      structure: 'elevated',
+      foundation: {
+        type: 'posts-on-footings',
+        post: { nominal: '6x6', species: 'PT', grade: 'No2' },
+        footing: { widthMm: 300, depthMm: 300 },
+      },
+      joist: { material: PT_2X8, spacingMm: 406 },
+      beam: { material: PT_2X8 },
+      decking: { material: PT_54, orientation: 'parallel-to-width' },
+      layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+      floatingFraming: 'beams-and-joists',
+    };
+    for (const bad of [0, Number.NaN, 30]) {
+      const design: DeckDesign = {
+        ...base,
+        joist: { ...base.joist, spacingMm: bad },
+      };
+      expect(() => computeLayout(design, { now: () => base.createdAt })).toThrowError(LayoutError);
     }
   });
 });

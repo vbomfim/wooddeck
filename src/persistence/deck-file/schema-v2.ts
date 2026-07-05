@@ -57,6 +57,7 @@
  *     `RegExp`, or the DOM.
  */
 import type { DeckDesign } from '../../domain/model';
+import { computeMinFloatingHeightMm } from '../../domain/layout';
 
 import { DeckFileError } from './errors';
 import type {
@@ -257,7 +258,17 @@ export function deserialize(json: string): DeserializeResult {
         generatorVersion: v1Envelope.generatorVersion,
         createdAt: v1Envelope.createdAt,
       };
-      return { design: validated.design, meta, migrated: true };
+      // S26 FIX #3 (review-gate, data-loss) — the migration ALREADY
+      // stamps `floatingFraming: 'beams-and-joists'` (elevated designs
+      // ignore the field), but route through the shared helper too so
+      // the invariant "every load path finalizes the same way" cannot
+      // drift on a future rewrite. Idempotent on already-stamped
+      // designs.
+      return {
+        design: finalizeFloatingFraming(validated.design),
+        meta,
+        migrated: true,
+      };
     }
     case 2: {
       // Native v2 envelope: validate → return.
@@ -271,12 +282,15 @@ export function deserialize(json: string): DeserializeResult {
       return {
         // S26 (fix/floating-framing-joists) — the schema makes
         // `design.floatingFraming` OPTIONAL so pre-S26 v2 files
-        // continue to load; the loader stamps the default here so
-        // downstream consumers see a fully-populated required
-        // field. Round-tripping a v2 file that OMITTED the field
-        // will now serialize it — that's an INTENTIONAL upgrade,
-        // not a compat break (the on-disk value is byte-additive).
-        design: withFloatingFramingDefault(envelope.design),
+        // continue to load; `finalizeFloatingFraming` stamps a
+        // safe default (Method B for pre-S26 low-profile floating
+        // decks; Method A otherwise) so downstream consumers see a
+        // fully-populated required field AND the loaded design is
+        // computeLayout-valid. Round-tripping a v2 file that OMITTED
+        // the field will now serialize it — that's an INTENTIONAL
+        // upgrade, not a compat break (the on-disk value is
+        // byte-additive).
+        design: finalizeFloatingFraming(envelope.design),
         meta,
         migrated: false,
       };
@@ -333,41 +347,102 @@ function knownSchemasList(): string {
 }
 
 /**
- * S26 (fix/floating-framing-joists) — coerce a validated v2 design
- * to guarantee `floatingFraming` is present. The v2 schema declares
- * the field OPTIONAL so a pre-S26 v2 file remains load-compatible,
- * but the domain `DeckDesign` type requires it — this helper is the
- * seam that reconciles the two.
+ * S26 FIX #3 (review-gate, DATA-LOSS) — finalize `floatingFraming`
+ * for a validated design regardless of load path.
  *
- * Missing → `'beams-and-joists'` (the Method-A default; see
- * `DeckDesign.floatingFraming` doc in `src/domain/model.ts`).
+ * ## Why "finalize" and not "default"
  *
- * Present → returned unchanged (Ajv already validated the enum).
+ * The v2 schema makes `floatingFraming` OPTIONAL so pre-S26 v2 files
+ * remain load-compatible, but the domain `DeckDesign` type REQUIRES
+ * the field — this helper is the seam that reconciles the two. It
+ * runs on EVERY loaded design (both the v1-migrate path and the
+ * native-v2 path route through it) so the invariant "every loaded
+ * design has a stamped `floatingFraming`" cannot drift on a future
+ * rewrite that touches only one path (Security-INFO#1 / QA-GAP-1).
  *
- * The helper is a NARROW function on purpose: it does not mutate
- * the input, and it does not attempt to fix other missing fields
- * — the schema `required` list is the authoritative shape check,
- * and we only exempt the one field we deliberately made optional
- * for backward compat.
+ * ## The height-aware default (the data-loss fix)
+ *
+ * Pre-S26 the floating layout had NO joist layer; the y-stack was
+ * `beam + decking` — Method B's stack (`joist + decking`) is
+ * strictly the same height (a floating "beam" pre-S26 was 2×N on-
+ * edge; a joist post-S26 is the same 2×N on-edge). Method A adds a
+ * SECOND lumber layer (a rim beam under the joists), which strictly
+ * raises the min height. Consequence:
+ *
+ *   - A pre-S26 floating design at `heightMm = 209 mm` (2×8/2×8/5-
+ *     4×6 min pre-S26) is LEGAL under Method B (min = 209 mm) but
+ *     REJECTED by Method A's `computeMinFloatingHeightMm` (min =
+ *     393 mm) → `computeLayout` throws → the user's saved `.deck`
+ *     is unopenable.
+ *
+ * The fix: when `floatingFraming` is missing AND the design is
+ * floating AND `heightMm` is below Method A's min but ≥ Method B's
+ * min, stamp Method B (`joists-on-blocks`) — the pre-S26 geometry
+ * IS Method B in every way except the missing field. When the
+ * heightMm comfortably clears Method A, stamp the canonical default
+ * (`beams-and-joists`, Method A). NEVER silently bump the user's
+ * `heightMm`.
+ *
+ * ## Behavior matrix
+ *
+ *   | present, valid | absent, elevated | absent, floating H≥A-min | absent, floating H<A-min | absent, floating H<B-min |
+ *   |----------------|------------------|--------------------------|--------------------------|--------------------------|
+ *   | pass-through   | Method A default | Method A default         | Method B (pre-S26 fix)   | Method A default (*)     |
+ *
+ *   (*) Below Method-B min: the design is too short for ANY method;
+ *   let `computeLayout` throw the specific LayoutError. Stamping
+ *   Method A here is the least surprising — the user sees the same
+ *   error they would have seen without the shim.
  */
-function withFloatingFramingDefault(design: DeckDesign): DeckDesign {
+function finalizeFloatingFraming(design: DeckDesign): DeckDesign {
   // `design` is typed as `DeckDesign` (required field) but Ajv
   // validated the payload against a schema that treats
   // `floatingFraming` as optional — the field may in fact be
-  // missing at runtime. The runtime check below is intentionally
-  // structural (`in`) so an EXPLICIT `undefined` value is treated
-  // the same as an absent key.
+  // missing at runtime. Read via `Record` so an EXPLICIT
+  // `undefined` is treated the same as an absent key.
   const record = design as unknown as Record<string, unknown>;
   const value = record['floatingFraming'];
-  if (
-    value === 'beams-and-joists' ||
-    value === 'joists-on-blocks'
-  ) {
-    // Field is present + valid. Return as-is (no clone — Ajv gave
-    // us a fresh JSON.parse object with no aliased state).
+  if (value === 'beams-and-joists' || value === 'joists-on-blocks') {
+    // Field is present + valid. Pass through unchanged.
     return design;
   }
-  // Field is absent or explicitly undefined. Stamp the default.
-  // Fresh spread so we never mutate the input.
+
+  // Field is absent. Elevated designs ignore the field, so any
+  // stamp is byte-equivalent at layout time — pick the canonical
+  // default.
+  if (design.structure !== 'floating') {
+    return { ...design, floatingFraming: 'beams-and-joists' };
+  }
+
+  // Floating + missing → height-aware default. Compute BOTH
+  // candidate minimums so we can classify the design accurately.
+  // `computeMinFloatingHeightMm` throws on unknown material triples;
+  // if that happens, fall back to the canonical default and let the
+  // downstream `computeLayout` surface the material error with its
+  // own message (better than swallowing here).
+  let methodAMin: number;
+  let methodBMin: number;
+  try {
+    methodAMin = computeMinFloatingHeightMm({
+      ...design,
+      floatingFraming: 'beams-and-joists',
+    });
+    methodBMin = computeMinFloatingHeightMm({
+      ...design,
+      floatingFraming: 'joists-on-blocks',
+    });
+  } catch {
+    return { ...design, floatingFraming: 'beams-and-joists' };
+  }
+  const heightMm = design.footprint.heightMm;
+
+  // Only downgrade to Method B when heightMm is IN the pre-S26
+  // legal range: [methodBMin, methodAMin). Above methodAMin the
+  // user gets the canonical default; below methodBMin the design
+  // is unbuildable and the loader stamps the canonical default so
+  // `computeLayout` produces the specific "too short" error.
+  if (heightMm >= methodBMin && heightMm < methodAMin) {
+    return { ...design, floatingFraming: 'joists-on-blocks' };
+  }
   return { ...design, floatingFraming: 'beams-and-joists' };
 }

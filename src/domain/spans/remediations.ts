@@ -1145,26 +1145,37 @@ function makeDisabledAddSupportRowNoRowCount(input: {
 
 /**
  * FLOATING-only foundation-level remediation. Densifies the
- * block grid under the beam(s) by ONE row (rows +z) — cheapest
- * possible fix because it changes NO framing SKU. Only proposed
- * when:
+ * block grid under the joist/beam by ONE row (rows +z) — cheapest
+ * possible fix because it changes NO framing SKU.
  *
- *   1. Warning kind is `over-span-beam` (this producer is not
- *      called for joist warnings — see `computeRemediations`).
- *   2. `design.structure === 'floating'`.
- *   3. `design.foundation.type ∈ {'deck-blocks','tuffblocks'}`.
+ * ## S26 FIX #4 method-aware branching (review-gate)
  *
- * When condition 1 or 3 fails, we return `null` — the remediation
- * KIND is structurally not modelable on this design (a joist
- * warning, or a posts-on-footings foundation with no block grid
- * at all).
+ *   - **Elevated + over-span-beam**: DISABLED with FR-032
+ *     "switch to floating" reason. Elevated has no block grid to
+ *     densify; the elevated intermediate-beam variant is deferred
+ *     post-MVP (ticket #47 §16 Q7). Every elevated design
+ *     (posts-on-footings AND deck-blocks per FR-030) receives the
+ *     same actionable hint — the user must learn about the
+ *     alternative regardless of which valid elevated variant they
+ *     chose.
  *
- * When condition 2 fails (`structure === 'elevated'`), FR-032
- * requires the option to be DISABLED with a reason that surfaces
- * the alternative (post-MVP: `structure = 'elevated'` will get an
- * intermediate-beam remediation tracked separately). Omitting the
- * option entirely would leave the user unaware of the alternative,
- * violating FR-032's "MUST surface the alternative" clause.
+ *   - **Floating Method A (`beams-and-joists`) + over-span-beam**:
+ *     DISABLED with the Method-A alternative reason. Method A's
+ *     block rows are PINNED to the two rim beams (see
+ *     `computeMethodA` in `floating-layout.ts`); adding a row does
+ *     NOT shorten the rim beam's +x span (beams run across the
+ *     deck WIDTH, not length). The user must pursue a real fix:
+ *     reduce joist spacing / upgrade joist / switch to Method B.
+ *
+ *   - **Floating Method B (`joists-on-blocks`) + over-span-joist**:
+ *     ENABLED — adding a block row genuinely shortens the joist
+ *     support span (blocks sit directly under joists in +z rows;
+ *     more rows → smaller block-to-block gap). This is where the
+ *     add-support-row math actually pays off post-S26.
+ *
+ *   - **All other combinations**: `null` — the remediation KIND
+ *     is structurally not modelable (joist warning on elevated /
+ *     Method A, beam warning on Method B, posts-on-footings, etc.).
  *
  * When the grid CANNOT densify any further (adjacent-block gap at
  * the proposed row count would drop below `MIN_BLOCK_SPACING_MM`),
@@ -1185,8 +1196,7 @@ function makeDisabledAddSupportRowNoRowCount(input: {
  * densifying a grid whose base row count we can't establish.
  *
  * @returns `RemediationOption` if applicable (enabled OR disabled
- *   with reason), `null` if the remediation KIND doesn't apply
- *   (joist warning or posts-on-footings foundation).
+ *   with reason), `null` if the remediation KIND doesn't apply.
  */
 function produceAddSupportRow(
   warning: Warning,
@@ -1194,27 +1204,53 @@ function produceAddSupportRow(
   table: SpanTable,
   recompute: (design: DeckDesign) => readonly Warning[],
 ): RemediationOption | null {
-  // KIND-applicability guard — joist warnings have no block-row
-  // remediation semantically, so we return null (the KIND isn't
-  // modelled for that warning).
-  if (warning.kind !== 'over-span-beam') return null;
-
   // FR-032 elevated clause (S25 pair-fix / Opus HIGH#1): every
   // elevated design gets a DISABLED option with a reason that
-  // surfaces the alternative construction MODEL. This runs
-  // BEFORE the foundation-type guard so ALL elevated designs
-  // (posts-on-footings AND deck-blocks per FR-030) receive the
-  // same actionable hint — the user must learn about the
-  // alternative regardless of which valid elevated variant they
-  // chose. The intermediate-beam variant for elevated is
-  // deferred post-MVP (ticket #47 §16 Q7).
+  // surfaces the alternative construction MODEL. Elevated designs
+  // don't have a block grid to densify (elevated intermediate-beam
+  // variant is deferred post-MVP, ticket #47 §16 Q7). Only
+  // over-span-beam warnings receive the disabled option — a joist
+  // warning on elevated has no add-support-row modelling at all.
   if (design.structure !== 'floating') {
+    if (warning.kind !== 'over-span-beam') return null;
     return makeDisabledAddSupportRowNoRowCount({
       warning,
       disabledReason:
         'Switch to Floating construction to enable intermediate support rows.',
     });
   }
+
+  // S26 FIX #4 (review-gate, Opus-HIGH + QA-GAP-3) — Method A's
+  // block grid rows are PINNED to the two rim beams (see
+  // `computeMethodA` in `floating-layout.ts`); `blockRowsHint` is
+  // a no-op for +z in Method A. Adding a row of blocks does NOT
+  // shorten the rim beam's +x span (beams run across the deck
+  // WIDTH, not length). Return a DISABLED option that surfaces
+  // the REAL alternative — the DIY user must learn what will
+  // actually work (per FR-032's "MUST surface the alternative"
+  // clause). Only over-span-beam warnings emit this in Method A
+  // — a joist warning under Method A is not modeled by
+  // add-support-row (framing swap or joist-spacing reduction is
+  // the correct path).
+  if (design.floatingFraming === 'beams-and-joists') {
+    if (warning.kind !== 'over-span-beam') return null;
+    return makeDisabledAddSupportRowNoRowCount({
+      warning,
+      disabledReason:
+        'Rim beams span the deck width in this framing — reduce joist ' +
+        'spacing, use a heavier joist, or switch to "Joists on blocks" ' +
+        'framing.',
+    });
+  }
+
+  // Method B — block rows GENUINELY shorten joist span (blocks
+  // sit directly under joists; more rows means smaller
+  // block-to-block gap along +z, which is the joist support
+  // span). The KIND that this remediation targets is
+  // `over-span-joist` in Method B. Method B has no beams — an
+  // over-span-beam warning here would indicate a defect, so
+  // return null (the KIND isn't modelable).
+  if (warning.kind !== 'over-span-joist') return null;
 
   // Floating + a non-block foundation is INVALID per FR-030 and
   // should have been rejected at the apply-parameters boundary
@@ -1296,10 +1332,11 @@ function produceAddSupportRow(
   }
 
   if (verify.wouldClear) {
-    // Display estimate for `newAllowableMm`: the new beam post-to-
-    // post span equals `actualMm × (currentRows−1) / (proposedRows−1)`.
-    // (Same block-to-block gap ratio.) That's the "beam span the
-    // grid would produce" — used only for the "was X → now Y" label.
+    // Display estimate for `newAllowableMm`: under Method B the
+    // joist-support gap post-fix equals
+    // `actualMm × (currentRows−1) / (proposedRows−1)` — same
+    // block-to-block gap ratio the elevated / Method-A beam-span
+    // math would use. Used only for the "was X → now Y" label.
     const newBeamSpanMm =
       (warning.actualMm * (currentRows - 1)) / (proposedRows - 1);
     return makeOption({
@@ -1308,8 +1345,8 @@ function produceAddSupportRow(
       patch,
       summary: `Add a row of blocks (${currentRows} → ${proposedRows})`,
       currentAllowableMm: warning.allowableMm,
-      // The allowable didn't change (same beam SKU); what changed
-      // is the ACTUAL span the beam has to carry. Report the new
+      // The allowable didn't change (same joist SKU); what changed
+      // is the ACTUAL span the joist has to carry. Report the new
       // actual span as the "newAllowable" so the label reads
       // sensibly (actual now = X, allowable stayed the same,
       // wouldClear because X < allowable).
@@ -1421,7 +1458,16 @@ export function computeRemediations(
   recompute: (design: DeckDesign) => readonly Warning[],
 ): readonly RemediationOption[] {
   if (warning.kind === 'over-span-joist') {
+    // S26 FIX #4 (review-gate) — under Method B, adding a block
+    // row DOES shorten joist span (blocks are the joist support
+    // in Method B). `produceAddSupportRow` handles the Method-B
+    // gate internally and returns `null` for elevated / Method A
+    // / non-block foundations. Cheapest-first ordering: block-row
+    // densification (no material change) comes before framing
+    // swaps.
+    const addSupport = produceAddSupportRow(warning, design, table, recompute);
     return [
+      ...(addSupport ? [addSupport] : []),
       produceReduceJoistSpacing(warning, design, table, recompute),
       produceUpgradeJoistSize(warning, design, table, recompute),
       produceChangeJoistSpecies(warning, design, table, recompute),

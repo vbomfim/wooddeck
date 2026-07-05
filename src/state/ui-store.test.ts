@@ -62,7 +62,7 @@ describe('useUiStore — initial state', () => {
     expect(useUiStore.getState().cameraPreset).toBe('orbit');
   });
 
-  it('starts with all eight layers visible (six original + S22 blocks + blocking)', () => {
+  it('starts with all seven layers visible (six original + S22 blocks; S26 FIX #6 removed blocking)', () => {
     const lv = useUiStore.getState().layerVisibility;
     expect(lv).toEqual({
       environment: true,
@@ -72,7 +72,6 @@ describe('useUiStore — initial state', () => {
       posts: true,
       footings: true,
       blocks: true,
-      blocking: true,
     });
   });
 
@@ -139,28 +138,21 @@ describe('useUiStore — layer visibility', () => {
     expect(after.posts).toBe(before.posts);
     expect(after.footings).toBe(before.footings);
     expect(after.blocks).toBe(before.blocks);
-    expect(after.blocking).toBe(before.blocking);
   });
 
-  it('toggleLayer supports the S22 blocks + blocking keys', () => {
-    // S22 (Epic 2 / FR-029) — two new layers wired to the same
+  it('toggleLayer supports the S22 blocks key (S26 FIX #6 — blocking key removed)', () => {
+    // S22 (Epic 2 / FR-029) added `blocks` to the
     // `LayerVisibility` map. The toggle path is the same as every
     // other layer; this test proves the wiring picks up the new
-    // keys without a special case.
+    // key without a special case. `blocking` was removed by S26
+    // FIX #6 (dead-toggle removal).
     const before = useUiStore.getState().layerVisibility;
     act(() => {
       useUiStore.getState().toggleLayer('blocks');
     });
-    const after1 = useUiStore.getState().layerVisibility;
-    expect(after1.blocks).toBe(!before.blocks);
-    expect(after1.blocking).toBe(before.blocking);
-    act(() => {
-      useUiStore.getState().toggleLayer('blocking');
-    });
-    const after2 = useUiStore.getState().layerVisibility;
-    expect(after2.blocking).toBe(!before.blocking);
-    // First toggle preserved.
-    expect(after2.blocks).toBe(!before.blocks);
+    const after = useUiStore.getState().layerVisibility;
+    expect(after.blocks).toBe(!before.blocks);
+    expect(after.footings).toBe(before.footings);
   });
 
   it('toggleLayer is its own inverse (call twice → identity)', () => {

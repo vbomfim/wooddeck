@@ -61,29 +61,29 @@ function resetLayerVisibility(): void {
       posts: true,
       footings: true,
       blocks: true,
-      blocking: true,
     },
   });
 }
 
-describe('<DeckLayers /> — AC1 all eight layers mount', () => {
+describe('<DeckLayers /> — AC1 all seven layers mount', () => {
   beforeEach(() => {
     resetLayerVisibility();
     resetDesignStoreForTests();
     // Seed an empty layout so no member meshes are created — this
-    // test focuses on the eight layer groups themselves (six from
-    // S10 + two from S22: blocks and blocking).
+    // test focuses on the seven layer groups themselves (six from
+    // S10 + `blocks` from S22; `blocking` was removed in S26 FIX #6
+    // — dead toggle / no layout emits `blocking` members).
     const cur = useDesignStore.getState().bundle;
     useDesignStore.setState({ bundle: { ...cur, layout: makeLayout([]) } });
   });
 
-  it('mounts EIGHT groups — one per layer (six original + blocks + blocking)', async () => {
+  it('mounts SEVEN groups — one per layer (six original + blocks; S26 FIX #6 removed blocking)', async () => {
     const renderer = await ReactThreeTestRenderer.create(<DeckLayers />);
     const groups = renderer.scene.findAllByType('Group');
-    // Eight layer groups (S22 adds `blocks` + `blocking`). There
-    // may be additional nested groups from internal r3f wrapping,
-    // but the top-level count MUST include the eight.
-    expect(groups.length).toBeGreaterThanOrEqual(8);
+    // Seven layer groups. There may be additional nested groups
+    // from internal r3f wrapping, but the top-level count MUST
+    // include the seven.
+    expect(groups.length).toBeGreaterThanOrEqual(7);
     await renderer.unmount();
   });
 });
@@ -96,20 +96,21 @@ describe('<DeckLayers /> — AC8 composition order (raycast picking hygiene)', (
     useDesignStore.setState({ bundle: { ...cur, layout: makeLayout([]) } });
   });
 
-  it('DECK_LAYER_ORDER is the fixed eight-entry sequence: env → footings → blocks → posts → beams → blocking → joists → decking', () => {
+  it('DECK_LAYER_ORDER is the fixed seven-entry sequence: env → footings → blocks → posts → beams → joists → decking', () => {
     // Frozen order — see DeckLayers.tsx module header for the
-    // physical-stack rationale. The S22 additions:
-    //   - blocks   sit between footings and posts (below beams for
+    // physical-stack rationale. S22 additions:
+    //   - blocks   sits between footings and posts (below beams for
     //              floating; below posts for elevated + deck-blocks)
-    //   - blocking sits between beams and joists (same y as beams;
-    //              interior between them in x/z)
+    // S26 FIX #6 (review-gate) removed `blocking` from the order —
+    // no layout emits `blocking` members, the dead toggle was
+    // dropped. The `BlockingLayer` component is kept dormant for
+    // a future "blocking between joists" feature.
     expect(DECK_LAYER_ORDER).toEqual([
       'environment',
       'footings',
       'blocks',
       'posts',
       'beams',
-      'blocking',
       'joists',
       'decking',
     ]);
@@ -170,10 +171,10 @@ describe('<DeckLayers /> — AC3 default visibility (all on)', () => {
     // after mount. If a future layer defaults to hidden, this test
     // fires and forces a doc update.
     const groups = renderer.scene.findAllByType('Group').map((n) => n.instance as Group);
-    // At least eight visible groups (the eight layer roots — S22
-    // adds blocks + blocking).
+    // At least seven visible groups (the seven layer roots — S22
+    // adds `blocks`; S26 FIX #6 removed `blocking`).
     const visibleCount = groups.filter((g) => g.visible).length;
-    expect(visibleCount).toBeGreaterThanOrEqual(8);
+    expect(visibleCount).toBeGreaterThanOrEqual(7);
     await renderer.unmount();
   });
 });
