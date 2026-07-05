@@ -79,6 +79,7 @@ import { MM_PER_FOOT, type Mm } from '../../units';
 import { assertNever } from '../../assert-never';
 import {
   LayoutError,
+  MAX_DECK_DIMENSION_MM,
   MIN_DECK_DIMENSION_MM,
   validateFlushBeamDepth,
   validateJoistSpacing,
@@ -708,6 +709,27 @@ function validateFloatingDesign(design: DeckDesign): void {
     throw new LayoutError(
       `Invalid deck length: lengthMm=${lengthMm} is below the minimum of ${MIN_DECK_DIMENSION_MM} mm ` +
         `(${MIN_DECK_DIMENSION_MM / MM_PER_FOOT}′). Floating decks smaller than this are ` +
+        `outside the MVP layout engine's supported range.`,
+    );
+  }
+
+  // feat/block-spacing review-gate follow-up (2026-07-05) — mirror
+  // the elevated `validateDesign` MAX_DECK_DIMENSION_MM cap on the
+  // floating path. Without this the schema-side 30480 mm cap is
+  // the ONLY line of defense for floating designs entering through
+  // in-memory patch / test-fixture paths (no persistence
+  // round-trip → no Ajv). See FR-035 "defense-in-depth" clause.
+  if (widthMm > MAX_DECK_DIMENSION_MM) {
+    throw new LayoutError(
+      `Invalid deck width: widthMm=${widthMm} exceeds the maximum of ${MAX_DECK_DIMENSION_MM} mm ` +
+        `(${MAX_DECK_DIMENSION_MM / MM_PER_FOOT}′). Deck sizes above this ceiling are ` +
+        `outside the MVP layout engine's supported range.`,
+    );
+  }
+  if (lengthMm > MAX_DECK_DIMENSION_MM) {
+    throw new LayoutError(
+      `Invalid deck length: lengthMm=${lengthMm} exceeds the maximum of ${MAX_DECK_DIMENSION_MM} mm ` +
+        `(${MAX_DECK_DIMENSION_MM / MM_PER_FOOT}′). Deck sizes above this ceiling are ` +
         `outside the MVP layout engine's supported range.`,
     );
   }

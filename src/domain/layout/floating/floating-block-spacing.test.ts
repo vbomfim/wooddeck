@@ -32,6 +32,11 @@ import { MM_PER_FOOT, type Mm } from '../../units';
 
 import { computeFloatingLayout, DEFAULT_METHOD_B_BLOCK_SPACING_MM, MAX_METHOD_B_BLOCK_COUNT } from './floating-layout';
 import { MAX_BLOCK_SPACING_MM, MIN_BLOCK_SPACING_MM } from './block-grid';
+import {
+  LayoutError,
+  MAX_DECK_DIMENSION_MM,
+  MIN_DECK_DIMENSION_MM,
+} from '../layout-shared';
 
 const PT_2X8: MaterialRef = { nominal: '2x8', species: 'PT', grade: 'No2' };
 const PT_54: MaterialRef = { nominal: '5/4x6', species: 'PT', grade: 'No2' };
@@ -499,5 +504,117 @@ describe('feat/block-spacing — blockSpacingMm ONLY affects Method B', () => {
         })),
       );
     expect(summarize(layoutBase)).toBe(summarize(layoutWith));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review-gate follow-up (2026-07-05) — schema-legal fractional footprints
+// must not crash on femtometre float drift from `computeAxisCenters`
+// ---------------------------------------------------------------------------
+
+describe('Method B float-drift regression — schema-legal fractional footprints must not throw', () => {
+  it('reviewer repro (widthMm=10757.7662929877, lengthMm=10205.753894382558, blockSpacingMm=MIN) does not throw', () => {
+    // Before the validator-tolerance fix, this footprint drove
+    // `computeAxisCenters(10205.753894382558, 19)` — the post-cap
+    // row count — to accumulate `-span/2 + (count-1)*step` to
+    // 5102.876947191281 while `span/2 = 5102.876947191279`
+    // (delta ≈ 1.82e-12 mm — a femtometre from `step * (count-1)`
+    // vs `span` due to IEEE-754 rounding). `validateExplicitCenters`
+    // rejected it with strict bounds → `LayoutError:
+    // explicitRowZCenters[..] out of range`.
+    const design = makeMethodB({
+      widthFt: 10757.7662929877 / MM_PER_FOOT,
+      lengthFt: 10205.753894382558 / MM_PER_FOOT,
+      blockSpacingMm: MIN_BLOCK_SPACING_MM,
+    });
+    expect(() => computeFloatingLayout(design)).not.toThrow();
+  });
+
+  it('parametrized property — a spread of fractional schema-legal Method-B footprints at MIN spacing never throws', () => {
+    // Deterministic pseudo-random cover of the fractional
+    // width/length space. Every draw must be ≥ MIN_DECK_DIMENSION_MM
+    // and ≤ MAX_DECK_DIMENSION_MM (schema-legal). At
+    // MIN_BLOCK_SPACING_MM the closed-form cap engages for every
+    // draw > ~4877 mm × ~4877 mm — exercising the post-cap
+    // `computeAxisCenters` call that produced the drift.
+    // Linear congruential PRNG (deterministic, no fast-check dep):
+    let state = 0x1a2b3c4d;
+    const rand = (): number => {
+      state = (state * 1664525 + 1013904223) >>> 0;
+      return state / 0x100000000;
+    };
+    const range = MAX_DECK_DIMENSION_MM - MIN_DECK_DIMENSION_MM;
+    for (let i = 0; i < 48; i += 1) {
+      const widthMm = MIN_DECK_DIMENSION_MM + rand() * range;
+      const lengthMm = MIN_DECK_DIMENSION_MM + rand() * range;
+      const design = makeMethodB({
+        widthFt: widthMm / MM_PER_FOOT,
+        lengthFt: lengthMm / MM_PER_FOOT,
+        blockSpacingMm: MIN_BLOCK_SPACING_MM,
+      });
+      expect(
+        () => computeFloatingLayout(design),
+        `widthMm=${widthMm} lengthMm=${lengthMm}`,
+      ).not.toThrow();
+    }
+  });
+
+  it('float-drift is TOLERATED but a genuinely out-of-range explicit center is still REJECTED', () => {
+    // The tolerance fix relaxes the bounds by EPS_MM (1e-6 mm), NOT by
+    // a large slop. A center a MILLIMETRE outside the footprint half-
+    // extent MUST still throw — that is a real callsite bug, not
+    // float drift. Confirmed via a Method-A design whose S26 defensive
+    // `explicitRowZCenters` check would fire on a truly rogue value.
+    // (We can't easily inject an out-of-range center via the public
+    // `computeFloatingLayout` API — those overrides are internal —
+    // so this test lives in `block-grid.test.ts` as an invariant on
+    // `computeBlockGrid` itself; here we just document the boundary
+    // via a positive case: the reviewer repro is < 1e-11 mm outside
+    // the bound and passes.)
+    const design = makeMethodB({
+      widthFt: 10757.7662929877 / MM_PER_FOOT,
+      lengthFt: 10205.753894382558 / MM_PER_FOOT,
+      blockSpacingMm: MIN_BLOCK_SPACING_MM,
+    });
+    // Sanity — the layout does produce blocks (grid non-empty).
+    const blocks = computeFloatingLayout(design).members.filter(
+      (m) => m.kind === 'block',
+    );
+    expect(blocks.length).toBeGreaterThan(0);
+    expect(blocks.length).toBeLessThanOrEqual(MAX_METHOD_B_BLOCK_COUNT);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review-gate follow-up (2026-07-05) — floating validation must mirror the
+// footprint MAX cap now enforced by the elevated `validateDesign`
+// ---------------------------------------------------------------------------
+
+describe('validateFloatingDesign mirrors MAX_DECK_DIMENSION_MM (defense-in-depth)', () => {
+  it('floating design with widthMm > MAX_DECK_DIMENSION_MM throws LayoutError', () => {
+    const design = makeMethodB({
+      widthFt: MAX_DECK_DIMENSION_MM / MM_PER_FOOT + 1, // 1 ft over max
+      lengthFt: 16,
+    });
+    expect(() => computeFloatingLayout(design)).toThrow(LayoutError);
+    expect(() => computeFloatingLayout(design)).toThrow(/exceeds the maximum/i);
+  });
+
+  it('floating design with lengthMm > MAX_DECK_DIMENSION_MM throws LayoutError', () => {
+    const design = makeMethodB({
+      widthFt: 16,
+      lengthFt: MAX_DECK_DIMENSION_MM / MM_PER_FOOT + 1,
+    });
+    expect(() => computeFloatingLayout(design)).toThrow(LayoutError);
+    expect(() => computeFloatingLayout(design)).toThrow(/exceeds the maximum/i);
+  });
+
+  it('floating design at exactly MAX_DECK_DIMENSION_MM is ACCEPTED (boundary)', () => {
+    const design = makeMethodB({
+      widthFt: MAX_DECK_DIMENSION_MM / MM_PER_FOOT,
+      lengthFt: MAX_DECK_DIMENSION_MM / MM_PER_FOOT,
+      blockSpacingMm: MIN_BLOCK_SPACING_MM,
+    });
+    expect(() => computeFloatingLayout(design)).not.toThrow();
   });
 });

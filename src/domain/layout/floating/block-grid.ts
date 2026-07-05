@@ -459,11 +459,23 @@ function validateInput(input: BlockGridInput): void {
  * Shared helper for `explicitColXCenters` / `explicitRowZCenters`
  * defensive checks. Each entry must be finite (rejects NaN,
  * ±Infinity) and lie within the corresponding footprint
- * half-extent (`±halfExtentMm`). Throws with a message that
- * names the offending field + value so a callsite bug is
- * traceable.
+ * half-extent (`±halfExtentMm`, ± `EPS_MM` tolerance for IEEE-754
+ * round-off drift). Throws with a message that names the
+ * offending field + value so a callsite bug is traceable.
  *
  * S26 FIX #7 (review-gate: Opus#5).
+ *
+ * feat/block-spacing review-gate follow-up (2026-07-05) — tolerance
+ * relaxed by `EPS_MM = 1e-6` mm. `computeAxisCenters` computes each
+ * center as `-span/2 + i * (span / (count-1))`; IEEE-754 rounding
+ * of the mul-add chain can drive the LAST center up to a few
+ * femtometres OUTSIDE `±span/2` for fractional (schema-legal)
+ * footprints — e.g. `span=10205.753894382558, count=19` produces
+ * `last=5102.876947191281` vs bound `5102.876947191279`
+ * (Δ ≈ 1.8e-12 mm). Strict bounds rejected this valid geometry.
+ * The tolerance matches `validateJoistSpacing`'s `EPS_MM` in
+ * `layout-shared.ts`. Real callsite bugs (millimetres out of
+ * range or worse — the S26 defense's target) are unaffected.
  */
 function validateExplicitCenters(
   centers: readonly Mm[] | undefined,
@@ -472,6 +484,9 @@ function validateExplicitCenters(
   extentFieldName: 'footprintMm.widthMm' | 'footprintMm.lengthMm',
 ): void {
   if (centers === undefined) return;
+  const EPS_MM = 1e-6;
+  const lowerBound = -halfExtentMm - EPS_MM;
+  const upperBound = halfExtentMm + EPS_MM;
   for (let i = 0; i < centers.length; i += 1) {
     const value = centers[i];
     if (typeof value !== 'number' || !Number.isFinite(value)) {
@@ -480,7 +495,7 @@ function validateExplicitCenters(
           `(must be a finite number).`,
       );
     }
-    if (value < -halfExtentMm || value > halfExtentMm) {
+    if (value < lowerBound || value > upperBound) {
       throw new Error(
         `computeBlockGrid: ${fieldName}[${i}]=${value} out of range ` +
           `[${-halfExtentMm}, ${halfExtentMm}] (half of ${extentFieldName}).`,

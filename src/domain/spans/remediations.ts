@@ -1481,7 +1481,6 @@ function produceAddSupportRow(
   };
 }
 
-/**
 // ---------------------------------------------------------------------------
 // HIGH #3 (review — feat/block-spacing)
 //
