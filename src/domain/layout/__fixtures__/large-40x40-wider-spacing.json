@@ -2736,6 +2736,2506 @@
         }
       },
       {
+        "id": "blocking-r0-b0",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -5773.15,
+          "y": 771.9000000000001,
+          "z": -4064
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b1",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -5165.450000000001,
+          "y": 771.9000000000001,
+          "z": -4064
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b2",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -4557.75,
+          "y": 771.9000000000001,
+          "z": -4064
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b3",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -3950.0499999999997,
+          "y": 771.9000000000001,
+          "z": -4064
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b4",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -3342.35,
+          "y": 771.9000000000001,
+          "z": -4064
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b5",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -2734.6499999999996,
+          "y": 771.9000000000001,
+          "z": -4064
+        },
+        "size": {
+          "x": 569.7000000000003,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b6",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -2126.95,
+          "y": 771.9000000000001,
+          "z": -4064
+        },
+        "size": {
+          "x": 569.7000000000003,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b7",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -1519.2499999999995,
+          "y": 771.9000000000001,
+          "z": -4064
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b8",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -911.5499999999997,
+          "y": 771.9000000000001,
+          "z": -4064
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b9",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -303.8499999999999,
+          "y": 771.9000000000001,
+          "z": -4064
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b10",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 303.85000000000036,
+          "y": 771.9000000000001,
+          "z": -4064
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b11",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 911.5500000000006,
+          "y": 771.9000000000001,
+          "z": -4064
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b12",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 1519.2500000000005,
+          "y": 771.9000000000001,
+          "z": -4064
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b13",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 2126.9500000000007,
+          "y": 771.9000000000001,
+          "z": -4064
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b14",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 2734.6500000000005,
+          "y": 771.9000000000001,
+          "z": -4064
+        },
+        "size": {
+          "x": 569.6999999999989,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b15",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 3342.3500000000004,
+          "y": 771.9000000000001,
+          "z": -4064
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b16",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 3950.050000000001,
+          "y": 771.9000000000001,
+          "z": -4064
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b17",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 4557.750000000001,
+          "y": 771.9000000000001,
+          "z": -4064
+        },
+        "size": {
+          "x": 569.6999999999989,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b18",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 5165.450000000001,
+          "y": 771.9000000000001,
+          "z": -4064
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b19",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 5773.150000000001,
+          "y": 771.9000000000001,
+          "z": -4064
+        },
+        "size": {
+          "x": 569.6999999999989,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r1-b0",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -5773.15,
+          "y": 771.9000000000001,
+          "z": -2032
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r1-b1",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -5165.450000000001,
+          "y": 771.9000000000001,
+          "z": -2032
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r1-b2",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -4557.75,
+          "y": 771.9000000000001,
+          "z": -2032
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r1-b3",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -3950.0499999999997,
+          "y": 771.9000000000001,
+          "z": -2032
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r1-b4",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -3342.35,
+          "y": 771.9000000000001,
+          "z": -2032
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r1-b5",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -2734.6499999999996,
+          "y": 771.9000000000001,
+          "z": -2032
+        },
+        "size": {
+          "x": 569.7000000000003,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r1-b6",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -2126.95,
+          "y": 771.9000000000001,
+          "z": -2032
+        },
+        "size": {
+          "x": 569.7000000000003,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r1-b7",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -1519.2499999999995,
+          "y": 771.9000000000001,
+          "z": -2032
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r1-b8",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -911.5499999999997,
+          "y": 771.9000000000001,
+          "z": -2032
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r1-b9",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -303.8499999999999,
+          "y": 771.9000000000001,
+          "z": -2032
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r1-b10",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 303.85000000000036,
+          "y": 771.9000000000001,
+          "z": -2032
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r1-b11",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 911.5500000000006,
+          "y": 771.9000000000001,
+          "z": -2032
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r1-b12",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 1519.2500000000005,
+          "y": 771.9000000000001,
+          "z": -2032
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r1-b13",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 2126.9500000000007,
+          "y": 771.9000000000001,
+          "z": -2032
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r1-b14",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 2734.6500000000005,
+          "y": 771.9000000000001,
+          "z": -2032
+        },
+        "size": {
+          "x": 569.6999999999989,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r1-b15",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 3342.3500000000004,
+          "y": 771.9000000000001,
+          "z": -2032
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r1-b16",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 3950.050000000001,
+          "y": 771.9000000000001,
+          "z": -2032
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r1-b17",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 4557.750000000001,
+          "y": 771.9000000000001,
+          "z": -2032
+        },
+        "size": {
+          "x": 569.6999999999989,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r1-b18",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 5165.450000000001,
+          "y": 771.9000000000001,
+          "z": -2032
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r1-b19",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 5773.150000000001,
+          "y": 771.9000000000001,
+          "z": -2032
+        },
+        "size": {
+          "x": 569.6999999999989,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r2-b0",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -5773.15,
+          "y": 771.9000000000001,
+          "z": 0
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r2-b1",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -5165.450000000001,
+          "y": 771.9000000000001,
+          "z": 0
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r2-b2",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -4557.75,
+          "y": 771.9000000000001,
+          "z": 0
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r2-b3",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -3950.0499999999997,
+          "y": 771.9000000000001,
+          "z": 0
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r2-b4",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -3342.35,
+          "y": 771.9000000000001,
+          "z": 0
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r2-b5",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -2734.6499999999996,
+          "y": 771.9000000000001,
+          "z": 0
+        },
+        "size": {
+          "x": 569.7000000000003,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r2-b6",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -2126.95,
+          "y": 771.9000000000001,
+          "z": 0
+        },
+        "size": {
+          "x": 569.7000000000003,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r2-b7",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -1519.2499999999995,
+          "y": 771.9000000000001,
+          "z": 0
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r2-b8",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -911.5499999999997,
+          "y": 771.9000000000001,
+          "z": 0
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r2-b9",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -303.8499999999999,
+          "y": 771.9000000000001,
+          "z": 0
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r2-b10",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 303.85000000000036,
+          "y": 771.9000000000001,
+          "z": 0
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r2-b11",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 911.5500000000006,
+          "y": 771.9000000000001,
+          "z": 0
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r2-b12",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 1519.2500000000005,
+          "y": 771.9000000000001,
+          "z": 0
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r2-b13",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 2126.9500000000007,
+          "y": 771.9000000000001,
+          "z": 0
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r2-b14",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 2734.6500000000005,
+          "y": 771.9000000000001,
+          "z": 0
+        },
+        "size": {
+          "x": 569.6999999999989,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r2-b15",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 3342.3500000000004,
+          "y": 771.9000000000001,
+          "z": 0
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r2-b16",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 3950.050000000001,
+          "y": 771.9000000000001,
+          "z": 0
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r2-b17",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 4557.750000000001,
+          "y": 771.9000000000001,
+          "z": 0
+        },
+        "size": {
+          "x": 569.6999999999989,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r2-b18",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 5165.450000000001,
+          "y": 771.9000000000001,
+          "z": 0
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r2-b19",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 5773.150000000001,
+          "y": 771.9000000000001,
+          "z": 0
+        },
+        "size": {
+          "x": 569.6999999999989,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r3-b0",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -5773.15,
+          "y": 771.9000000000001,
+          "z": 2032
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r3-b1",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -5165.450000000001,
+          "y": 771.9000000000001,
+          "z": 2032
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r3-b2",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -4557.75,
+          "y": 771.9000000000001,
+          "z": 2032
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r3-b3",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -3950.0499999999997,
+          "y": 771.9000000000001,
+          "z": 2032
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r3-b4",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -3342.35,
+          "y": 771.9000000000001,
+          "z": 2032
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r3-b5",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -2734.6499999999996,
+          "y": 771.9000000000001,
+          "z": 2032
+        },
+        "size": {
+          "x": 569.7000000000003,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r3-b6",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -2126.95,
+          "y": 771.9000000000001,
+          "z": 2032
+        },
+        "size": {
+          "x": 569.7000000000003,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r3-b7",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -1519.2499999999995,
+          "y": 771.9000000000001,
+          "z": 2032
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r3-b8",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -911.5499999999997,
+          "y": 771.9000000000001,
+          "z": 2032
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r3-b9",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -303.8499999999999,
+          "y": 771.9000000000001,
+          "z": 2032
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r3-b10",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 303.85000000000036,
+          "y": 771.9000000000001,
+          "z": 2032
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r3-b11",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 911.5500000000006,
+          "y": 771.9000000000001,
+          "z": 2032
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r3-b12",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 1519.2500000000005,
+          "y": 771.9000000000001,
+          "z": 2032
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r3-b13",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 2126.9500000000007,
+          "y": 771.9000000000001,
+          "z": 2032
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r3-b14",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 2734.6500000000005,
+          "y": 771.9000000000001,
+          "z": 2032
+        },
+        "size": {
+          "x": 569.6999999999989,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r3-b15",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 3342.3500000000004,
+          "y": 771.9000000000001,
+          "z": 2032
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r3-b16",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 3950.050000000001,
+          "y": 771.9000000000001,
+          "z": 2032
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r3-b17",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 4557.750000000001,
+          "y": 771.9000000000001,
+          "z": 2032
+        },
+        "size": {
+          "x": 569.6999999999989,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r3-b18",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 5165.450000000001,
+          "y": 771.9000000000001,
+          "z": 2032
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r3-b19",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 5773.150000000001,
+          "y": 771.9000000000001,
+          "z": 2032
+        },
+        "size": {
+          "x": 569.6999999999989,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r4-b0",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -5773.15,
+          "y": 771.9000000000001,
+          "z": 4064
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r4-b1",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -5165.450000000001,
+          "y": 771.9000000000001,
+          "z": 4064
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r4-b2",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -4557.75,
+          "y": 771.9000000000001,
+          "z": 4064
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r4-b3",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -3950.0499999999997,
+          "y": 771.9000000000001,
+          "z": 4064
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r4-b4",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -3342.35,
+          "y": 771.9000000000001,
+          "z": 4064
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r4-b5",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -2734.6499999999996,
+          "y": 771.9000000000001,
+          "z": 4064
+        },
+        "size": {
+          "x": 569.7000000000003,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r4-b6",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -2126.95,
+          "y": 771.9000000000001,
+          "z": 4064
+        },
+        "size": {
+          "x": 569.7000000000003,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r4-b7",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -1519.2499999999995,
+          "y": 771.9000000000001,
+          "z": 4064
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r4-b8",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -911.5499999999997,
+          "y": 771.9000000000001,
+          "z": 4064
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r4-b9",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -303.8499999999999,
+          "y": 771.9000000000001,
+          "z": 4064
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r4-b10",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 303.85000000000036,
+          "y": 771.9000000000001,
+          "z": 4064
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r4-b11",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 911.5500000000006,
+          "y": 771.9000000000001,
+          "z": 4064
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r4-b12",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 1519.2500000000005,
+          "y": 771.9000000000001,
+          "z": 4064
+        },
+        "size": {
+          "x": 569.6999999999998,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r4-b13",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 2126.9500000000007,
+          "y": 771.9000000000001,
+          "z": 4064
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r4-b14",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 2734.6500000000005,
+          "y": 771.9000000000001,
+          "z": 4064
+        },
+        "size": {
+          "x": 569.6999999999989,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r4-b15",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 3342.3500000000004,
+          "y": 771.9000000000001,
+          "z": 4064
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r4-b16",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 3950.050000000001,
+          "y": 771.9000000000001,
+          "z": 4064
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r4-b17",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 4557.750000000001,
+          "y": 771.9000000000001,
+          "z": 4064
+        },
+        "size": {
+          "x": 569.6999999999989,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r4-b18",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 5165.450000000001,
+          "y": 771.9000000000001,
+          "z": 4064
+        },
+        "size": {
+          "x": 569.7000000000007,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r4-b19",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x10",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 5773.150000000001,
+          "y": 771.9000000000001,
+          "z": 4064
+        },
+        "size": {
+          "x": 569.6999999999989,
+          "y": 235,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
         "id": "beam-near",
         "kind": "beam",
         "material": {

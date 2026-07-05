@@ -380,6 +380,81 @@
         }
       },
       {
+        "id": "blocking-r0-b0",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x8",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": -393.73333333333335,
+          "y": 276,
+          "z": 0
+        },
+        "size": {
+          "x": 355.73333333333335,
+          "y": 184,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b1",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x8",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 0,
+          "y": 276,
+          "z": 0
+        },
+        "size": {
+          "x": 355.73333333333335,
+          "y": 184,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
+        "id": "blocking-r0-b2",
+        "kind": "blocking",
+        "material": {
+          "kind": "lumber",
+          "nominal": "2x8",
+          "species": "PT",
+          "grade": "No2"
+        },
+        "position": {
+          "x": 393.73333333333335,
+          "y": 276,
+          "z": 0
+        },
+        "size": {
+          "x": 355.73333333333335,
+          "y": 184,
+          "z": 38
+        },
+        "rotation": {
+          "x": 0,
+          "y": 0,
+          "z": 0
+        }
+      },
+      {
         "id": "beam-near",
         "kind": "beam",
         "material": {

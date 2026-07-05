@@ -1,10 +1,10 @@
 /**
  * Unit tests for `src/scene/layers/DeckLayers.tsx`.
  *
- * ## Coverage map (S10 issue #11 + S22 issue #44)
+ * ## Coverage map (S10 issue #11 + S22 issue #44 + #72)
  *
- *   AC1  All eight layers mount (six from S10 + blocks + blocking
- *        from S22).
+ *   AC1  All eight layers mount (six from S10 + blocks from S22 +
+ *        blocking re-added under issue #72).
  *   AC8  Layer order — the composition order is
  *        environment → footings → blocks → posts → beams → blocking
  *        → joists → decking so that a raycast from above hits
@@ -57,6 +57,7 @@ function resetLayerVisibility(): void {
       environment: true,
       decking: true,
       joists: true,
+      blocking: true,
       beams: true,
       posts: true,
       footings: true,
@@ -65,25 +66,25 @@ function resetLayerVisibility(): void {
   });
 }
 
-describe('<DeckLayers /> — AC1 all seven layers mount', () => {
+describe('<DeckLayers /> — AC1 all eight layers mount', () => {
   beforeEach(() => {
     resetLayerVisibility();
     resetDesignStoreForTests();
     // Seed an empty layout so no member meshes are created — this
-    // test focuses on the seven layer groups themselves (six from
-    // S10 + `blocks` from S22; `blocking` was removed in S26 FIX #6
-    // — dead toggle / no layout emits `blocking` members).
+    // test focuses on the eight layer groups themselves (six from
+    // S10 + `blocks` from S22 + `blocking` re-added under issue #72
+    // for solid noggins between joists per IRC R502.7).
     const cur = useDesignStore.getState().bundle;
     useDesignStore.setState({ bundle: { ...cur, layout: makeLayout([]) } });
   });
 
-  it('mounts SEVEN groups — one per layer (six original + blocks; S26 FIX #6 removed blocking)', async () => {
+  it('mounts EIGHT groups — one per layer (six original + blocks + #72 blocking)', async () => {
     const renderer = await ReactThreeTestRenderer.create(<DeckLayers />);
     const groups = renderer.scene.findAllByType('Group');
-    // Seven layer groups. There may be additional nested groups
+    // Eight layer groups. There may be additional nested groups
     // from internal r3f wrapping, but the top-level count MUST
-    // include the seven.
-    expect(groups.length).toBeGreaterThanOrEqual(7);
+    // include the eight.
+    expect(groups.length).toBeGreaterThanOrEqual(8);
     await renderer.unmount();
   });
 });
@@ -96,21 +97,22 @@ describe('<DeckLayers /> — AC8 composition order (raycast picking hygiene)', (
     useDesignStore.setState({ bundle: { ...cur, layout: makeLayout([]) } });
   });
 
-  it('DECK_LAYER_ORDER is the fixed seven-entry sequence: env → footings → blocks → posts → beams → joists → decking', () => {
+  it('DECK_LAYER_ORDER is the fixed eight-entry sequence: env → footings → blocks → posts → beams → blocking → joists → decking', () => {
     // Frozen order — see DeckLayers.tsx module header for the
     // physical-stack rationale. S22 additions:
     //   - blocks   sits between footings and posts (below beams for
     //              floating; below posts for elevated + deck-blocks)
-    // S26 FIX #6 (review-gate) removed `blocking` from the order —
-    // no layout emits `blocking` members, the dead toggle was
-    // dropped. The `BlockingLayer` component is kept dormant for
-    // a future "blocking between joists" feature.
+    // Issue #72 additions:
+    //   - blocking sits between beams and joists (co-planar with
+    //              joists, IRC R502.7). Re-attached under #72 —
+    //              was dormant post-S26 FIX #6.
     expect(DECK_LAYER_ORDER).toEqual([
       'environment',
       'footings',
       'blocks',
       'posts',
       'beams',
+      'blocking',
       'joists',
       'decking',
     ]);
@@ -171,10 +173,10 @@ describe('<DeckLayers /> — AC3 default visibility (all on)', () => {
     // after mount. If a future layer defaults to hidden, this test
     // fires and forces a doc update.
     const groups = renderer.scene.findAllByType('Group').map((n) => n.instance as Group);
-    // At least seven visible groups (the seven layer roots — S22
-    // adds `blocks`; S26 FIX #6 removed `blocking`).
+    // At least eight visible groups (the eight layer roots — S22
+    // adds `blocks`; issue #72 re-adds `blocking`).
     const visibleCount = groups.filter((g) => g.visible).length;
-    expect(visibleCount).toBeGreaterThanOrEqual(7);
+    expect(visibleCount).toBeGreaterThanOrEqual(8);
     await renderer.unmount();
   });
 });

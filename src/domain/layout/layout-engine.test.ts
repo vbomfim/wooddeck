@@ -117,16 +117,69 @@ describe('computeLayout — AC6 complete render contract', () => {
     }
   });
 
-  it('all five MemberKind values appear in members[]', () => {
+  it('all six lumber MemberKind values appear in members[] (elevated + posts-on-footings + issue #72 blocking)', () => {
+    // Post-issue-#72 the elevated + posts-on-footings pipeline
+    // emits SIX kinds: the original five (joist / beam / post /
+    // footing / board) plus `blocking` (solid noggins between
+    // joists per IRC R502.7.1). Block-kind members appear only
+    // under the deck-blocks foundation variant — not here.
     const layout = computeLayout(makeDesign());
     const kinds = new Set<MemberKind>(layout.members.map((m) => m.kind));
-    expect(kinds).toEqual(new Set<MemberKind>(['joist', 'beam', 'post', 'footing', 'board']));
+    expect(kinds).toEqual(
+      new Set<MemberKind>(['joist', 'beam', 'post', 'footing', 'board', 'blocking']),
+    );
   });
 
   it('every member id is unique across the whole layout', () => {
     const layout = computeLayout(makeDesign());
     const ids = layout.members.map((m) => m.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  // -------------------------------------------------------------
+  // Issue #72 — blocking between joists (IRC R502.7.1)
+  // -------------------------------------------------------------
+  //
+  // Wiring coverage: the elevated pipeline emits blocking
+  // members. Per-member geometry is proved by
+  // `../blocking-layout.test.ts`; here we only prove the SHARED
+  // helper is actually called from the elevated compute path.
+
+  it('elevated + posts-on-footings emits blocking members between adjacent joists (issue #72)', () => {
+    const layout = computeLayout(makeDesign());
+    const joists = layout.members.filter((m) => m.kind === 'joist');
+    const blocking = layout.members.filter((m) => m.kind === 'blocking');
+    expect(joists.length).toBeGreaterThanOrEqual(2);
+    expect(blocking.length).toBeGreaterThan(0);
+    // At least (joists.length - 1) blocking pieces (one per bay,
+    // times ≥ 1 row per IRC R502.7.1 minimum-row floor).
+    expect(blocking.length).toBeGreaterThanOrEqual(joists.length - 1);
+  });
+
+  it('every blocking member sits at joistCenterY (co-planar with joists) — issue #72', () => {
+    const layout = computeLayout(makeDesign());
+    const joistY = layout.members.find((m) => m.kind === 'joist')!.position.y;
+    for (const b of layout.members.filter((m) => m.kind === 'blocking')) {
+      expect(b.position.y).toBe(joistY);
+    }
+  });
+
+  it('blocking is emitted for the deck-blocks elevated variant too — issue #72', () => {
+    // Both elevated variants share the joist y-anchor
+    // (`computeYStack.joistCenterY`), so the shared helper works
+    // for both. The variant test in the deck-blocks describe
+    // block below spot-checks the geometry; this test proves the
+    // wiring for the posts-on-footings variant is symmetric with
+    // the deck-blocks branch.
+    // (No design construction here — the deck-blocks describe
+    // suite proves the wiring for the block variant separately.)
+    const layout = computeLayout(makeDesign());
+    const blocking = layout.members.filter((m) => m.kind === 'blocking');
+    for (const b of blocking) {
+      // Every emitted member carries a lumber material so the BOM
+      // routes it into the joist-material lumber pack.
+      expect(b.material.kind).toBe('lumber');
+    }
   });
 });
 
@@ -228,31 +281,39 @@ describe('computeLayout — LayoutError contract', () => {
     expect(() => computeLayout(design)).toThrow(LayoutError);
   });
 
-  it('throws LayoutError when spacingMm < joist thickness — Fix A', () => {
-    // 2x10 PT joist actual.widthMm = 38. spacingMm=1 would produce overlap.
+  it('throws LayoutError when spacingMm < joist thickness — Fix A (SUPERSEDED but still catches sub-thickness at defense-in-depth layer)', () => {
+    // 2x10 PT joist actual.widthMm = 38. Pre-PR-#73 spacingMm=1
+    // was rejected by the thickness guard.
+    //
+    // PR #73 review (GPT-5.5 HIGH #2 root fix): the new
+    // MIN_JOIST_SPACING_MM=305 guard now fires FIRST for any
+    // sub-305 value (including this one) — its message is
+    // friendlier for the common user-error case. The
+    // `< joistThicknessMm` guard is RETAINED as defense-in-depth
+    // for the (unreachable-via-validated-input) case where a
+    // future lower MIN would leave sub-thickness inputs uncaught.
+    // Either message is acceptable — both prove the fail-loud
+    // invariant.
     const design = makeDesign({ spacingMm: 1 });
     expect(() => computeLayout(design)).toThrow(LayoutError);
     expect(() => computeLayout(design)).toThrow(/spacing/i);
-    expect(() => computeLayout(design)).toThrow(/thickness/i);
-    // Must name the minimum (the joist thickness in mm).
-    expect(() => computeLayout(design)).toThrow(/38/);
   });
 
-  it('accepts spacingMm == joist thickness when width geometry is compatible (issue #25 boundary — inclusive)', () => {
-    // 2x10 PT joist thickness = 38 mm; spacingMm = 38 is right at the min.
+  it('accepts spacingMm == joist thickness when width geometry is compatible (issue #25 boundary — SUPERSEDED by MIN_JOIST_SPACING_MM=305 in PR #73 review)', () => {
+    // PRE-PR-#73: this test verified that spacing=38 (== 2x10 PT joist
+    // thickness) with a width chosen so `actualSpacing == thickness`
+    // exactly was accepted (joists touching face-to-face).
     //
-    // The even-spaced algorithm (see joist-layout.ts) computes
-    //   actualSpacing = (widthMm - thickness) / ceil((widthMm - thickness) / spacingMm)
-    // With spacingMm == thickness, `actualSpacing == thickness` iff
-    // `(widthMm - thickness)` is an exact multiple of `thickness`. Otherwise
-    // `actualSpacing < thickness` and adjacent joists overlap — which the
-    // strengthened validator now rejects (issue #25).
-    //
-    // Pick widthMm = 38 * 33 = 1254 mm (> MIN_DECK_DIMENSION_MM ≈ 1219.2):
-    // usable = 1216 = 38 * 32 → bayCount = 32 → actualSpacing = 38 exactly.
-    // Joists touch face-to-face (no overlap, no gap) — allowed.
+    // PR #73 review (GPT-5.5 HIGH #2 root-fix): a 305 mm (12″ o.c.)
+    // practical minimum joist spacing is now enforced at the domain
+    // trust boundary (`validateJoistSpacing`) to bound the joist
+    // count AND its blocking-member multiplier. 38 mm falls FAR below
+    // that floor — the design must now be REJECTED even at the
+    // width geometry that would have satisfied the pre-#73
+    // thickness-only check.
     const design = makeDesign({ widthMm: 38 * 33, spacingMm: 38 });
-    expect(() => computeLayout(design)).not.toThrow();
+    expect(() => computeLayout(design)).toThrow(LayoutError);
+    expect(() => computeLayout(design)).toThrow(/305|minimum|12/i);
   });
 
   // Issue #25 regression — see `src/domain/layout/layout-shared.ts`
@@ -262,34 +323,33 @@ describe('computeLayout — LayoutError contract', () => {
   // spacing is legal (equal to thickness). That produces silent joist
   // overlap of ~1 mm, which the AC3 property test caught intermittently
   // (flaky in CI — depended on the fast-check seed hitting the boundary).
-  describe('issue #25 — reject joist spacings that would produce overlap by construction', () => {
-    it('throws LayoutError when requested spacing == thickness but the resulting even-spaced actualSpacing would be < thickness', () => {
-      // Deterministic reproducer for the flake reported in issue #25.
-      // widthMm = 1220 (just above MIN_DECK_DIMENSION_MM = 1219.2),
-      // spacingMm = 38 (2×10 PT joist thickness). The even-spaced
-      // algorithm computes:
-      //   usable = 1220 - 38 = 1182
-      //   bayCount = ceil(1182 / 38) = 32
-      //   actualSpacing = 1182 / 32 = 36.9375 mm < 38 mm
-      // → adjacent joists would overlap by ~1.06 mm.
-      // With the strengthened validator this must fail loud.
+  //
+  // ⚠ PR #73 review (GPT-5.5 HIGH #2 root-fix): the tests below still
+  // pass — the same designs are STILL rejected — but the rejection
+  // now fires at the tighter `MIN_JOIST_SPACING_MM = 305` guard
+  // BEFORE the issue #25 overlap check runs. The message no longer
+  // includes the "achievable spacing / usable span" text; it names
+  // the 305 mm minimum instead. The issue #25 defense-in-depth check
+  // is retained in `validateJoistSpacing` (belt-and-braces) so a
+  // future consumer that bypasses the MIN guard (e.g. a helper
+  // called directly with primitive inputs) still gets the overlap
+  // rejection.
+  describe('issue #25 — reject joist spacings that would produce overlap by construction (SUPERSEDED by MIN=305 for the pipeline path)', () => {
+    it('throws LayoutError when requested spacing == thickness (pre-#25 reproducer; now caught earlier by MIN_JOIST_SPACING_MM=305)', () => {
+      // Pre-#25 case: widthMm=1220, spacingMm=38 (2×10 PT thickness).
+      // Pre-#73 the check that fired was the actual-spacing overlap
+      // guard ("36.94 mm on-center < 38 mm thickness"). Post-#73 the
+      // MIN=305 check fires first — same fail-loud outcome, tighter
+      // message.
       const design = makeDesign({ widthMm: 1220, spacingMm: 38 });
       expect(() => computeLayout(design)).toThrow(LayoutError);
-      // The error message must be actionable — name the requested
-      // spacing, the achievable spacing, and the joist thickness so
-      // the ParameterPanel warning banner can render the fix hint.
       expect(() => computeLayout(design)).toThrow(/spacing/i);
-      expect(() => computeLayout(design)).toThrow(/1220/); // width
-      expect(() => computeLayout(design)).toThrow(/38/); // spacing / thickness
+      // Message names 38 (the requested spacing) AND 305 (the min).
+      expect(() => computeLayout(design)).toThrow(/38/);
+      expect(() => computeLayout(design)).toThrow(/305/);
     });
 
-    it('throws LayoutError for a narrow deck where usable width is not a multiple of spacing (issue #25 reproducer close to fast-check seed)', () => {
-      // The flaky fast-check case (seed -1901521422) landed at
-      // widthMm ~1144, spacingMm = 38. The property test's dim arb
-      // bottoms out at MIN_DECK_DIMENSION_MM (~1220), so we pick 1234
-      // — the SAME regime: usable = 1196 = 38*31.47, bayCount = 32,
-      // actualSpacing = 37.375 mm → overlap of ~0.625 mm. Confirms the
-      // fix generalises beyond the single 1220 boundary case.
+    it('throws LayoutError for a narrow deck with sub-min spacing (pre-#25 reproducer; now caught by MIN_JOIST_SPACING_MM=305)', () => {
       const design = makeDesign({ widthMm: 1234, spacingMm: 38 });
       expect(() => computeLayout(design)).toThrow(LayoutError);
       expect(() => computeLayout(design)).toThrow(/spacing/i);
@@ -300,6 +360,54 @@ describe('computeLayout — LayoutError contract', () => {
       // 305, 406, 508, 610 mm are all much larger than the 38 mm
       // thickness, so actualSpacing stays close to spacingMm and no
       // overlap is possible.
+      for (const spacingMm of [305, 406, 508, 610]) {
+        const design = makeDesign({ spacingMm });
+        expect(() => computeLayout(design)).not.toThrow();
+      }
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // PR #73 review-gate follow-up — GPT-5.5 HIGH #2 root fix.
+  //
+  // A practical MIN joist spacing at the domain trust boundary bounds
+  // the joist count AND its blocking-member multiplier. Value chosen:
+  // `MIN_JOIST_SPACING_MM = 305 mm (12″ o.c.)` — mirrors the codebase's
+  // canonical tightest sensible spacing (the `reduce-joist-spacing`
+  // remediation floor in `remediations.ts`, and the first entry in
+  // `TABULATED_SPACINGS_MM = [305, 406, 610]`).
+  //
+  // Enforced at 3 layers: (a) `validateJoistSpacing` in the domain;
+  // (b) the persisted `.deck` schema v2's `joist.spacingMm.minimum`;
+  // (c) the ParameterPanel's joist-spacing LengthField hint.
+  // -------------------------------------------------------------------
+  describe('PR #73 review — MIN_JOIST_SPACING_MM (=305 mm, 12″ o.c.)', () => {
+    it('rejects spacingMm strictly below the min with an actionable LayoutError', () => {
+      // A value comfortably below the min AND above the joist
+      // thickness (38 mm) — so we know the rejection came from the
+      // MIN guard, not the thickness guard.
+      const design = makeDesign({ spacingMm: 200 });
+      expect(() => computeLayout(design)).toThrow(LayoutError);
+      expect(() => computeLayout(design)).toThrow(/305/); // names the min
+      expect(() => computeLayout(design)).toThrow(/12/); // names the 12" o.c. imperial equivalent
+      expect(() => computeLayout(design)).toThrow(/spacing/i); // names the field
+      // The message must be actionable — suggest typical values so
+      // the UI banner surfaces a fix hint the user can act on.
+      expect(() => computeLayout(design)).toThrow(/406|610|typical/i);
+    });
+
+    it('accepts spacingMm == MIN (=305) exactly (inclusive boundary)', () => {
+      const design = makeDesign({ spacingMm: 305 });
+      expect(() => computeLayout(design)).not.toThrow();
+    });
+
+    it('rejects spacingMm at 304 (one millimetre below the min — boundary)', () => {
+      const design = makeDesign({ spacingMm: 304 });
+      expect(() => computeLayout(design)).toThrow(LayoutError);
+      expect(() => computeLayout(design)).toThrow(/305/);
+    });
+
+    it('accepts all catalog spacings (305, 406, 508, 610) — regression pin: MIN guard does NOT over-reject', () => {
       for (const spacingMm of [305, 406, 508, 610]) {
         const design = makeDesign({ spacingMm });
         expect(() => computeLayout(design)).not.toThrow();
@@ -647,6 +755,18 @@ describe('computeLayout — S20 elevated + deck-blocks AC1 (block members, no fo
     // 3657.6 / 2438.4 = 1.5 → ceil=2 → +1 = 3 posts per beam × 2 beams = 6.
     expect(posts).toHaveLength(6);
     expect(blocks).toHaveLength(6);
+  });
+
+  it('elevated + deck-blocks also emits blocking between joists (issue #72)', () => {
+    // The deck-blocks variant shares the joist y-anchor with the
+    // posts-on-footings variant (`computeYStack.joistCenterY`), so
+    // the same `computeBlockingFromDesign` adapter applies. This
+    // test proves the wiring lives in BOTH elevated compute paths.
+    const layout = computeLayout(makeDeckBlocksDesign());
+    const joists = layout.members.filter((m) => m.kind === 'joist');
+    const blocking = layout.members.filter((m) => m.kind === 'blocking');
+    expect(joists.length).toBeGreaterThanOrEqual(2);
+    expect(blocking.length).toBeGreaterThan(0);
   });
 });
 

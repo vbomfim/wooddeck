@@ -65,7 +65,16 @@
           "required": ["material", "spacingMm"],
           "properties": {
             "material": { "$ref": "#/$defs/MaterialRef" },
-            "spacingMm": { "$ref": "#/$defs/Mm" }
+            "spacingMm": {
+              "allOf": [
+                { "$ref": "#/$defs/Mm" },
+                {
+                  "type": "number",
+                  "minimum": 305,
+                  "description": "Joist on-center spacing in millimetres. Practical minimum 305 mm (12 inch o.c.) mirrors the domain-level MIN_JOIST_SPACING_MM guard in src/domain/layout/layout-shared.ts. Enforced here so a hand-crafted .deck file with a sub-min value is rejected at deserialize (as schema-validation-failed) rather than reaching the domain and throwing an opaque LayoutError."
+                }
+              ]
+            }
           }
         },
         "beam": {

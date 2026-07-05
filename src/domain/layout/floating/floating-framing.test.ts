@@ -402,11 +402,26 @@ describe('FIX #2 — floating joist-spacing validation (safety guard)', () => {
 
       it('REJECTS spacingMm below joist thickness (would overlap joists)', () => {
         // 2×8 dressed widthMm = 38 → spacing < 38 must be rejected.
+        // NOTE (PR #73 review): the MIN_JOIST_SPACING_MM = 305 guard
+        // also rejects 30 mm now, and fires FIRST. Either message is
+        // acceptable — both prove the fail-loud invariant.
         const design = makeFloatingDesign({
           floatingFraming: framing,
           spacingMm: 30,
         });
         expect(() => computeFloatingLayout(design)).toThrowError(LayoutError);
+      });
+
+      it('REJECTS spacingMm strictly below MIN_JOIST_SPACING_MM=305 (PR #73 review)', () => {
+        // A value comfortably below the min AND above thickness so
+        // we know the rejection came from the MIN guard, not the
+        // thickness guard.
+        const design = makeFloatingDesign({
+          floatingFraming: framing,
+          spacingMm: 200,
+        });
+        expect(() => computeFloatingLayout(design)).toThrowError(LayoutError);
+        expect(() => computeFloatingLayout(design)).toThrowError(/305/);
       });
 
       it('ACCEPTS typical spacings (305, 406, 610 mm) unchanged', () => {
@@ -449,6 +464,69 @@ describe('FIX #2 — floating joist-spacing validation (safety guard)', () => {
         joist: { ...base.joist, spacingMm: bad },
       };
       expect(() => computeLayout(design, { now: () => base.createdAt })).toThrowError(LayoutError);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Issue #72 — blocking between joists (IRC R502.7.1) — floating pipelines
+// ---------------------------------------------------------------------------
+//
+// Integration coverage that BOTH floating framing methods (A + B)
+// emit blocking members co-planar with the joists. The per-member
+// geometry (position / size / material / id) is proved exhaustively
+// by the unit suite in `../blocking-layout.test.ts`; these tests
+// verify the WIRING — that the shared helper is actually called
+// from each method's compute path and that the emitted members
+// carry the right kind and reasonable bay-count.
+
+describe('Method A blocking — issue #72 wiring', () => {
+  it('emits blocking members between adjacent joists (≥1 per bay × ≥1 row)', () => {
+    const design = makeFloatingDesign({
+      widthFt: 16,
+      lengthFt: 14,
+      floatingFraming: 'beams-and-joists',
+    });
+    const layout = computeFloatingLayout(design);
+    const joists = layout.members.filter((m) => m.kind === 'joist');
+    const blocking = layout.members.filter((m) => m.kind === 'blocking');
+    expect(joists.length).toBeGreaterThanOrEqual(2);
+    // For a 14 ft deck (4267.2 mm), N=1 (single mid-span row).
+    // Bay count = joists.length - 1. So blocking count = bays.
+    const bays = joists.length - 1;
+    expect(blocking).toHaveLength(bays);
+  });
+
+  it('blocking sits at the SAME y as the joists (co-planar)', () => {
+    const design = makeFloatingDesign({ floatingFraming: 'beams-and-joists' });
+    const layout = computeFloatingLayout(design);
+    const joistY = layout.members.find((m) => m.kind === 'joist')!.position.y;
+    for (const b of layout.members.filter((m) => m.kind === 'blocking')) {
+      expect(b.position.y).toBe(joistY);
+    }
+  });
+});
+
+describe('Method B blocking — issue #72 wiring', () => {
+  it('emits blocking members between adjacent joists on the joists-on-blocks plane', () => {
+    const design = makeFloatingDesign({
+      widthFt: 16,
+      lengthFt: 14,
+      floatingFraming: 'joists-on-blocks',
+    });
+    const layout = computeFloatingLayout(design);
+    const joists = layout.members.filter((m) => m.kind === 'joist');
+    const blocking = layout.members.filter((m) => m.kind === 'blocking');
+    expect(joists.length).toBeGreaterThanOrEqual(2);
+    expect(blocking.length).toBeGreaterThan(0);
+  });
+
+  it('blocking sits at the SAME y as the joists — Method B (joist bottom on block top)', () => {
+    const design = makeFloatingDesign({ floatingFraming: 'joists-on-blocks' });
+    const layout = computeFloatingLayout(design);
+    const joistY = layout.members.find((m) => m.kind === 'joist')!.position.y;
+    for (const b of layout.members.filter((m) => m.kind === 'blocking')) {
+      expect(b.position.y).toBe(joistY);
     }
   });
 });

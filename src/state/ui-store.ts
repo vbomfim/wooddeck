@@ -66,11 +66,14 @@ import { create } from 'zustand';
 export type CameraPreset = 'orbit' | 'top' | 'front' | 'side' | 'iso';
 
 /**
- * The seven visual LAYERS a user can toggle. Names match the domain
+ * The eight visual LAYERS a user can toggle. Names match the domain
  * `MemberKind` set (`joist` / `beam` / `post` / `footing` / `board` /
- * `block`) plus `environment` (ground plane + shadows).
+ * `block` / `blocking`) plus `environment` (ground plane + shadows).
  * `board` is renamed to `decking` here to match user-facing
- * vocabulary; `block` is pluralized to `blocks` for the same reason.
+ * vocabulary; `block` is pluralized to `blocks` for the same reason;
+ * `blocking` retains the singular domain name because it refers to a
+ * distinct structural role (short lumber noggins between joists per
+ * IRC R502.7.1) and pluralizing to `blockings` would obscure that.
  * Layer maps to scene-graph visibility toggles in S9/S10/S22.
  *
  * ## S22 addition (Epic 2 / FR-029)
@@ -84,16 +87,25 @@ export type CameraPreset = 'orbit' | 'top' | 'front' | 'side' | 'iso';
  * between beams for lateral bracing." S26's floating rework removed
  * that concept from the layout (`floating-layout.ts` emits ZERO
  * `blocking` members), leaving the toggle wired to an
- * always-empty layer — misleading UI. The key is removed from
+ * always-empty layer — misleading UI. The key was removed from
  * `LayerVisibility` + `LAYER_ITEMS`; the dormant `BlockingLayer`
- * component and the `blocking` `MemberKind` are preserved so a
+ * component and the `blocking` `MemberKind` were preserved so a
  * future "blocking between joists" feature can cheaply re-add the
- * toggle. See `scene/layers/BlockingLayer.tsx` for the re-add path.
+ * toggle.
+ *
+ * ## Issue #72 — `blocking` RE-ADDED (blocking-between-joists)
+ *
+ * The blocking key is re-added as active. It now maps to the
+ * `blocking` domain `MemberKind` emitted by the SHARED helper
+ * `layoutBlockingBetweenJoists` (called from both elevated and
+ * floating pipelines) — solid noggins between adjacent joists per
+ * IRC R502.7 / R502.7.1 (≤ 8 ft o.c., ≥ 1 interior mid-span row).
  */
 export interface LayerVisibility {
   readonly environment: boolean;
   readonly decking: boolean;
   readonly joists: boolean;
+  readonly blocking: boolean;
   readonly beams: boolean;
   readonly posts: boolean;
   readonly footings: boolean;
@@ -251,7 +263,7 @@ export interface UiStoreActions {
 }
 
 /**
- * All seven layers on — the boot-time default. Extracted so both
+ * All eight layers on — the boot-time default. Extracted so both
  * the store initializer and `showAllLayers()` can share the same
  * value (DRY — a new layer added to the union means updating ONE
  * place).
@@ -259,11 +271,14 @@ export interface UiStoreActions {
  * S22 addition — `blocks` joins the six S10 layers.
  * S26 FIX #6 — `blocking` REMOVED from LayerVisibility (see
  * interface doc); the dormant scene layer + MemberKind remain.
+ * Issue #72 — `blocking` RE-ADDED (blocking-between-joists;
+ * IRC R502.7.1). Default ON — safety-relevant lateral restraint.
  */
 const ALL_LAYERS_VISIBLE: LayerVisibility = Object.freeze({
   environment: true,
   decking: true,
   joists: true,
+  blocking: true,
   beams: true,
   posts: true,
   footings: true,
@@ -271,7 +286,7 @@ const ALL_LAYERS_VISIBLE: LayerVisibility = Object.freeze({
 });
 
 /**
- * All seven layers off — utility for `hideAllLayers()`. Kept as a
+ * All eight layers off — utility for `hideAllLayers()`. Kept as a
  * module-scope frozen literal so every `hideAllLayers()` invocation
  * returns the same reference; consumers that key on referential
  * equality see a stable value.
@@ -280,6 +295,7 @@ const ALL_LAYERS_HIDDEN: LayerVisibility = Object.freeze({
   environment: false,
   decking: false,
   joists: false,
+  blocking: false,
   beams: false,
   posts: false,
   footings: false,

@@ -97,6 +97,64 @@ export const MIN_DECK_DIMENSION_MM: Mm = 4 * MM_PER_FOOT;
 export const MAX_DECK_DIMENSION_MM: Mm = 100 * MM_PER_FOOT;
 
 /**
+ * PR #73 review — GPT-5.5 HIGH #2 root fix.
+ *
+ * Minimum practical joist on-center spacing. Enforced at the
+ * domain trust boundary in `validateJoistSpacing` (below), mirrored
+ * in the persisted `.deck` schema v2 (`docs/deck-file-schema-v2.json`
+ * on `joist.spacingMm`), and surfaced to the user in the
+ * `ParameterPanel` joist-spacing hint.
+ *
+ * ## Value rationale (305 mm = 12″ o.c.)
+ *
+ * 305 mm is the codebase's canonical tightest sensible spacing.
+ * Evidence:
+ *   - `TABULATED_SPACINGS_MM = [305, 406, 610]` in
+ *     `src/domain/remediations.ts` — the app's authoritative
+ *     catalog of "typical" spacings.
+ *   - The `reduce-joist-spacing` remediation FLOOR is 305 mm — the
+ *     app's own auto-remediation loop refuses to go tighter.
+ *   - 12″ o.c. is the tightest joist pitch used in residential
+ *     framing per IRC prescriptive tables; below that is
+ *     specialty framing (bridge decking) and out of MVP scope.
+ *
+ * ## What this bounds (both structural correctness AND DoS)
+ *
+ * 1. Blocking-member explosion. `layoutBlockingBetweenJoists`
+ *    emits (bays × rows) = (joists−1) × rows members. Without
+ *    a lower bound on spacing, a 100 ft × 100 ft deck at
+ *    `spacingMm = joistThickness + 1` could theoretically yield
+ *    ~800 joists × 12 rows = ~9,600 blocking members. At MIN
+ *    305 the same deck caps at ~100 joists → ~1,200 blocking,
+ *    proportionate to a 10,000 sq ft deck.
+ * 2. Layout-time DoS (pre-existing). `computeJoistXCenters`
+ *    already tolerated near-thickness spacing at the trust
+ *    boundary; the resulting joist count grew as
+ *    `O(width / thickness)`. This bound caps joist count too.
+ * 3. Method B degenerate-exception (FR-035). Prior to this
+ *    bound, `spacingMm=40` on a 100 × 100 ft footprint reached
+ *    the "numJoists × 2 > MAX_METHOD_B_BLOCK_COUNT" exception
+ *    in `resolveMethodBGrid`. With MIN=305 that pathological
+ *    input is REJECTED at validation — the FR-035 exception
+ *    code is retained as belt-and-braces, but is now
+ *    unreachable via any legal design.
+ *
+ * ## Boundary is INCLUSIVE
+ *
+ * `spacingMm == 305` is ACCEPTED (the "tightest sensible" pitch);
+ * `spacingMm == 304` is REJECTED. The check below reads
+ * `spacingMm < MIN_JOIST_SPACING_MM` so the boundary is inclusive.
+ *
+ * Autonomous decision — reversible by editing this constant.
+ * If lowered, verify (a) the blocking-member bound at
+ * `MAX_DECK_DIMENSION_MM` remains proportionate; (b) the
+ * `reduce-joist-spacing` remediation floor still matches (or
+ * lower it in tandem); (c) any UI hint mentioning "12 in" is
+ * updated.
+ */
+export const MIN_JOIST_SPACING_MM: Mm = 305;
+
+/**
  * `LayoutError` — thrown when a `DeckDesign` fails validation OR when
  * a downstream catalog lookup fails. Distinct from generic `Error` so
  * consumers can `catch (err) { if (err instanceof LayoutError) …}`
@@ -160,16 +218,53 @@ export function validateJoistSpacing(design: DeckDesign): void {
     );
   }
   const spacingMm = design.joist.spacingMm;
-  if (
-    !Number.isFinite(spacingMm) ||
-    spacingMm <= 0 ||
-    spacingMm < joistThicknessMm
-  ) {
+  if (!Number.isFinite(spacingMm) || spacingMm <= 0) {
     throw new LayoutError(
-      `Invalid joist spacing: spacingMm=${spacingMm} must be finite, ` +
-        `strictly positive, and ≥ the joist thickness of ${joistThicknessMm} mm ` +
-        `(spacings smaller than the joist thickness would produce overlapping joists; ` +
-        `spacings ≤ 0 or non-finite produce a non-terminating layout anchor loop). ` +
+      `Invalid joist spacing: spacingMm=${spacingMm} must be finite ` +
+        `and strictly positive (spacings ≤ 0 or non-finite produce a ` +
+        `non-terminating layout anchor loop). ` +
+        `Typical values: 305 mm (12″), 406 mm (16″), 508 mm (20″), 610 mm (24″).`,
+    );
+  }
+
+  // PR #73 review — GPT-5.5 HIGH #2 root fix.
+  //
+  // Enforce the practical MIN joist spacing at the trust boundary
+  // BEFORE the thickness/actualSpacing checks so:
+  //   (a) the friendlier "12″ min" message fires first for the
+  //       common user-error case (someone enters a very small
+  //       spacing), instead of the more technical thickness /
+  //       overlap message; and
+  //   (b) the pathological input path that used to reach the
+  //       Method B FR-035 degenerate exception (`numJoists × 2 >
+  //       MAX_METHOD_B_BLOCK_COUNT`) and the blocking-member
+  //       explosion (`bays × rows` unbounded above) is CUT OFF
+  //       here — bounding both structural-correctness AND DoS
+  //       surfaces at a single seam.
+  //
+  // Kept AFTER `spacingMm <= 0` so a NaN / negative value gives
+  // the (more accurate) "non-terminating loop" reason, not a
+  // misleading "below 305" reason.
+  //
+  // The thickness (`< joistThicknessMm`) and issue-#25
+  // actualSpacing checks BELOW are retained as defense-in-depth:
+  // a future lowering of MIN_JOIST_SPACING_MM (or a caller that
+  // bypasses this helper) must still catch overlapping joists.
+  if (spacingMm < MIN_JOIST_SPACING_MM) {
+    throw new LayoutError(
+      `Joist spacing ${spacingMm} mm is below the ${MIN_JOIST_SPACING_MM} mm ` +
+        `(12″) practical minimum — tighter spacings are not supported by this ` +
+        `tool (they exceed the joist-count budget for large decks and fall ` +
+        `outside IRC prescriptive framing tables). ` +
+        `Typical values: 305 mm (12″), 406 mm (16″), 610 mm (24″).`,
+    );
+  }
+
+  if (spacingMm < joistThicknessMm) {
+    throw new LayoutError(
+      `Invalid joist spacing: spacingMm=${spacingMm} must be ≥ the joist ` +
+        `thickness of ${joistThicknessMm} mm (spacings smaller than the joist ` +
+        `thickness would produce overlapping joists). ` +
         `Typical values: 305 mm (12″), 406 mm (16″), 508 mm (20″), 610 mm (24″).`,
     );
   }

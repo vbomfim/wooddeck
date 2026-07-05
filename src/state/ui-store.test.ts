@@ -62,12 +62,13 @@ describe('useUiStore — initial state', () => {
     expect(useUiStore.getState().cameraPreset).toBe('orbit');
   });
 
-  it('starts with all seven layers visible (six original + S22 blocks; S26 FIX #6 removed blocking)', () => {
+  it('starts with all eight layers visible (six original + S22 blocks + #72 blocking re-added)', () => {
     const lv = useUiStore.getState().layerVisibility;
     expect(lv).toEqual({
       environment: true,
       decking: true,
       joists: true,
+      blocking: true,
       beams: true,
       posts: true,
       footings: true,

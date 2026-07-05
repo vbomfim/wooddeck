@@ -54,6 +54,7 @@ beforeEach(() => {
         environment: true,
         decking: true,
         joists: true,
+        blocking: true,
         beams: true,
         posts: true,
         footings: true,
@@ -89,6 +90,7 @@ describe('<LayerTogglePanel /> — heading + checkboxes (AC1)', () => {
           environment: true,
           decking: true,
           joists: false, // hidden
+          blocking: true,
           beams: true,
           posts: true,
           footings: true,
@@ -210,12 +212,13 @@ describe('<LayerTogglePanel /> — camera presets (AC4)', () => {
 
 // ---------------------------------------------------------------------------
 // S26 issue #48 — Blocks toggle row
-// (`blocking` row removed in S26 FIX #6 — see LayerVisibility doc)
+// (`blocking` row re-added under issue #72 — blocking between joists per
+//  IRC R502.7. See LayerVisibility doc-block for the full history.)
 // ---------------------------------------------------------------------------
 
 describe('<LayerTogglePanel /> — S26 blocks toggle (AC1 rendering)', () => {
-  it('LAYER_ITEMS contains exactly SEVEN rows (six original + blocks; S26 FIX #6 removed blocking)', () => {
-    expect(LAYER_ITEMS).toHaveLength(7);
+  it('LAYER_ITEMS contains exactly EIGHT rows (six original + blocks + blocking re-added under issue #72)', () => {
+    expect(LAYER_ITEMS).toHaveLength(8);
   });
 
   it('renders a "Blocks" checkbox (AC1)', () => {
@@ -223,26 +226,27 @@ describe('<LayerTogglePanel /> — S26 blocks toggle (AC1 rendering)', () => {
     expect(screen.getByRole('checkbox', { name: 'Blocks' })).toBeInTheDocument();
   });
 
-  it('does NOT render a "Blocking" checkbox — dead toggle removed in S26 FIX #6', () => {
+  it('renders a "Blocking" checkbox — re-attached under issue #72 (blocking between joists per IRC R502.7)', () => {
     render(<LayerTogglePanel />);
-    expect(screen.queryByRole('checkbox', { name: 'Blocking' })).toBeNull();
+    expect(screen.getByRole('checkbox', { name: 'Blocking' })).toBeInTheDocument();
   });
 
-  it('renders a total of seven checkboxes in the panel (AC1)', () => {
+  it('renders a total of eight checkboxes in the panel (AC1)', () => {
     render(<LayerTogglePanel />);
-    expect(screen.getAllByRole('checkbox')).toHaveLength(7);
+    expect(screen.getAllByRole('checkbox')).toHaveLength(8);
   });
 
   it('places blocks right after footings, in ticket-§2 order (AC1)', () => {
     // The panel iterates LAYER_ITEMS to render rows — the array
-    // order IS the visual order. Ticket §2 order (post-S26 FIX #6):
-    // environment → decking → joists → beams → posts → footings →
-    // blocks.
+    // order IS the visual order. Ticket §2 order (post-#72):
+    // environment → decking → joists → blocking → beams → posts →
+    // footings → blocks.
     const orderedKeys = LAYER_ITEMS.map((item) => item.key);
     expect(orderedKeys).toEqual([
       'environment',
       'decking',
       'joists',
+      'blocking',
       'beams',
       'posts',
       'footings',
@@ -348,8 +352,9 @@ describe('<LayerTogglePanel /> — S26 blocks toggle (AC8 empty layers)', () => 
 
     render(<LayerTogglePanel />);
     expect(screen.getByRole('checkbox', { name: 'Blocks' })).toBeInTheDocument();
-    // S26 FIX #6 — "Blocking" checkbox was removed.
-    expect(screen.queryByRole('checkbox', { name: 'Blocking' })).toBeNull();
+    // Issue #72 — "Blocking" is now an ACTIVE toggle (re-attached
+    // for solid noggins between joists per IRC R502.7).
+    expect(screen.getByRole('checkbox', { name: 'Blocking' })).toBeInTheDocument();
   });
 });
 
