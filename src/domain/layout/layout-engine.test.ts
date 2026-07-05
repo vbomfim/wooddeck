@@ -238,10 +238,73 @@ describe('computeLayout — LayoutError contract', () => {
     expect(() => computeLayout(design)).toThrow(/38/);
   });
 
-  it('accepts spacingMm == joist thickness (Fix A boundary — inclusive)', () => {
-    // 2x10 PT joist thickness = 38 mm; spacingMm=38 is right at the min.
-    const design = makeDesign({ spacingMm: 38 });
+  it('accepts spacingMm == joist thickness when width geometry is compatible (issue #25 boundary — inclusive)', () => {
+    // 2x10 PT joist thickness = 38 mm; spacingMm = 38 is right at the min.
+    //
+    // The even-spaced algorithm (see joist-layout.ts) computes
+    //   actualSpacing = (widthMm - thickness) / ceil((widthMm - thickness) / spacingMm)
+    // With spacingMm == thickness, `actualSpacing == thickness` iff
+    // `(widthMm - thickness)` is an exact multiple of `thickness`. Otherwise
+    // `actualSpacing < thickness` and adjacent joists overlap — which the
+    // strengthened validator now rejects (issue #25).
+    //
+    // Pick widthMm = 38 * 33 = 1254 mm (> MIN_DECK_DIMENSION_MM ≈ 1219.2):
+    // usable = 1216 = 38 * 32 → bayCount = 32 → actualSpacing = 38 exactly.
+    // Joists touch face-to-face (no overlap, no gap) — allowed.
+    const design = makeDesign({ widthMm: 38 * 33, spacingMm: 38 });
     expect(() => computeLayout(design)).not.toThrow();
+  });
+
+  // Issue #25 regression — see `src/domain/layout/layout-shared.ts`
+  // `validateJoistSpacing`. The pre-#25 validator only rejected
+  // `spacingMm < joistThicknessMm`, but the even-spaced algorithm can
+  // produce `actualSpacing < joistThicknessMm` even when the REQUESTED
+  // spacing is legal (equal to thickness). That produces silent joist
+  // overlap of ~1 mm, which the AC3 property test caught intermittently
+  // (flaky in CI — depended on the fast-check seed hitting the boundary).
+  describe('issue #25 — reject joist spacings that would produce overlap by construction', () => {
+    it('throws LayoutError when requested spacing == thickness but the resulting even-spaced actualSpacing would be < thickness', () => {
+      // Deterministic reproducer for the flake reported in issue #25.
+      // widthMm = 1220 (just above MIN_DECK_DIMENSION_MM = 1219.2),
+      // spacingMm = 38 (2×10 PT joist thickness). The even-spaced
+      // algorithm computes:
+      //   usable = 1220 - 38 = 1182
+      //   bayCount = ceil(1182 / 38) = 32
+      //   actualSpacing = 1182 / 32 = 36.9375 mm < 38 mm
+      // → adjacent joists would overlap by ~1.06 mm.
+      // With the strengthened validator this must fail loud.
+      const design = makeDesign({ widthMm: 1220, spacingMm: 38 });
+      expect(() => computeLayout(design)).toThrow(LayoutError);
+      // The error message must be actionable — name the requested
+      // spacing, the achievable spacing, and the joist thickness so
+      // the ParameterPanel warning banner can render the fix hint.
+      expect(() => computeLayout(design)).toThrow(/spacing/i);
+      expect(() => computeLayout(design)).toThrow(/1220/); // width
+      expect(() => computeLayout(design)).toThrow(/38/); // spacing / thickness
+    });
+
+    it('throws LayoutError for a narrow deck where usable width is not a multiple of spacing (issue #25 reproducer close to fast-check seed)', () => {
+      // The flaky fast-check case (seed -1901521422) landed at
+      // widthMm ~1144, spacingMm = 38. The property test's dim arb
+      // bottoms out at MIN_DECK_DIMENSION_MM (~1220), so we pick 1234
+      // — the SAME regime: usable = 1196 = 38*31.47, bayCount = 32,
+      // actualSpacing = 37.375 mm → overlap of ~0.625 mm. Confirms the
+      // fix generalises beyond the single 1220 boundary case.
+      const design = makeDesign({ widthMm: 1234, spacingMm: 38 });
+      expect(() => computeLayout(design)).toThrow(LayoutError);
+      expect(() => computeLayout(design)).toThrow(/spacing/i);
+    });
+
+    it('accepts spacings that comfortably exceed the joist thickness (regression guard — do not over-reject)', () => {
+      // Sanity: the tightened check must NOT break normal designs.
+      // 305, 406, 508, 610 mm are all much larger than the 38 mm
+      // thickness, so actualSpacing stays close to spacingMm and no
+      // overlap is possible.
+      for (const spacingMm of [305, 406, 508, 610]) {
+        const design = makeDesign({ spacingMm });
+        expect(() => computeLayout(design)).not.toThrow();
+      }
+    });
   });
 
   it('LayoutError is a subclass of Error and has name "LayoutError"', () => {

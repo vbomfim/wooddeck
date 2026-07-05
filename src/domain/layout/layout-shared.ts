@@ -86,6 +86,18 @@ export class LayoutError extends Error {
  *   - `spacingMm < joistThicknessMm` — placing joists closer than
  *     the joist's own thickness produces OVERLAPPING joists, which
  *     the layout math cannot represent.
+ *   - `actualSpacingMm < joistThicknessMm` (issue #25) — even when
+ *     the REQUESTED spacing is legal (`>= thickness`), the even-spaced
+ *     algorithm in `computeJoistXCenters` may compute
+ *     `actualSpacing = (widthMm - thickness) / ceil((widthMm - thickness) / spacingMm)`
+ *     which can be strictly LESS than `thickness` when the requested
+ *     spacing is at/near the thickness and the deck width is narrow
+ *     (e.g. widthMm=1220, spacingMm=38, thickness=38 → actualSpacing=
+ *     36.94 mm → adjacent joists overlap by ~1 mm). This was a real
+ *     layout-correctness bug the AC3 property test caught
+ *     intermittently — the flake in issue #25. The strengthened check
+ *     rejects the design at the trust boundary so the pipeline can
+ *     never emit an overlapping layout.
  *
  * The joist thickness is looked up from the materials catalog; a
  * catalog miss is surfaced as a `LayoutError` naming the material.
@@ -125,6 +137,54 @@ export function validateJoistSpacing(design: DeckDesign): void {
         `spacings ≤ 0 or non-finite produce a non-terminating layout anchor loop). ` +
         `Typical values: 305 mm (12″), 406 mm (16″), 508 mm (20″), 610 mm (24″).`,
     );
+  }
+
+  // Issue #25 — tighter check on the ACHIEVABLE spacing.
+  //
+  // The requested `spacingMm` is legal at this point (≥ thickness),
+  // but the even-spaced anchor algorithm in `computeJoistXCenters`
+  // computes:
+  //   usable       = widthMm - joistThicknessMm
+  //   bayCount     = ceil(usable / spacingMm)
+  //   actualSpacing = usable / bayCount
+  // With `spacingMm == joistThicknessMm` AND `usable` NOT an exact
+  // multiple of `spacingMm`, `actualSpacing < joistThicknessMm` — the
+  // algorithm packs one MORE joist than fits at the requested
+  // pitch, and the resulting on-center distance is smaller than the
+  // joists themselves → adjacent joists physically overlap.
+  //
+  // The tolerance `EPS_MM` matches the AC3 property test's `EPS` so
+  // "actualSpacing == thickness exactly" (touching face-to-face) is
+  // NOT falsely rejected — floats produced by `usable / bayCount`
+  // can carry sub-nanometre rounding error even when the math is
+  // exact.
+  //
+  // Guard on `usable > 0` for defensive robustness: the elevated
+  // pipeline validates widthMm ≥ MIN_DECK_DIMENSION_MM (~1219.2 mm)
+  // BEFORE this helper runs, so `usable = widthMm - thickness` is
+  // always > 0 in practice. But `validateJoistSpacing` is exported
+  // as a shared helper, and a future caller (or a hostile .deck
+  // file entering through a different boundary) could invoke it
+  // with a degenerate width. `usable ≤ 0` would produce a negative
+  // `bayCount` and division-by-zero — safer to no-op the tightening
+  // check on unreachable geometry and let the width guard fail loud.
+  const widthMm = design.footprint.widthMm;
+  const usableSpanMm = widthMm - joistThicknessMm;
+  if (usableSpanMm > 0) {
+    const bayCount = Math.ceil(usableSpanMm / spacingMm);
+    const actualSpacingMm = usableSpanMm / bayCount;
+    const EPS_MM = 1e-6;
+    if (actualSpacingMm + EPS_MM < joistThicknessMm) {
+      throw new LayoutError(
+        `Joist spacing ${spacingMm} mm too tight for deck width ${widthMm} mm — ` +
+          `evenly spacing ${bayCount + 1} joists across the ${usableSpanMm} mm ` +
+          `usable span places them ${actualSpacingMm.toFixed(3)} mm on-center, ` +
+          `less than the ${joistThicknessMm} mm joist thickness (adjacent joists ` +
+          `would overlap). Increase the joist spacing OR choose a joist with ` +
+          `smaller thickness OR increase the deck width. Typical values: ` +
+          `305 mm (12″), 406 mm (16″), 508 mm (20″), 610 mm (24″).`,
+      );
+    }
   }
 }
 
