@@ -115,3 +115,14 @@ export { StructureSelector } from './fields/StructureSelector';
 export { FoundationTypeSelector } from './fields/FoundationTypeSelector';
 export { BlockProductSelector } from './fields/BlockProductSelector';
 
+// ---- S15 issue #16 — 2D top-down plan view -----------------------------
+//
+// A single component + copy constants. Helpers stay INTERNAL to
+// the `PlanView2D` submodule — consumers only need the component.
+export {
+  PlanView2D,
+  PLAN_VIEW_EMPTY_TEXT,
+  PLAN_VIEW_HEADING,
+  PLAN_VIEW_TITLE,
+} from './PlanView2D';
+export type { PlanView2DProps } from './PlanView2D';

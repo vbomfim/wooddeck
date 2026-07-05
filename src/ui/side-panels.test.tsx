@@ -40,19 +40,20 @@ afterEach(() => {
 });
 
 describe('<SidePanels /> — integration', () => {
-  it('renders all four panel headings (Layers & view, Warnings, BOM, Save & export)', () => {
+  it('renders all five panel headings (Layers & view, Warnings, BOM, Save & export, Plan view)', () => {
     render(<SidePanels />);
     const h2s = screen.getAllByRole('heading', { level: 2 });
-    // Every panel MUST provide its own <h2> — 4 total.
-    expect(h2s).toHaveLength(4);
+    // Every panel MUST provide its own <h2> — 5 total (S15 adds the plan view).
+    expect(h2s).toHaveLength(5);
     const texts = h2s.map((h) => h.textContent?.toLowerCase().trim() ?? '');
     expect(texts.some((t) => t.includes('layers'))).toBe(true);
     expect(texts.some((t) => t.startsWith('warnings'))).toBe(true);
     expect(texts.some((t) => t.includes('bill of materials'))).toBe(true);
     expect(texts.some((t) => t.includes('save') && t.includes('export'))).toBe(true);
+    expect(texts.some((t) => t.includes('plan view'))).toBe(true);
   });
 
-  it('renders panels in the ticket order (toggles → warnings → BOM → export)', () => {
+  it('renders panels in the ticket order (toggles → warnings → BOM → export → plan view)', () => {
     render(<SidePanels />);
     const h2s = screen.getAllByRole('heading', { level: 2 });
     // documentPosition — first heading must come first in DOM.
@@ -60,6 +61,7 @@ describe('<SidePanels /> — integration', () => {
     expect(h2s[1]?.textContent?.toLowerCase()).toMatch(/^warnings/);
     expect(h2s[2]?.textContent?.toLowerCase()).toMatch(/bill of materials/);
     expect(h2s[3]?.textContent?.toLowerCase()).toMatch(/save.*export/);
+    expect(h2s[4]?.textContent?.toLowerCase()).toMatch(/plan view/);
   });
 
   it('toggling a layer in LayerTogglePanel does NOT change BOM row count', async () => {
