@@ -4,11 +4,13 @@
  *
  * ## Responsibility (single)
  *
- * Translate ONE {@link LayoutMember} into ONE `<mesh>` — a
- * translucent red box positioned, scaled, and rotated per the
- * member's pre-computed geometry fields. This is the leaf
- * decorator for the S11 WarningOverlay; the overlay
- * (`../WarningOverlay.tsx`) maps each `Warning` to the
+ * Translate ONE {@link LayoutMember} into ONE `<mesh>` — an
+ * opaque red enclosing box positioned and rotated per the
+ * member's pre-computed geometry fields, scaled to the member's
+ * inflated size (via {@link inflateHighlightScale}) so the box
+ * fully encloses the coincident member and avoids z-fighting.
+ * This is the leaf decorator for the S11 WarningOverlay; the
+ * overlay (`../WarningOverlay.tsx`) maps each `Warning` to the
  * corresponding member and renders one of these per warning.
  *
  * ## ZERO geometry math — the S10 finding-#3 pledge
@@ -18,15 +20,18 @@
  * through as `<mesh>` props:
  *
  *   position = [ m.position.x, m.position.y, m.position.z ]
- *   scale    = [ m.size.x,     m.size.y,     m.size.z     ]
+ *   scale    = inflateHighlightScale(m.size)   ← helper, no math here
  *   rotation = [ m.rotation.x, m.rotation.y, m.rotation.z ]
  *
- * The sibling `no-geometry-math.test.ts` grep scans this file
- * for any `member.position.<axis>` followed by an arithmetic
- * operator (`+`, `-`, `*`, `slash`, `%`), plus unary-minus
- * and bracket-notation variants, and fires if one appears.
- * The layout engine (S4) owns every derivation; the highlight
- * decorator is the passive consumer.
+ * The scale prop delegates to {@link inflateHighlightScale}
+ * (defined in `./highlight-primitives.ts`) so the per-axis
+ * inflation arithmetic lives in a primitives helper rather than
+ * inline here. The sibling `no-geometry-math.test.ts` grep scans
+ * this file for any `member.position.<axis>` / `member.size.<axis>`
+ * followed by an arithmetic operator (`+`, `-`, `*`, `slash`,
+ * `%`), plus unary-minus and bracket-notation variants, and fires
+ * if one appears — passing `member.size` through the helper
+ * preserves that pledge.
  *
  * ## 1 three.js unit = 1 mm
  *
@@ -39,11 +44,11 @@
  * The S11 `warning-overlay-no-layers` dep-cruiser rule (finding
  * #7) forbids `src/scene/highlights/**` from importing anything
  * under `src/scene/layers/**`. This file imports its shared
- * geometry + material from the sibling `./highlight-primitives`
- * module (a self-contained copy of the S10 shared-primitive
- * pattern), NEVER from `layers/shared/`. Enforced structurally
- * by dep-cruiser + BLOCK-2q boundary self-test + the sibling
- * `no-geometry-math.test.ts` grep guard.
+ * geometry + material + inflation helper from the sibling
+ * `./highlight-primitives` module (a self-contained copy of the
+ * S10 shared-primitive pattern), NEVER from `layers/shared/`.
+ * Enforced structurally by dep-cruiser + BLOCK-2q boundary
+ * self-test + the sibling `no-geometry-math.test.ts` grep guard.
  *
  * ## Reusability contract for future stories
  *
@@ -62,6 +67,7 @@ import {
   HIGHLIGHT_BOX_GEOMETRY,
   HIGHLIGHT_MATERIAL,
   HIGHLIGHT_RENDER_ORDER,
+  inflateHighlightScale,
 } from './highlight-primitives';
 
 /**
@@ -81,7 +87,7 @@ export function OverSpanHighlight({ member }: OverSpanHighlightProps): JSX.Eleme
   return (
     <mesh
       position={[member.position.x, member.position.y, member.position.z]}
-      scale={[member.size.x, member.size.y, member.size.z]}
+      scale={inflateHighlightScale(member.size)}
       rotation={[member.rotation.x, member.rotation.y, member.rotation.z]}
       geometry={HIGHLIGHT_BOX_GEOMETRY}
       material={HIGHLIGHT_MATERIAL}

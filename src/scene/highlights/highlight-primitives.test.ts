@@ -1,15 +1,17 @@
 /**
  * Unit tests for `src/scene/highlights/highlight-primitives.ts`.
  *
- * ## Coverage map (S11 issue #12)
+ * ## Coverage map (S11 issue #12 + opaque-highlight follow-up)
  *
- *   AC3  Highlight material is a distinctly-visible RED, TRANSLUCENT
- *        primitive that renders ON TOP of any occluding geometry
- *        (`depthTest === false`). Also asserts the mesh geometry
- *        is a unit BoxGeometry so scaling by `member.size` produces
- *        the correct box extent (matches the S10 BoxMember discipline
- *        — but with a SEPARATE self-contained copy per the S11
- *        `warning-overlay-no-layers` boundary rule).
+ *   AC3  Highlight material is a distinctly-visible RED, OPAQUE,
+ *        depth-correct primitive (`transparent === false`,
+ *        `opacity === 1`, `depthTest === true`, `depthWrite === true`).
+ *        The mesh geometry is a unit BoxGeometry — every highlight
+ *        scales it via {@link inflateHighlightScale}(member.size)
+ *        so the resulting box is slightly larger than the member,
+ *        fully enclosing it and avoiding z-fighting with the
+ *        member's own surface. See module header of the source file
+ *        for the depth-correct opaque rationale.
  *
  * ## Independence from `src/scene/layers/` (finding #7)
  *
@@ -27,9 +29,11 @@ import {
   disposeHighlightPrimitives,
   HIGHLIGHT_BOX_GEOMETRY,
   HIGHLIGHT_COLOR_HEX,
+  HIGHLIGHT_INFLATE_MM,
   HIGHLIGHT_MATERIAL,
   HIGHLIGHT_OPACITY,
   HIGHLIGHT_RENDER_ORDER,
+  inflateHighlightScale,
 } from './highlight-primitives';
 
 describe('highlight primitives — geometry (self-contained unit cube)', () => {
@@ -60,7 +64,7 @@ describe('highlight primitives — geometry (self-contained unit cube)', () => {
   });
 });
 
-describe('highlight primitives — material (AC3 always-on-top red)', () => {
+describe('highlight primitives — material (AC3 opaque red, depth-correct)', () => {
   it('HIGHLIGHT_MATERIAL is a MeshBasicMaterial (unlit — consistent visibility)', () => {
     // Unlit so the highlight does not vary in brightness with
     // scene lighting — a MeshStandardMaterial in a shadowed
@@ -83,39 +87,34 @@ describe('highlight primitives — material (AC3 always-on-top red)', () => {
     expect(HIGHLIGHT_MATERIAL.color.getHex()).toBe(HIGHLIGHT_COLOR_HEX);
   });
 
-  it('material is TRANSLUCENT (transparent=true, opacity in (0, 1))', () => {
-    // Translucent so the user can still see the highlighted member
-    // through the highlight — a fully opaque red box would hide
-    // the member entirely. Opacity is pinned via HIGHLIGHT_OPACITY.
-    expect(HIGHLIGHT_MATERIAL.transparent).toBe(true);
-    expect(HIGHLIGHT_OPACITY).toBeGreaterThan(0);
-    expect(HIGHLIGHT_OPACITY).toBeLessThan(1);
+  it('material is OPAQUE (transparent=false, opacity=1)', () => {
+    // Opacity was flipped from translucent (0.35) to fully opaque
+    // per the "remove transparency" request. The over-span member
+    // renders as a SOLID red box — no member tint bleeding through.
+    // Coincident z-fighting is avoided at the geometry level by
+    // {@link inflateHighlightScale} — see its dedicated tests.
+    expect(HIGHLIGHT_MATERIAL.transparent).toBe(false);
+    expect(HIGHLIGHT_OPACITY).toBe(1);
     expect(HIGHLIGHT_MATERIAL.opacity).toBe(HIGHLIGHT_OPACITY);
   });
 
-  it('material has depthTest=false so the highlight renders ON TOP (AC3)', () => {
-    // AC3: "Renders on top so it isn't occluded by the highlighted
-    // member." depthTest=false disables the per-pixel z-test that
-    // would otherwise hide the highlight behind opaque decking.
-    expect(HIGHLIGHT_MATERIAL.depthTest).toBe(false);
+  it('material participates in the depth buffer (depthTest=true, depthWrite=true)', () => {
+    // The old translucent-overlay design disabled depth entirely
+    // (test=false, write=false) and force-drew on top via a high
+    // renderOrder. The opaque-box design is depth-correct: the
+    // enclosing red box is occluded by nearer geometry the same
+    // way any other opaque scene primitive is — no more artificial
+    // "always on top" behavior that ignored the scene's z-order.
+    expect(HIGHLIGHT_MATERIAL.depthTest).toBe(true);
+    expect(HIGHLIGHT_MATERIAL.depthWrite).toBe(true);
   });
 
-  it('material has depthWrite=false so it does not corrupt the z-buffer', () => {
-    // Companion to depthTest=false: without depthWrite=false, the
-    // translucent highlight would still write its depth values,
-    // occluding subsequent transparent primitives further back.
-    // For a decorator layer this is unwanted — the highlight is
-    // an overlay, not a scene participant.
-    expect(HIGHLIGHT_MATERIAL.depthWrite).toBe(false);
-  });
-
-  it('HIGHLIGHT_RENDER_ORDER is HIGH so the mesh sorts LAST (drawn on top)', () => {
-    // Three.js sorts objects by renderOrder ascending — a high
-    // value means the highlight draws AFTER every opaque scene
-    // primitive (which typically have renderOrder=0). Combined
-    // with depthTest=false, this guarantees the highlight sits
-    // visually on top regardless of camera angle.
-    expect(HIGHLIGHT_RENDER_ORDER).toBeGreaterThanOrEqual(999);
+  it('HIGHLIGHT_RENDER_ORDER is 0 — depth-correct opaque, no forced top-most sort', () => {
+    // A depth-correct opaque box does not need to force itself to
+    // the end of the transparent pass. renderOrder=0 sorts it with
+    // other opaque scene primitives; z-buffer visibility is
+    // determined by the real depth values, not by draw order.
+    expect(HIGHLIGHT_RENDER_ORDER).toBe(0);
   });
 
   it('HIGHLIGHT_MATERIAL is a MODULE-LEVEL singleton (identity stable across imports)', async () => {
@@ -125,6 +124,48 @@ describe('highlight primitives — material (AC3 always-on-top red)', () => {
     // would explode GPU state as warnings scale up.
     const again = await import('./highlight-primitives');
     expect(again.HIGHLIGHT_MATERIAL).toBe(HIGHLIGHT_MATERIAL);
+  });
+});
+
+describe('highlight primitives — inflation (opaque box encloses member, no z-fight)', () => {
+  it('HIGHLIGHT_INFLATE_MM is a small positive mm value', () => {
+    // The inflation amount is added to each axis so the opaque
+    // highlight fully ENCLOSES the coincident member — no shared
+    // faces, no z-fighting. Too small (< 1 mm) and floating-point
+    // precision at real-world coordinates still lets faces touch;
+    // too large (> 100 mm) and the highlight visibly overshoots
+    // the member's silhouette.
+    expect(HIGHLIGHT_INFLATE_MM).toBeGreaterThan(0);
+    expect(HIGHLIGHT_INFLATE_MM).toBeLessThanOrEqual(100);
+  });
+
+  it('inflateHighlightScale adds HIGHLIGHT_INFLATE_MM on every axis', () => {
+    // The helper takes a size {x,y,z} and returns a [x,y,z] tuple
+    // suitable for the mesh `scale` prop. Adding the same margin
+    // on every axis keeps the box centred on the member position
+    // (which OverSpanHighlight passes through unchanged).
+    const scale = inflateHighlightScale({ x: 3600, y: 240, z: 45 });
+    expect(scale).toEqual([
+      3600 + HIGHLIGHT_INFLATE_MM,
+      240 + HIGHLIGHT_INFLATE_MM,
+      45 + HIGHLIGHT_INFLATE_MM,
+    ]);
+  });
+
+  it('inflateHighlightScale returns a length-3 tuple', () => {
+    // Contract check — the return shape is what the R3F mesh
+    // `scale` prop consumes.
+    const scale = inflateHighlightScale({ x: 1, y: 2, z: 3 });
+    expect(scale).toHaveLength(3);
+  });
+
+  it('inflateHighlightScale is pure (does not mutate the input)', () => {
+    // The helper is called on every render — mutation of the
+    // input would silently corrupt LayoutMember state (which flows
+    // from the immutable layout store).
+    const size = { x: 100, y: 200, z: 300 };
+    inflateHighlightScale(size);
+    expect(size).toEqual({ x: 100, y: 200, z: 300 });
   });
 });
 
