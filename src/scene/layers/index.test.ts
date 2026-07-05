@@ -34,11 +34,13 @@ describe('layers/index barrel — frozen public surface', () => {
   });
 
   it('exports the shared material helpers so downstream (S11 warning overlay) can align', () => {
-    expect(typeof layers.materialForSpecies).toBe('function');
+    // Post `fix/part-type-colors`: coloured by MemberKind, not by
+    // species — `materialForKind` replaces `materialForSpecies`,
+    // and `MATERIAL_KIND_COLORS` replaces the two prior palette
+    // records (`MATERIAL_COLORS` + `MATERIAL_BLOCK_COLORS`).
+    expect(typeof layers.materialForKind).toBe('function');
     expect(typeof layers.materialForMember).toBe('function');
-    expect(layers.MATERIAL_COLORS).toBeDefined();
-    // S22 additions — block-specific material picker + palette.
+    expect(layers.MATERIAL_KIND_COLORS).toBeDefined();
     expect(typeof layers.materialForBlock).toBe('function');
-    expect(layers.MATERIAL_BLOCK_COLORS).toBeDefined();
   });
 });

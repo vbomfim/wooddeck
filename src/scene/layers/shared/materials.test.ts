@@ -1,221 +1,91 @@
 /**
- * Unit tests for `src/scene/layers/shared/materials.ts`.
+ * Unit tests for `src/scene/layers/shared/materials.ts` — kind-keyed
+ * scene material palette (replaces the species-keyed AC6 palette).
  *
- * ## Coverage map (S10 issue #11)
+ * ## User directive (fix/part-type-colors)
  *
- *   AC6  Materials per species — PT / Cedar / Composite each pick a
- *        distinct base colour (asserted here via `color.getHex()`).
- *   §7   Materials memoized — every call to `materialForMember(...)`
- *        for the same species returns the SAME instance (referential
- *        equality) so all joists share one material and the GPU has
- *        one MeshStandardMaterial to bind.
- *   §17  Non-transparent — MVP has no see-through materials; the
- *        material is opaque, `MeshStandardMaterial`, with a fixed
- *        roughness (documented in the module header).
+ * The scene MUST color members by `MemberKind` — NOT by
+ * `LumberMemberMaterial.species`. Two joists of different species
+ * render the SAME colour; a joist and a beam of the SAME species
+ * render DIFFERENT colours (the whole point of the change).
+ *
+ * ## Contract asserted here
+ *
+ *   1. `MATERIAL_KIND_COLORS` maps every `MemberKind` variant to
+ *      a distinct hex — the palette is exhaustive (compile-time)
+ *      and pairwise distinct (runtime).
+ *   2. `materialForKind(kind)` returns a `MeshStandardMaterial`
+ *      instance memoized per kind — referential equality on
+ *      repeat calls (the "shared per kind" GPU trade-off).
+ *   3. Beam / joist / blocking each pick a colour distinct from
+ *      the other two (the core user request — those three sit in
+ *      the same rendered scene and must be told apart at a glance).
+ *   4. `materialForMember` dispatches by `member.kind`, so a
+ *      joist member and a beam member of the same species produce
+ *      different materials — this is the regression sentinel that
+ *      would have FAILED on the old species-based code.
+ *   5. `materialForBlock` still exists for `BlocksLayer` (it also
+ *      chooses geometry by productId), but the material it returns
+ *      is now the shared block-kind material — one color for every
+ *      block product, matching the "one colour per kind" rule.
+ *   6. Materials are opaque (`transparent === false`) — same MVP
+ *      trade-off as the original species-keyed palette.
+ *   7. Disposal helper tears the cache down without throwing;
+ *      subsequent calls repopulate with fresh instances.
  *
  * ## Why we don't render inside r3f here
  *
  * `materials.ts` returns plain three.js `MeshStandardMaterial`
- * instances — they compose into r3f `<mesh>` but they themselves
- * are constructed with the three.js API and asserted on the same
- * API. No `<Canvas>` involvement needed; this file uses `vitest`
- * only.
+ * instances — no `<Canvas>` involvement needed; this file uses
+ * `vitest` only.
  */
 import { describe, expect, it } from 'vitest';
 import { MeshStandardMaterial } from 'three';
 
-import type { LayoutMember, Species } from '../../../domain/model';
+import type { LayoutMember, MemberKind, Species } from '../../../domain/model';
 import {
-  MATERIAL_BLOCK_COLORS,
-  MATERIAL_COLORS,
-  disposeSharedBlockMaterials,
+  MATERIAL_KIND_COLORS,
   disposeSharedMaterials,
   materialForBlock,
+  materialForKind,
   materialForMember,
-  materialForSpecies,
 } from './materials';
 
-function makeMember(species: Species): LayoutMember {
+/**
+ * Every `MemberKind` variant — hand-listed so a compiler error
+ * fires if the domain enum grows. `MATERIAL_KIND_COLORS` uses the
+ * same enum via TypeScript's exhaustive `Record` type, so the
+ * "add a row when you add a kind" invariant is compile-enforced.
+ */
+const ALL_KINDS: readonly MemberKind[] = [
+  'joist',
+  'beam',
+  'post',
+  'footing',
+  'board',
+  'block',
+  'blocking',
+] as const;
+
+function makeLumberMember(kind: MemberKind, species: Species = 'PT'): LayoutMember {
   return {
-    id: 'test',
-    kind: 'joist',
-    material: { kind: 'lumber', nominal: '2x8', species, grade: species === 'Composite' ? 'NA' : 'No2' },
+    id: `test-${kind}-${species}`,
+    kind,
+    material:
+      species === 'Composite'
+        ? { kind: 'lumber', nominal: '5/4x6', species, grade: 'NA' }
+        : { kind: 'lumber', nominal: '2x8', species, grade: 'No2' },
     position: { x: 0, y: 0, z: 0 },
     size: { x: 100, y: 100, z: 100 },
     rotation: { x: 0, y: 0, z: 0 },
   };
 }
 
-describe('materials — per-species colour (AC6)', () => {
-  it('PT / Cedar / Composite each pick a distinct colour', () => {
-    const pt = materialForSpecies('PT');
-    const cedar = materialForSpecies('Cedar');
-    const composite = materialForSpecies('Composite');
-    // Distinct hex values — if two matched, the "see underneath"
-    // UX would confuse the viewer about species.
-    expect(pt.color.getHex()).not.toBe(cedar.color.getHex());
-    expect(pt.color.getHex()).not.toBe(composite.color.getHex());
-    expect(cedar.color.getHex()).not.toBe(composite.color.getHex());
-  });
-
-  it('MATERIAL_COLORS map matches the resolved MeshStandardMaterial colours', () => {
-    // The `MATERIAL_COLORS` constant is documented in the module
-    // header (PT = greenish-brown, Cedar = reddish-brown, Composite
-    // = gray). This test locks the map in place so a future edit
-    // that flips one colour also updates the docstring.
-    expect(materialForSpecies('PT').color.getHex()).toBe(MATERIAL_COLORS.PT);
-    expect(materialForSpecies('Cedar').color.getHex()).toBe(MATERIAL_COLORS.Cedar);
-    expect(materialForSpecies('Composite').color.getHex()).toBe(MATERIAL_COLORS.Composite);
-  });
-
-  it('PT colour is greenish-brown (green channel is the dominant chroma)', () => {
-    // Documented in the module header. Asserting the numerical
-    // property (rather than the exact hex) keeps a future palette
-    // tweak from silently drifting AWAY from "greenish".
-    const hex = MATERIAL_COLORS.PT;
-    const r = (hex >> 16) & 0xff;
-    const g = (hex >> 8) & 0xff;
-    const b = hex & 0xff;
-    // Green channel is at least equal to red — PT is olive/tan,
-    // not fire-engine red. Blue stays low so the material reads
-    // warm.
-    expect(g).toBeGreaterThanOrEqual(r - 8);
-    expect(b).toBeLessThan(r);
-    expect(b).toBeLessThan(g);
-  });
-
-  it('Cedar colour is reddish-brown (red channel dominant)', () => {
-    const hex = MATERIAL_COLORS.Cedar;
-    const r = (hex >> 16) & 0xff;
-    const g = (hex >> 8) & 0xff;
-    const b = hex & 0xff;
-    // Red is highest; green sits in the middle; blue is lowest —
-    // classic warm cedar tone.
-    expect(r).toBeGreaterThan(g);
-    expect(g).toBeGreaterThan(b);
-  });
-
-  it('Composite colour is neutral gray (r ≈ g ≈ b)', () => {
-    const hex = MATERIAL_COLORS.Composite;
-    const r = (hex >> 16) & 0xff;
-    const g = (hex >> 8) & 0xff;
-    const b = hex & 0xff;
-    // Neutral gray: no channel dominates by more than ~16 (≈6% of
-    // the full range) — reads as gray rather than tinted.
-    expect(Math.abs(r - g)).toBeLessThanOrEqual(16);
-    expect(Math.abs(g - b)).toBeLessThanOrEqual(16);
-    expect(Math.abs(r - b)).toBeLessThanOrEqual(16);
-  });
-});
-
-describe('materials — sharing & memoization (§7 shared-per-species)', () => {
-  it('materialForSpecies returns the SAME instance on repeat calls', () => {
-    // Referential equality — every joist gets the SAME
-    // MeshStandardMaterial pointer, so the GPU has one binding to
-    // manage. If a refactor accidentally builds a new material per
-    // call, this test fires.
-    const a = materialForSpecies('PT');
-    const b = materialForSpecies('PT');
-    expect(a).toBe(b);
-  });
-
-  it('materialForMember returns the same instance as materialForSpecies for that species', () => {
-    const shared = materialForSpecies('Cedar');
-    const viaMember = materialForMember(makeMember('Cedar'));
-    expect(viaMember).toBe(shared);
-  });
-
-  it('all three species produce MeshStandardMaterial instances', () => {
-    // Ticket §7: MVP is opaque MeshStandardMaterial. A future PBR
-    // swap must go through a deliberate change; this guard makes
-    // the swap visible.
-    expect(materialForSpecies('PT')).toBeInstanceOf(MeshStandardMaterial);
-    expect(materialForSpecies('Cedar')).toBeInstanceOf(MeshStandardMaterial);
-    expect(materialForSpecies('Composite')).toBeInstanceOf(MeshStandardMaterial);
-  });
-
-  it('shared materials are opaque (transparent === false) — MVP has no see-through wood', () => {
-    // If a future edit accidentally enables `transparent: true`
-    // (e.g. to fade a hidden layer), sort-order-based Z-fighting
-    // will bite; MVP keeps everything opaque.
-    expect(materialForSpecies('PT').transparent).toBe(false);
-    expect(materialForSpecies('Cedar').transparent).toBe(false);
-    expect(materialForSpecies('Composite').transparent).toBe(false);
-  });
-});
-
-describe('materials — disposal', () => {
-  it('disposeSharedMaterials tears down the cached materials without throwing', () => {
-    // Prime the cache.
-    const pt = materialForSpecies('PT');
-    // A `MeshStandardMaterial.dispose()` marks GPU resources for
-    // release; three.js does not currently throw for double-dispose
-    // but we still guard against a stale-reference use path.
-    expect(() => disposeSharedMaterials()).not.toThrow();
-    // After disposal, calling again returns a FRESH material (the
-    // cache is empty). The re-created material is still a
-    // MeshStandardMaterial with the documented colour.
-    const ptAgain = materialForSpecies('PT');
-    expect(ptAgain).toBeInstanceOf(MeshStandardMaterial);
-    expect(ptAgain.color.getHex()).toBe(MATERIAL_COLORS.PT);
-    // Referential equality: the fresh material is a different
-    // instance from the pre-dispose one.
-    expect(ptAgain).not.toBe(pt);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// QA Gap S17-G2 — materialForMember throws on a block-kind member
-// ---------------------------------------------------------------------------
-//
-// Block producers arrive with S19/S20 and will introduce their own
-// material picker rather than routing through this shared helper.
-// If a caller accidentally routes a block-kind member here today,
-// the throw makes the misuse LOUD (no silent wrong-color render).
-// This regression test locks in that behavior for the S17 window.
-
-describe('materialForMember — QA-Gap-S17-G2 block-kind member throws loudly', () => {
-  it('throws a descriptive Error naming the module when passed a block-kind member', () => {
-    const blockMember: LayoutMember = {
-      id: 'block-0',
-      kind: 'block',
-      material: { kind: 'block', productId: 'oldcastle-11x11x7' },
-      position: { x: 0, y: 0, z: 0 },
-      size: { x: 279, y: 178, z: 279 },
-      rotation: { x: 0, y: 0, z: 0 },
-    };
-    expect(() => materialForMember(blockMember)).toThrow(/lumber material/i);
-    expect(() => materialForMember(blockMember)).toThrow(/block/);
-    // The message names the module so triage is fast.
-    expect(() => materialForMember(blockMember)).toThrow(/materialForMember/);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// S22 — block materials (Epic 2 / FR-029)
-// ---------------------------------------------------------------------------
-//
-// Blocks are NOT lumber — `materialForMember` throws on them by
-// design (see the S17 guard above). The block layer uses its own
-// picker `materialForBlock(member)` that dispatches by product id
-// through the foundation catalog's `FoundationCategory` field:
-//
-//   - `oldcastle-11x11x7` → category `'concrete-precast'` → grey
-//     concrete tone.
-//   - `tuffblock-12x12x4` → category `'polypropylene'` → dark
-//     charcoal / near-black plastic tone.
-//
-// The picker follows the SAME shared-per-category discipline as
-// `materialForSpecies` (referential equality on repeat calls,
-// `MATERIAL_BLOCK_COLORS` exported for palette assertions,
-// `disposeSharedBlockMaterials` for HMR / test cleanup).
-// ---------------------------------------------------------------------------
-
 function makeBlockMember(
   productId: 'oldcastle-11x11x7' | 'tuffblock-12x12x4',
 ): LayoutMember {
   return {
-    id: `block-${productId}`,
+    id: `test-block-${productId}`,
     kind: 'block',
     material: { kind: 'block', productId },
     position: { x: 0, y: 0, z: 0 },
@@ -224,103 +94,270 @@ function makeBlockMember(
   };
 }
 
-describe('materialForBlock — per-category colour (AC / FR-029)', () => {
-  it('Oldcastle (concrete-precast) and TuffBlock (polypropylene) get distinct colours', () => {
-    const concrete = materialForBlock(makeBlockMember('oldcastle-11x11x7'));
-    const plastic = materialForBlock(makeBlockMember('tuffblock-12x12x4'));
-    // Distinct hex — a viewer glancing at a mixed layout must be
-    // able to tell "which foundation product is this?" at a glance.
-    expect(concrete.color.getHex()).not.toBe(plastic.color.getHex());
+describe('materials — per-kind colour', () => {
+  it('every MemberKind resolves to a DISTINCT colour hex', () => {
+    // Pairwise-distinct via `color.getHex()`. If two kinds shared
+    // a colour, the whole point of the change (visually separate
+    // the seven kinds) would be defeated.
+    const hexes = ALL_KINDS.map((k) => materialForKind(k).color.getHex());
+    expect(new Set(hexes).size).toBe(ALL_KINDS.length);
   });
 
-  it('MATERIAL_BLOCK_COLORS maps each category to the resolved MeshStandardMaterial colour', () => {
-    // The `MATERIAL_BLOCK_COLORS` constant is the source of truth
-    // for the block palette. Downstream code (S26 LayerToggle
-    // future icons; docs) can assert the palette without duplicating
-    // hex literals.
-    const concrete = materialForBlock(makeBlockMember('oldcastle-11x11x7'));
-    const plastic = materialForBlock(makeBlockMember('tuffblock-12x12x4'));
-    expect(concrete.color.getHex()).toBe(MATERIAL_BLOCK_COLORS['concrete-precast']);
-    expect(plastic.color.getHex()).toBe(MATERIAL_BLOCK_COLORS['polypropylene']);
+  it('beam / joist / blocking each pick a colour distinct from the other two (core user triad)', () => {
+    // The core of the ticket — beam, joist, and blocking are the
+    // three interior-framing kinds that stack side by side in a
+    // typical scene. All three MUST be visually distinguishable.
+    const beam = materialForKind('beam').color.getHex();
+    const joist = materialForKind('joist').color.getHex();
+    const blocking = materialForKind('blocking').color.getHex();
+    expect(beam).not.toBe(joist);
+    expect(beam).not.toBe(blocking);
+    expect(joist).not.toBe(blocking);
   });
 
-  it('concrete-precast colour is a neutral / light grey (r ≈ g ≈ b, mid-to-high luminance)', () => {
-    // Documented as "grey concrete" in the module header. The
-    // numerical property test (rather than a fixed hex) permits
-    // future palette adjustments without fighting the assertion,
-    // as long as the "concrete" cast survives.
-    const hex = MATERIAL_BLOCK_COLORS['concrete-precast'];
+  it('MATERIAL_KIND_COLORS map matches the resolved MeshStandardMaterial colours (one row per MemberKind)', () => {
+    // The `MATERIAL_KIND_COLORS` constant is EXPORTED as the
+    // single source of truth for the palette. Every kind is asserted
+    // to route through the same value the material renders with.
+    for (const kind of ALL_KINDS) {
+      expect(materialForKind(kind).color.getHex()).toBe(MATERIAL_KIND_COLORS[kind]);
+    }
+  });
+
+  it('beam is a cool colour (blue channel dominant)', () => {
+    // Documented in the module header — beam is a deep royal blue.
+    // Testing the numerical property (rather than a fixed hex)
+    // permits future palette tweaks that still preserve the "cool
+    // primary" reading.
+    const hex = MATERIAL_KIND_COLORS.beam;
+    const r = (hex >> 16) & 0xff;
+    const g = (hex >> 8) & 0xff;
+    const b = hex & 0xff;
+    expect(b).toBeGreaterThan(r);
+    expect(b).toBeGreaterThan(g);
+  });
+
+  it('joist is warm (red channel dominant, high luminance)', () => {
+    // Documented as amber/orange in the module header.
+    const hex = MATERIAL_KIND_COLORS.joist;
+    const r = (hex >> 16) & 0xff;
+    const g = (hex >> 8) & 0xff;
+    const b = hex & 0xff;
+    expect(r).toBeGreaterThan(g);
+    expect(r).toBeGreaterThan(b);
+    // Warm amber reads BRIGHT — total channel sum well above the
+    // darkest members (post, beam) so the two are separable by
+    // luminance alone.
+    expect(r + g + b).toBeGreaterThan(300);
+  });
+
+  it('blocking is cool green/teal (green channel > red channel)', () => {
+    // Documented as emerald in the module header. Green > Red
+    // distinguishes it from a warm amber joist even if luminances
+    // happen to be similar.
+    const hex = MATERIAL_KIND_COLORS.blocking;
+    const r = (hex >> 16) & 0xff;
+    const g = (hex >> 8) & 0xff;
+    expect(g).toBeGreaterThan(r);
+  });
+
+  it('board is a warm wood-plank tone (red >= green > blue)', () => {
+    // Documented as a medium wood tan in the module header —
+    // classic decking-plank read.
+    const hex = MATERIAL_KIND_COLORS.board;
+    const r = (hex >> 16) & 0xff;
+    const g = (hex >> 8) & 0xff;
+    const b = hex & 0xff;
+    expect(r).toBeGreaterThanOrEqual(g);
+    expect(g).toBeGreaterThan(b);
+  });
+
+  it('post is a dark warm brown (red dominant, LOW luminance)', () => {
+    // Documented as very dark chocolate brown — real
+    // pressure-treated posts read dark against a decked scene.
+    const hex = MATERIAL_KIND_COLORS.post;
+    const r = (hex >> 16) & 0xff;
+    const g = (hex >> 8) & 0xff;
+    const b = hex & 0xff;
+    expect(r).toBeGreaterThan(g);
+    expect(g).toBeGreaterThanOrEqual(b);
+    // Dark: total channel sum well below the mid-tones so post
+    // sits at the bottom of the luminance ladder.
+    expect(r + g + b).toBeLessThan(200);
+  });
+
+  it('footing is a neutral gray (r ≈ g ≈ b)', () => {
+    // Documented as mid concrete-pier gray in the module header —
+    // real concrete piers under a deck.
+    const hex = MATERIAL_KIND_COLORS.footing;
     const r = (hex >> 16) & 0xff;
     const g = (hex >> 8) & 0xff;
     const b = hex & 0xff;
     expect(Math.abs(r - g)).toBeLessThanOrEqual(16);
     expect(Math.abs(g - b)).toBeLessThanOrEqual(16);
-    // Concrete reads as a lighter mid-tone grey — luminance
-    // (crude Rec-601 approximation) should be > 96 (out of 255).
-    const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
-    expect(luminance).toBeGreaterThan(96);
+    expect(Math.abs(r - b)).toBeLessThanOrEqual(16);
   });
 
-  it('polypropylene colour is a dark / near-black neutral (low luminance, r ≈ g ≈ b)', () => {
-    // Documented as "dark charcoal / near-black" plastic. Same
-    // numerical-property discipline as the concrete assertion.
-    const hex = MATERIAL_BLOCK_COLORS['polypropylene'];
+  it('block is a neutral gray (r ≈ g ≈ b) — preserves the existing concrete-precast palette per user directive', () => {
+    // User directive: keep the existing block colour. The
+    // previous `MATERIAL_BLOCK_COLORS['concrete-precast']` was
+    // `0x9e9e98` — we preserve that exact hex here so scenes
+    // containing block members read the same before and after.
+    const hex = MATERIAL_KIND_COLORS.block;
+    expect(hex).toBe(0x9e9e98);
     const r = (hex >> 16) & 0xff;
     const g = (hex >> 8) & 0xff;
     const b = hex & 0xff;
     expect(Math.abs(r - g)).toBeLessThanOrEqual(16);
     expect(Math.abs(g - b)).toBeLessThanOrEqual(16);
-    const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
-    // Polypropylene puck reads DARK — luminance well below the
-    // concrete tone. Ceiling of 96 keeps a healthy contrast gap.
-    expect(luminance).toBeLessThan(96);
+    expect(Math.abs(r - b)).toBeLessThanOrEqual(16);
+  });
+});
+
+describe('materials — species-ignoring dispatch (user directive)', () => {
+  it('a joist member and a beam member of the SAME species produce DIFFERENT colours', () => {
+    // The core regression sentinel. On the OLD species-based
+    // code, a PT joist and a PT beam shared one material — this
+    // test would have FAILED on that code. On the new kind-based
+    // code, `materialForMember` dispatches by `member.kind`, so
+    // the two materials differ.
+    const ptJoist = makeLumberMember('joist', 'PT');
+    const ptBeam = makeLumberMember('beam', 'PT');
+    const joistMat = materialForMember(ptJoist);
+    const beamMat = materialForMember(ptBeam);
+    expect(joistMat.color.getHex()).not.toBe(beamMat.color.getHex());
   });
 
-  it('does not collide with any lumber species colour (concrete grey ≠ Composite grey)', () => {
-    // Composite lumber is `0x7a7a7a` — a viewer must not confuse
-    // "concrete block" with "composite decking" in a mixed scene.
-    // The block palette is required to stay clear of every lumber
-    // species colour.
-    for (const speciesColor of Object.values(MATERIAL_COLORS)) {
-      expect(MATERIAL_BLOCK_COLORS['concrete-precast']).not.toBe(speciesColor);
-      expect(MATERIAL_BLOCK_COLORS['polypropylene']).not.toBe(speciesColor);
+  it('a joist of PT and a joist of Cedar produce the SAME colour (species is ignored)', () => {
+    // Species is intentionally NO LONGER encoded in colour per the
+    // user directive. Two joists of different species render the
+    // same colour — the layer-toggle UX cares about part-kind, not
+    // material grade.
+    const ptJoist = makeLumberMember('joist', 'PT');
+    const cedarJoist = makeLumberMember('joist', 'Cedar');
+    const ptMat = materialForMember(ptJoist);
+    const cedarMat = materialForMember(cedarJoist);
+    expect(ptMat.color.getHex()).toBe(cedarMat.color.getHex());
+  });
+
+  it('a joist of PT and a joist of Composite return the SAME material INSTANCE (referential equality)', () => {
+    // Species-blind dispatch + kind-level memoization ⇒ two
+    // joist members share one MeshStandardMaterial pointer no
+    // matter which species tag they carry.
+    const ptJoist = makeLumberMember('joist', 'PT');
+    const compositeJoist = makeLumberMember('joist', 'Composite');
+    expect(materialForMember(ptJoist)).toBe(materialForMember(compositeJoist));
+  });
+
+  it('materialForMember(joist) returns the same instance as materialForKind("joist")', () => {
+    // Contract: `materialForMember` is a thin wrapper that reads
+    // `member.kind` and delegates. The mesh's material is the
+    // exact SAME instance every KindLayer BoxMember uses.
+    const member = makeLumberMember('joist', 'Cedar');
+    expect(materialForMember(member)).toBe(materialForKind('joist'));
+  });
+});
+
+describe('materials — sharing & memoization (shared per kind)', () => {
+  it('materialForKind returns the SAME instance on repeat calls', () => {
+    // Referential equality — every joist mesh gets the SAME
+    // MeshStandardMaterial pointer so the GPU has one binding to
+    // manage. If a refactor accidentally builds a new material per
+    // call, this test fires.
+    const a = materialForKind('joist');
+    const b = materialForKind('joist');
+    expect(a).toBe(b);
+  });
+
+  it('materialForKind returns DIFFERENT instances for different kinds', () => {
+    // Two kinds must have DIFFERENT material instances (they have
+    // different colours, so they cannot share).
+    expect(materialForKind('joist')).not.toBe(materialForKind('beam'));
+    expect(materialForKind('beam')).not.toBe(materialForKind('blocking'));
+    expect(materialForKind('joist')).not.toBe(materialForKind('blocking'));
+  });
+
+  it('every kind produces a MeshStandardMaterial instance', () => {
+    // MVP is opaque MeshStandardMaterial for every kind. A future
+    // PBR swap must go through a deliberate change; this guard
+    // makes the swap visible.
+    for (const kind of ALL_KINDS) {
+      expect(materialForKind(kind)).toBeInstanceOf(MeshStandardMaterial);
+    }
+  });
+
+  it('every kind material is opaque (transparent === false) — MVP has no see-through members', () => {
+    // Depth-buffer / z-fighting hygiene — MVP keeps every material
+    // opaque so DeckLayers.tsx's fixed render order alone determines
+    // the visible pixel.
+    for (const kind of ALL_KINDS) {
+      expect(materialForKind(kind).transparent).toBe(false);
     }
   });
 });
 
-describe('materialForBlock — sharing & memoization (matches materialForSpecies)', () => {
-  it('returns the SAME instance on repeat calls for the same productId', () => {
-    // Referential equality — every Oldcastle mesh in a scene shares
-    // ONE material. The GPU manages one binding; the memory
-    // footprint stays O(1) regardless of block count.
-    const a = materialForBlock(makeBlockMember('oldcastle-11x11x7'));
-    const b = materialForBlock(makeBlockMember('oldcastle-11x11x7'));
-    expect(a).toBe(b);
+describe('materials — disposal', () => {
+  it('disposeSharedMaterials tears down the cached materials without throwing', () => {
+    // Prime the cache.
+    const beam = materialForKind('beam');
+    expect(() => disposeSharedMaterials()).not.toThrow();
+    // After disposal, calling again returns a FRESH material (the
+    // cache is empty). The re-created material is still a
+    // MeshStandardMaterial with the documented colour.
+    const beamAgain = materialForKind('beam');
+    expect(beamAgain).toBeInstanceOf(MeshStandardMaterial);
+    expect(beamAgain.color.getHex()).toBe(MATERIAL_KIND_COLORS.beam);
+    // Referential equality: the fresh material is a different
+    // instance from the pre-dispose one.
+    expect(beamAgain).not.toBe(beam);
+  });
+});
+
+describe('materialForMember — QA-Gap-S17-G2 block-kind member throws loudly', () => {
+  // A `LayoutMember` with `material.kind === 'block'` must NEVER be
+  // routed through the lumber path — blocks own their own picker
+  // (`materialForBlock`) because the material discriminant is a
+  // productId, not a species. The throw makes the misuse LOUD.
+  it('throws a descriptive Error naming the module when passed a block-material member', () => {
+    const blockMember = makeBlockMember('oldcastle-11x11x7');
+    expect(() => materialForMember(blockMember)).toThrow(/lumber material/i);
+    expect(() => materialForMember(blockMember)).toThrow(/block/);
+    expect(() => materialForMember(blockMember)).toThrow(/materialForMember/);
+  });
+});
+
+describe('materialForBlock — routes every block-kind member through the shared block-kind material', () => {
+  // User directive: every block, regardless of productId, uses the
+  // SAME kind-level colour ("route through the same kind map for
+  // consistency"). BlocksLayer still uses `materialForBlock` because
+  // it needs per-productId GEOMETRY dispatch — the MATERIAL is now
+  // shared per-kind.
+
+  it('Oldcastle and TuffBlock both resolve to the shared block-kind material (productId ignored for colour)', () => {
+    const concrete = materialForBlock(makeBlockMember('oldcastle-11x11x7'));
+    const plastic = materialForBlock(makeBlockMember('tuffblock-12x12x4'));
+    // Same colour (per user directive) AND same INSTANCE.
+    expect(concrete.color.getHex()).toBe(plastic.color.getHex());
+    expect(concrete).toBe(plastic);
   });
 
-  it('returns distinct instances for different productIds', () => {
-    // Two distinct products → two distinct materials (they have
-    // different colours, so they cannot share).
-    const oldcastle = materialForBlock(makeBlockMember('oldcastle-11x11x7'));
-    const tuff = materialForBlock(makeBlockMember('tuffblock-12x12x4'));
-    expect(oldcastle).not.toBe(tuff);
+  it('materialForBlock returns the SAME instance as materialForKind("block")', () => {
+    // Colour + material sharing follow the same kind map every
+    // other layer uses — one MeshStandardMaterial per kind, period.
+    const blockMat = materialForBlock(makeBlockMember('oldcastle-11x11x7'));
+    expect(blockMat).toBe(materialForKind('block'));
   });
 
-  it('returns MeshStandardMaterial instances (matches lumber palette)', () => {
-    // Same PBR shader path as lumber — the block layer participates
-    // in the same ambient + directional lighting the framing uses.
-    expect(materialForBlock(makeBlockMember('oldcastle-11x11x7'))).toBeInstanceOf(
-      MeshStandardMaterial,
-    );
-    expect(materialForBlock(makeBlockMember('tuffblock-12x12x4'))).toBeInstanceOf(
-      MeshStandardMaterial,
-    );
+  it('materialForBlock returns a MeshStandardMaterial with the block-kind colour', () => {
+    // Same PBR shader path as every other layer — the block
+    // participates in the same ambient + directional lighting the
+    // framing uses.
+    const mat = materialForBlock(makeBlockMember('oldcastle-11x11x7'));
+    expect(mat).toBeInstanceOf(MeshStandardMaterial);
+    expect(mat.color.getHex()).toBe(MATERIAL_KIND_COLORS.block);
   });
 
-  it('block materials are opaque (transparent === false) — MVP has no see-through blocks', () => {
-    // Depth-buffer / z-fighting hygiene — MVP keeps every material
-    // opaque so DeckLayers.tsx's fixed render order alone determines
-    // the visible pixel.
+  it('materialForBlock returns an OPAQUE material — no see-through blocks in MVP', () => {
     expect(materialForBlock(makeBlockMember('oldcastle-11x11x7')).transparent).toBe(
       false,
     );
@@ -329,37 +366,12 @@ describe('materialForBlock — sharing & memoization (matches materialForSpecies
     );
   });
 
-  it('throws a descriptive Error naming the module when passed a lumber-kind member', () => {
-    // Mirror image of the S17 guard on `materialForMember` — passing
-    // a lumber member here is a caller bug (the block layer would
-    // never render a lumber member). Fail loudly rather than
-    // silently return the wrong material.
-    const lumberMember: LayoutMember = {
-      id: 'joist-0',
-      kind: 'joist',
-      material: { kind: 'lumber', nominal: '2x8', species: 'PT', grade: 'No2' },
-      position: { x: 0, y: 0, z: 0 },
-      size: { x: 100, y: 100, z: 100 },
-      rotation: { x: 0, y: 0, z: 0 },
-    };
+  it('throws a descriptive Error naming the module when passed a lumber-material member', () => {
+    // Mirror image of the `materialForMember` guard — passing a
+    // lumber member here is a caller bug (the block layer would
+    // never render a lumber member).
+    const lumberMember = makeLumberMember('joist', 'PT');
     expect(() => materialForBlock(lumberMember)).toThrow(/block material/i);
     expect(() => materialForBlock(lumberMember)).toThrow(/materialForBlock/);
-  });
-});
-
-describe('materialForBlock — disposal', () => {
-  it('disposeSharedBlockMaterials tears down cached materials without throwing', () => {
-    // Prime the cache with both products.
-    const oldcastle = materialForBlock(makeBlockMember('oldcastle-11x11x7'));
-    const tuff = materialForBlock(makeBlockMember('tuffblock-12x12x4'));
-    expect(() => disposeSharedBlockMaterials()).not.toThrow();
-    // After disposal, the cache is empty — re-request re-creates
-    // fresh instances with the documented palette.
-    const oldcastleAgain = materialForBlock(makeBlockMember('oldcastle-11x11x7'));
-    const tuffAgain = materialForBlock(makeBlockMember('tuffblock-12x12x4'));
-    expect(oldcastleAgain).not.toBe(oldcastle);
-    expect(tuffAgain).not.toBe(tuff);
-    expect(oldcastleAgain.color.getHex()).toBe(MATERIAL_BLOCK_COLORS['concrete-precast']);
-    expect(tuffAgain.color.getHex()).toBe(MATERIAL_BLOCK_COLORS['polypropylene']);
   });
 });

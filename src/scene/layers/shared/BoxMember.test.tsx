@@ -10,9 +10,11 @@
  *        NOT on props alone — so a regression that DROPS one of
  *        the props is caught (mirrors the CameraRig live-camera
  *        probe pattern from S9 Fix C).
- *   AC6  Material comes from the shared per-species helper —
- *        assert the mesh's `material` is the SAME instance as
- *        `materialForSpecies(...)`.
+ *   AC6  Material comes from the shared per-kind helper — assert
+ *        the mesh's `material` is the SAME instance as
+ *        `materialForKind(member.kind)`. The `fix/part-type-colors`
+ *        change rerouted this from species to kind; the assertion
+ *        stays a structural referential-equality check.
  *   AC7  1 three.js unit = 1 mm — a member at position.x = 1000
  *        renders at THREE position.x = 1000 (no rescale).
  *   §3   ZERO geometry math — the member's position is `.set` into
@@ -33,7 +35,7 @@ import { Mesh, MeshBasicMaterial } from 'three';
 
 import { BoxMember } from './BoxMember';
 import { UNIT_BOX_GEOMETRY } from './geometries';
-import { materialForSpecies } from './materials';
+import { materialForKind } from './materials';
 import { makeMember } from '../__testing__/fixtures';
 
 describe('<BoxMember /> — mesh construction (AC2, AC7)', () => {
@@ -146,7 +148,10 @@ describe('<BoxMember /> — mesh construction (AC2, AC7)', () => {
 });
 
 describe('<BoxMember /> — material sharing (AC6)', () => {
-  it('mesh uses the shared PT material instance for a PT member', async () => {
+  it('mesh uses the shared JOIST-kind material for a joist member (species IGNORED)', async () => {
+    // Post `fix/part-type-colors`: colour is determined by
+    // `member.kind`, not `member.material.species`. Two joists of
+    // different species must share the same material instance.
     const member = makeMember({
       id: 'joist-pt',
       kind: 'joist',
@@ -155,14 +160,16 @@ describe('<BoxMember /> — material sharing (AC6)', () => {
     const renderer = await ReactThreeTestRenderer.create(<BoxMember member={member} />);
     const mesh = renderer.scene.findByType('Mesh').instance as Mesh;
     // Referential equality — the mesh's material IS the shared
-    // module-cached instance. Every PT joist points at the same
-    // MeshStandardMaterial, which is the whole point of §7's
-    // "shared per species" trade-off.
-    expect(mesh.material).toBe(materialForSpecies('PT'));
+    // module-cached instance. Every joist points at the same
+    // MeshStandardMaterial, which is the whole point of the
+    // "shared per kind" trade-off.
+    expect(mesh.material).toBe(materialForKind('joist'));
     await renderer.unmount();
   });
 
-  it('mesh uses the shared Cedar material for a Cedar member', async () => {
+  it('mesh uses the shared JOIST-kind material even for a Cedar-species joist (species IGNORED)', async () => {
+    // Same joist kind, DIFFERENT species — proves species has no
+    // effect on material selection.
     const member = makeMember({
       id: 'joist-cedar',
       kind: 'joist',
@@ -170,11 +177,13 @@ describe('<BoxMember /> — material sharing (AC6)', () => {
     });
     const renderer = await ReactThreeTestRenderer.create(<BoxMember member={member} />);
     const mesh = renderer.scene.findByType('Mesh').instance as Mesh;
-    expect(mesh.material).toBe(materialForSpecies('Cedar'));
+    expect(mesh.material).toBe(materialForKind('joist'));
     await renderer.unmount();
   });
 
-  it('mesh uses the shared Composite material for a Composite board member', async () => {
+  it('mesh uses the shared BOARD-kind material for a Composite decking board (species IGNORED)', async () => {
+    // Decking (kind='board') always uses the board colour, no
+    // matter what species tag the material carries.
     const member = makeMember({
       id: 'board-composite',
       kind: 'board',
@@ -182,11 +191,11 @@ describe('<BoxMember /> — material sharing (AC6)', () => {
     });
     const renderer = await ReactThreeTestRenderer.create(<BoxMember member={member} />);
     const mesh = renderer.scene.findByType('Mesh').instance as Mesh;
-    expect(mesh.material).toBe(materialForSpecies('Composite'));
+    expect(mesh.material).toBe(materialForKind('board'));
     await renderer.unmount();
   });
 
-  it('two PT members SHARE the same material instance in the scene graph', async () => {
+  it('two joist members SHARE the same material instance in the scene graph', async () => {
     // Guard: a subtle refactor that pushed material construction
     // into `<BoxMember>` (rather than looking it up from the
     // module-cached helper) would flip this test to red.
@@ -202,6 +211,33 @@ describe('<BoxMember /> — material sharing (AC6)', () => {
     expect(meshes).toHaveLength(2);
     expect(meshes[0]!.material).toBe(meshes[1]!.material);
     await renderer.unmount();
+  });
+
+  it('a joist and a beam of the SAME species render DIFFERENT material instances (core user request)', async () => {
+    // This is the regression sentinel: on the OLD species-based
+    // code, a PT joist and a PT beam shared a material — this test
+    // would have FAILED there. On the new kind-based code, they
+    // are distinct instances with distinct colours.
+    const joist = makeMember({
+      id: 'joist-pt',
+      kind: 'joist',
+      material: { kind: 'lumber', nominal: '2x8', species: 'PT', grade: 'No2' },
+    });
+    const beam = makeMember({
+      id: 'beam-pt',
+      kind: 'beam',
+      material: { kind: 'lumber', nominal: '2x10', species: 'PT', grade: 'No2' },
+    });
+    const renderer = await ReactThreeTestRenderer.create(
+      <>
+        <BoxMember member={joist} />
+        <BoxMember member={beam} />
+      </>,
+    );
+    const meshes = renderer.scene.findAllByType('Mesh').map((n) => n.instance as Mesh);
+    expect(meshes).toHaveLength(2);
+    // Different instances — different colours per the kind palette.
+    expect(meshes[0]!.material).not.toBe(meshes[1]!.material);
   });
 });
 
@@ -222,7 +258,7 @@ describe('<BoxMember /> — optional material override (Fix F, Opus #6)', () => 
     );
     const mesh = renderer.scene.findByType('Mesh').instance as Mesh;
     // Referential equality — the mesh's material IS the override,
-    // not the species default.
+    // not the kind default.
     expect(mesh.material).toBe(override);
     // Sanity: the OTHER props still flow through unchanged.
     expect(mesh.geometry).toBe(UNIT_BOX_GEOMETRY);
@@ -230,7 +266,7 @@ describe('<BoxMember /> — optional material override (Fix F, Opus #6)', () => 
     await renderer.unmount();
   });
 
-  it('falls back to the shared species material when `material` is omitted', async () => {
+  it('falls back to the shared kind material when `material` is omitted', async () => {
     // This is the current call path — every `<KindLayer>` renders
     // `<BoxMember member={...}/>` without an override. The
     // regression sentinel: adding a REQUIRED material prop would
@@ -243,7 +279,7 @@ describe('<BoxMember /> — optional material override (Fix F, Opus #6)', () => 
     });
     const renderer = await ReactThreeTestRenderer.create(<BoxMember member={member} />);
     const mesh = renderer.scene.findByType('Mesh').instance as Mesh;
-    expect(mesh.material).toBe(materialForSpecies('PT'));
+    expect(mesh.material).toBe(materialForKind('joist'));
     await renderer.unmount();
   });
 });

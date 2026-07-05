@@ -39,8 +39,11 @@
  *   function   computePresetCamera  — pure preset math
  *   function   computeAutoFitDistance
  *   function   computeZoomLimits
- *   function   materialForSpecies   — S10 shared MeshStandardMaterial
- *   function   materialForMember    — S10 material by LayoutMember
+ *   function   materialForKind      — shared MeshStandardMaterial
+ *                                    keyed by MemberKind (replaces
+ *                                    the species-keyed helper)
+ *   function   materialForMember    — material by LayoutMember
+ *                                    (routes lumber members by kind)
  *   function   disposeHighlightPrimitives — S11 HMR/tooling helper
  *                                    (do NOT call from render code)
  *   constant   DECK_LAYER_ORDER     — S10 pinned six-entry sequence
@@ -53,7 +56,9 @@
  *   constant   DEFAULT_FOV_DEG, TOP_DOWN_FOV_DEG
  *   constant   CAMERA_NEAR_MM, CAMERA_FAR_MM
  *   constant   GROUND_PLANE_SIZE_MM, GROUND_GRID_DIVISIONS
- *   constant   MATERIAL_COLORS      — S10 per-species palette (AC6)
+ *   constant   MATERIAL_KIND_COLORS — per-MemberKind palette
+ *                                    (replaces the S10 MATERIAL_COLORS
+ *                                    species map)
  *   constant   WARNING_OVERLAY_USER_DATA_KEY — S11 well-known userData
  *                                     key stamped on the overlay group
  *                                     (mirrors LAYER_USER_DATA_KEY)
@@ -113,10 +118,10 @@ export {
   GROUND_PLANE_SIZE_MM,
   JoistsLayer,
   LAYER_USER_DATA_KEY,
-  MATERIAL_COLORS,
+  MATERIAL_KIND_COLORS,
   PostsLayer,
+  materialForKind,
   materialForMember,
-  materialForSpecies,
 } from './layers';
 export type { BoxMemberProps } from './layers';
 
