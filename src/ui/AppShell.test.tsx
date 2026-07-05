@@ -383,3 +383,191 @@ describe('<AppShell /> — CSS invariants (ticket §4 Edge cases)', () => {
     expect(screen.getByRole('note', { name: /product disclaimer/i })).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Bugfix — Independent pane scrolling (fix/independent-pane-scroll)
+//
+// Bug: when the right panel's content grew (many warnings + BOM + plan
+// view), the WHOLE PAGE scrolled and the 3D canvas got pushed off-screen.
+// Fix: on desktop (≥ 1024px), the shell is a FIXED-viewport-height layout;
+// each aside scrolls INTERNALLY (overflow-y:auto + min-height:0), main is
+// overflow:hidden, and the shell itself does not scroll (overflow:hidden).
+// On mobile (< 1024px, stacked), the shell can grow and the PAGE scrolls
+// as before.
+//
+// These invariants are enforced via source-file grep of `app-shell.css`,
+// following the existing pattern used by the WCAG 2.3.3 test above. A
+// pure-CSS overflow behaviour cannot be asserted from jsdom (no layout
+// engine), so we assert the CSS declarations that make the browser behave
+// correctly, plus the classNames the CSS targets are present in the DOM.
+// ---------------------------------------------------------------------------
+
+describe('<AppShell /> — independent pane scrolling (regression guard)', () => {
+  it('renders every classname the layout CSS targets (regression: renaming a class silently breaks the CSS)', () => {
+    const { container } = render(
+      <AppShell
+        leftPanel={<div data-testid="lp" />}
+        rightPanel={<div data-testid="rp" />}
+        main={<div data-testid="m" />}
+      />,
+    );
+    // The five CSS hooks the fix relies on. If any of these class
+    // names change in AppShell.tsx without also updating app-shell.css,
+    // the layout regresses to auto-height scrolling.
+    expect(container.querySelector('.wd-app-shell')).toBeTruthy();
+    expect(container.querySelector('.wd-app-shell__body')).toBeTruthy();
+    expect(container.querySelector('aside.wd-app-shell__left')).toBeTruthy();
+    expect(container.querySelector('aside.wd-app-shell__right')).toBeTruthy();
+    expect(container.querySelector('main.wd-app-shell__main')).toBeTruthy();
+  });
+});
+
+/**
+ * Utility — locate a CSS rule block by selector and return its declarations
+ * as a raw string. Uses a brace-aware scanner because a naïve regex would
+ * fail on nested media queries or pseudo-class blocks. If the selector
+ * appears more than once (e.g. once outside a media query and once inside),
+ * returns the concatenation of every block's declarations so an assertion
+ * against the combined text still catches the property.
+ *
+ * Search targets a top-level rule OR a rule at any nesting depth INSIDE
+ * the anchor block passed via `withinBlock` (defaults to the whole file).
+ */
+function findRuleDeclarations(css: string, selector: string, withinBlock?: string): string {
+  const haystack = withinBlock ?? css;
+  const pattern = new RegExp(
+    // Match the selector as a full selector-list token — allow other
+    // selectors joined by commas, but require our target selector to
+    // appear as a whole word (bounded by `,`, whitespace, or `{`).
+    `(?:^|[\\s,])${selector.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}[\\s,{]`,
+    'g',
+  );
+  let out = '';
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(haystack)) !== null) {
+    // Find the `{` that opens THIS rule's block. The match ends
+    // just past the selector; the next `{` at the current nesting
+    // level opens the block.
+    let i = match.index + match[0].length - 1;
+    while (i < haystack.length && haystack[i] !== '{') i += 1;
+    if (i >= haystack.length) continue;
+    i += 1; // move past `{`
+    // Walk to the matching `}` at depth 0.
+    let depth = 1;
+    const start = i;
+    while (i < haystack.length && depth > 0) {
+      const ch = haystack[i];
+      if (ch === '{') depth += 1;
+      else if (ch === '}') depth -= 1;
+      i += 1;
+    }
+    out += haystack.slice(start, i - 1) + '\n';
+    pattern.lastIndex = i;
+  }
+  return out;
+}
+
+/**
+ * Utility — extract the body of a `@media (min-width: 1024px)` block from
+ * the CSS. Returns the concatenation of every such block (there can be
+ * more than one) so a downstream assertion catches the property no matter
+ * which block declares it.
+ */
+function extractDesktopMediaBlock(css: string): string {
+  const pattern = /@media\s*\(min-width:\s*1024px\)\s*\{/g;
+  let out = '';
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(css)) !== null) {
+    let depth = 1;
+    let i = match.index + match[0].length;
+    const start = i;
+    while (i < css.length && depth > 0) {
+      const ch = css[i];
+      if (ch === '{') depth += 1;
+      else if (ch === '}') depth -= 1;
+      i += 1;
+    }
+    out += css.slice(start, i - 1) + '\n';
+    pattern.lastIndex = i;
+  }
+  return out;
+}
+
+describe('<AppShell /> — independent pane scrolling CSS invariants (fix/independent-pane-scroll)', () => {
+  it('caps the shell at viewport height on desktop (≥ 1024px) so panel content does not grow the page', () => {
+    // ROOT INVARIANT of the fix. If the shell can grow beyond the
+    // viewport height on desktop, panel content pushes the 3D canvas
+    // off-screen and the whole page scrolls — the bug we are fixing.
+    // The desktop @media block must declare `height: 100vh` or
+    // `height: 100dvh` on `.wd-app-shell`.
+    const css = readCss('app-shell.css');
+    const desktop = extractDesktopMediaBlock(css);
+    expect(
+      desktop,
+      'app-shell.css must contain a @media (min-width: 1024px) block',
+    ).not.toBe('');
+    const shellRule = findRuleDeclarations(desktop, '.wd-app-shell');
+    expect(
+      shellRule,
+      '.wd-app-shell must have a rule inside @media (min-width: 1024px)',
+    ).not.toBe('');
+    // Accept either `100vh` or `100dvh` (or both — `100dvh` with a
+    // `100vh` fallback is the recommended progressive-enhancement
+    // pattern for iOS Safari where the URL bar changes viewport size).
+    expect(shellRule).toMatch(/height\s*:\s*100(vh|dvh)/);
+  });
+
+  it('clips the shell root on desktop so no child can push the page taller than the viewport', () => {
+    // Belt-and-braces alongside the height cap: if a child ever
+    // overflows the shell despite the height cap, `overflow: hidden`
+    // ensures the page still doesn't grow. Without this, a grid item
+    // whose min-content exceeds its track can visually spill.
+    const css = readCss('app-shell.css');
+    const desktop = extractDesktopMediaBlock(css);
+    const shellRule = findRuleDeclarations(desktop, '.wd-app-shell');
+    expect(shellRule).toMatch(/overflow\s*:\s*hidden/);
+  });
+
+  it('asides scroll internally on desktop (overflow-y: auto + min-height: 0)', () => {
+    // Grid/flex children need BOTH `overflow-y: auto` AND
+    // `min-height: 0` for internal scrolling to work. Without
+    // `min-height: 0`, the aside's min-content expands its track
+    // and the container grows instead of the aside scrolling.
+    const css = readCss('app-shell.css');
+    // The rule may live at top level (mobile default with a media
+    // override) or inside the desktop block — either way, the
+    // combined rule text must declare both properties for both asides.
+    const leftAll = findRuleDeclarations(css, '.wd-app-shell__left');
+    const rightAll = findRuleDeclarations(css, '.wd-app-shell__right');
+    // Overflow-y: auto MUST be present on desktop (either directly or
+    // via a shared rule the desktop @media doesn't override).
+    const desktop = extractDesktopMediaBlock(css);
+    const leftDesktop =
+      findRuleDeclarations(desktop, '.wd-app-shell__left') + '\n' + leftAll;
+    const rightDesktop =
+      findRuleDeclarations(desktop, '.wd-app-shell__right') + '\n' + rightAll;
+    expect(leftDesktop).toMatch(/overflow-y\s*:\s*auto/);
+    expect(rightDesktop).toMatch(/overflow-y\s*:\s*auto/);
+    expect(leftDesktop).toMatch(/min-height\s*:\s*0/);
+    expect(rightDesktop).toMatch(/min-height\s*:\s*0/);
+  });
+
+  it('main clips its content on desktop (overflow: hidden) so the 3D canvas never contributes to page height', () => {
+    // The r3f <Canvas> fills its parent. Without overflow: hidden
+    // on main, a canvas sized in mm world units could visually
+    // expand main and defeat the fixed-viewport layout.
+    const css = readCss('app-shell.css');
+    const mainRule = findRuleDeclarations(css, '.wd-app-shell__main');
+    expect(mainRule).toMatch(/overflow\s*:\s*hidden/);
+    expect(mainRule).toMatch(/min-height\s*:\s*0/);
+  });
+
+  it('body wrapper declares min-height: 0 so its grid track can shrink below content min (grid quirk)', () => {
+    // Without this, a grid item's default `min-height: auto` forces
+    // the track to be at least the content's min height, blowing out
+    // the fixed viewport layout.
+    const css = readCss('app-shell.css');
+    const bodyRule = findRuleDeclarations(css, '.wd-app-shell__body');
+    expect(bodyRule).toMatch(/min-height\s*:\s*0/);
+  });
+});
