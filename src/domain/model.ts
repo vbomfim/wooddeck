@@ -300,7 +300,7 @@ export interface FoundationBlockRef {
  * ## S25 remediation seam
  *
  * These fields are the seam the S25 `add-support-row` remediation
- * writes to when the user clicks "Add a row of blocks (N → N+1)"
+ * writes to when the user clicks "Add support rows (N → N+1)"
  * in the WarningsPanel. **S26 rescope (FIX #4):** the remediation
  * is DISABLED under Method A + `over-span-beam` warnings because
  * `blockRowsHint` is a no-op there — see the alternative surfaced

@@ -117,6 +117,7 @@ export {
   MAX_METHOD_B_BLOCK_COUNT,
   MAX_BLOCK_ROWS_HINT,
   MIN_BLOCK_ROWS_HINT,
+  clampMethodBRows,
 } from '../domain/layout/floating/floating-layout';
 export {
   MAX_BLOCK_SPACING_MM,

@@ -66,6 +66,7 @@ import type { DeckDesign, Layout, LayoutMember } from '../model';
 import { lookupFoundationProduct } from '../foundation-catalog';
 import { lookupMaterial } from '../materials-catalog';
 import { validateFoundationCombination } from '../compat-matrix';
+import type { SpanTable } from '../spans/span-table';
 import { MM_PER_FOOT, type Mm } from '../units';
 
 import { layoutBeams } from './beam-layout';
@@ -99,7 +100,14 @@ export { LayoutError, MAX_DECK_DIMENSION_MM, MIN_DECK_DIMENSION_MM };
 
 /**
  * Options for `computeLayout`. `now` is INJECTED so tests can lock in
- * a deterministic `computedAt` timestamp (AC7). Default: real clock.
+ * a deterministic `computedAt` timestamp (AC7).
+ *
+ * `spanTable` is INJECTED (Code Review Fix #4) so the floating
+ * Method-B path can derive a SPAN-SAFE default row count when
+ * `foundation.blockRowsHint` is absent. Threaded straight through
+ * to `computeFloatingLayout` → `computeMethodB` → `resolveMethodBGrid`;
+ * ELEVATED and Method-A layouts ignore this field (byte-identical
+ * before/after).
  */
 export interface ComputeLayoutOptions {
   /**
@@ -108,6 +116,15 @@ export interface ComputeLayoutOptions {
    * `() => new Date().toISOString()`.
    */
   readonly now?: () => string;
+  /**
+   * Optional IRC span table. When provided, `computeMethodB`
+   * derives a span-safe default row count from the joist's
+   * allowable — a fresh Method-B deck at any typical size does
+   * NOT start over-spanned. When absent (or when the joist
+   * material isn't in the catalog), the layout falls back to the
+   * 1220 mm-derived count (byte-identity with pre-fix consumers).
+   */
+  readonly spanTable?: SpanTable;
 }
 
 // Re-export `MIN_POST_HEIGHT_MM` so consumers (S13's height input) can

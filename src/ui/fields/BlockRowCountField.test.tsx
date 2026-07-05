@@ -152,6 +152,60 @@ describe('<BlockRowCountField /> — default surface', () => {
     );
     expect(input.value).toBe('5');
   });
+
+  // ---- Review-gate Fix #2 (no-lying UI) ------------------------
+  // When `blockRowsHint` is UNSET the displayed value must equal
+  // the ACTUAL number of Method-B block rows the layout is
+  // rendering. Pre-fix the field always showed a hardcoded "3"
+  // even when the layout drew 4 rows (12×12) / 7 rows (16×24) —
+  // a user "confirming" 3 would SILENTLY reduce support.
+  // ------------------------------------------------------------
+
+  it('displays the ACTUAL current row count (default 12×12) when blockRowsHint is unset', () => {
+    // Fresh design → 12×12 elevated → flip to Method B (which
+    // is the makeDefaultDesign starting shape). Read the actual
+    // block-row count from the layout the store just computed;
+    // assert the field shows exactly that number.
+    flipToMethodB();
+    const layout = useDesignStore.getState().bundle.layout;
+    const blocks = layout.members.filter((m) => m.kind === 'block');
+    const uniqueZ = new Set(blocks.map((b) => b.position.z));
+    const actualRowCount = uniqueZ.size;
+    expect(actualRowCount).toBeGreaterThanOrEqual(MIN_BLOCK_ROWS_HINT);
+
+    render(<BlockRowCountField />);
+    const input = screen.getByLabelText<HTMLInputElement>(
+      /blocks along each joist/i,
+    );
+    expect(input.value).toBe(String(actualRowCount));
+  });
+
+  it('displays the ACTUAL current row count for a resized 16×24 Method-B deck when blockRowsHint is unset', () => {
+    // Resize (and flip framing) via applyParameters. Once the
+    // deck is 16×24 the default row count changes; the field
+    // MUST track the layout, not a hardcoded starter.
+    act(() => {
+      useDesignStore.getState().applyParameters({
+        structure: 'floating',
+        floatingFraming: 'joists-on-blocks',
+        foundation: {
+          type: 'tuffblocks',
+          product: { productId: 'tuffblock-12x12x4' },
+        },
+        footprint: { widthMm: 16 * 304.8, lengthMm: 24 * 304.8 },
+      });
+    });
+    const layout = useDesignStore.getState().bundle.layout;
+    const blocks = layout.members.filter((m) => m.kind === 'block');
+    const uniqueZ = new Set(blocks.map((b) => b.position.z));
+    const actualRowCount = uniqueZ.size;
+
+    render(<BlockRowCountField />);
+    const input = screen.getByLabelText<HTMLInputElement>(
+      /blocks along each joist/i,
+    );
+    expect(input.value).toBe(String(actualRowCount));
+  });
 });
 
 // ---------------------------------------------------------------------------

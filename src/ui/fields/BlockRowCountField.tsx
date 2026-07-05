@@ -67,7 +67,7 @@
  * boundary directly (forbidden by dep-cruiser rule
  * `ui-no-domain-layout`).
  */
-import { useCallback, useId, useState, type JSX } from 'react';
+import { useCallback, useId, useMemo, useState, type JSX } from 'react';
 
 import type { DeckDesign } from '../../domain/model';
 import {
@@ -75,6 +75,7 @@ import {
   MIN_BLOCK_ROWS_HINT,
   useDesign,
   useDesignStore,
+  useLayout,
 } from '../../state';
 
 /**
@@ -128,6 +129,7 @@ function clampCountForDispatch(count: number): number {
  */
 export function BlockRowCountField(): JSX.Element | null {
   const design = useDesign();
+  const layout = useLayout();
   const inputId = useId();
   const hintId = `${inputId}-hint`;
 
@@ -138,7 +140,45 @@ export function BlockRowCountField(): JSX.Element | null {
   const storeHint = hasBlockFoundation(design)
     ? design.foundation.blockRowsHint
     : undefined;
-  const initialRaw = String(storeHint ?? MIN_BLOCK_ROWS_HINT + 1);
+
+  // Code Review Fix #2 — when `blockRowsHint` is UNSET, display
+  // the ACTUAL current Method-B row count derived from the
+  // rendered layout (unique block +z positions). Pre-fix the
+  // field showed a hardcoded starter integer ("3") even when
+  // the layout was drawing 4 rows (12×12) / 7 rows (16×24) — a
+  // user "confirming" 3 would SILENTLY reduce support. The
+  // displayed number MUST equal the rendered row count so the
+  // user can never be lied to about the current state.
+  //
+  // Method B guarantees ONE column per joist and a REGULAR grid
+  // along +z (see `resolveMethodBGrid`), so `uniqueZ.size`
+  // equals the row count. `useMemo` keys on the block-layer
+  // reference so the calculation only re-runs when the layout
+  // recomputes.
+  const effectiveRowCountFromLayout = useMemo(() => {
+    let unique: Set<number> | null = null;
+    for (const m of layout.members) {
+      if (m.kind !== 'block') continue;
+      if (unique === null) unique = new Set<number>();
+      unique.add(m.position.z);
+    }
+    return unique === null ? null : unique.size;
+  }, [layout.members]);
+
+  // Effective displayed number when the hint is absent — the
+  // layout's actual row count, clamped into the schema-legal
+  // range (fail-safe against a degenerate layout with < MIN
+  // blocks). Falls back to `MIN_BLOCK_ROWS_HINT + 1` = 3 ONLY
+  // when there are no block members (e.g. the visibility gate
+  // is about to return null anyway).
+  const effectiveDisplayCount =
+    effectiveRowCountFromLayout !== null && effectiveRowCountFromLayout >= 1
+      ? Math.max(
+          MIN_BLOCK_ROWS_HINT,
+          Math.min(MAX_BLOCK_ROWS_HINT, effectiveRowCountFromLayout),
+        )
+      : MIN_BLOCK_ROWS_HINT + 1;
+  const initialRaw = String(storeHint ?? effectiveDisplayCount);
   const [rawInput, setRawInput] = useState<string>(initialRaw);
 
   // Re-sync when the store's hint changes from OUTSIDE this
@@ -152,14 +192,22 @@ export function BlockRowCountField(): JSX.Element | null {
   // do NOT force a re-sync — that would repaint the last
   // committed value while the user is still typing.
   //
+  // Code Review Fix #2: the effective-count re-sync is ALSO
+  // tracked — a layout recompute (deck resized while the field
+  // is not being typed into) MUST update the displayed value
+  // when `blockRowsHint` is unset. We combine the two signals
+  // into a single "displayed number the store implies" and
+  // compare against that.
+  //
   // Ref: https://react.dev/reference/react/useState#storing-information-from-previous-renders
-  const [lastSeenStoreHint, setLastSeenStoreHint] = useState<
-    number | undefined
-  >(storeHint);
-  if (storeHint !== lastSeenStoreHint) {
-    setLastSeenStoreHint(storeHint);
+  const displayedFromStore = storeHint ?? effectiveDisplayCount;
+  const [lastSeenDisplayed, setLastSeenDisplayed] = useState<number>(
+    displayedFromStore,
+  );
+  if (displayedFromStore !== lastSeenDisplayed) {
+    setLastSeenDisplayed(displayedFromStore);
     if (rawInput !== '') {
-      const next = String(storeHint ?? MIN_BLOCK_ROWS_HINT + 1);
+      const next = String(displayedFromStore);
       if (next !== rawInput) setRawInput(next);
     }
   }

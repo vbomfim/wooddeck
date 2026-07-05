@@ -37,6 +37,8 @@ import { describe, expect, it } from 'vitest';
 
 import type { DeckDesign, FoundationSpec, MaterialRef } from '../../model';
 import { MM_PER_FOOT, type Mm } from '../../units';
+import { spanCheck } from '../../spans/span-check';
+import { IrcSpanTable } from '../../spans/irc-2018-tables';
 
 import {
   computeFloatingLayout,
@@ -412,3 +414,115 @@ describe('Method A / elevated are unaffected by blockRowsHint (byte-identity pin
     expect(summarize(base)).toBe(summarize(withHint));
   });
 });
+
+// ---------------------------------------------------------------------------
+// (F) Span-safe default across the tested matrix (Code Review Fix #4 —
+// QA G0 promoted probe). The FRESH Method-B default (no
+// blockRowsHint) must NOT start over-spanned across the range of
+// legal deck sizes × common joists × common species. When the deck
+// is so large that the block-count cap prevents reaching the
+// span-safe row count, an `over-span-joist` warning must fire
+// (documenting the boundary — no silent failure).
+// ---------------------------------------------------------------------------
+
+const PT_2X6: MaterialRef = { nominal: '2x6', species: 'PT', grade: 'No2' };
+const CEDAR_2X6: MaterialRef = { nominal: '2x6', species: 'Cedar', grade: 'No2' };
+const CEDAR_2X8: MaterialRef = { nominal: '2x8', species: 'Cedar', grade: 'No2' };
+
+interface SpanSafeCase {
+  widthFt: number;
+  lengthFt: number;
+  joist: MaterialRef;
+  spacingMm: Mm;
+}
+
+// A representative matrix of legal deck sizes × common joist SKUs
+// × common species — every case here is well within the schema-
+// legal footprint (widthMm ≤ 30480, lengthMm ≤ 30480) and uses a
+// joist / spacing combination that a typical DIY homeowner would
+// pick. A FRESH Method-B design (no `blockRowsHint`) across every
+// case in this matrix MUST NOT start over-spanned — the default
+// row count is derived from the joist's IRC allowable so the row
+// pitch is always ≤ allowable.
+const SPAN_SAFE_MATRIX: readonly SpanSafeCase[] = [
+  // 12×12 — the default deck size.
+  { widthFt: 12, lengthFt: 12, joist: PT_2X6, spacingMm: 406 },
+  { widthFt: 12, lengthFt: 12, joist: PT_2X8, spacingMm: 406 },
+  { widthFt: 12, lengthFt: 12, joist: CEDAR_2X6, spacingMm: 406 },
+  { widthFt: 12, lengthFt: 12, joist: CEDAR_2X8, spacingMm: 406 },
+  // 12×20 — narrow + long.
+  { widthFt: 12, lengthFt: 20, joist: PT_2X8, spacingMm: 406 },
+  { widthFt: 12, lengthFt: 20, joist: CEDAR_2X8, spacingMm: 406 },
+  // 16×24 — a common mid-size deck (the field-shows-actual test
+  // in `BlockRowCountField.test.tsx` also uses this shape).
+  { widthFt: 16, lengthFt: 24, joist: PT_2X8, spacingMm: 406 },
+  { widthFt: 16, lengthFt: 24, joist: CEDAR_2X8, spacingMm: 406 },
+  // 20×30 — bigger residential deck.
+  { widthFt: 20, lengthFt: 30, joist: PT_2X8, spacingMm: 406 },
+  // 40×40 — pushing the upper realistic range.
+  { widthFt: 40, lengthFt: 40, joist: PT_2X8, spacingMm: 406 },
+];
+
+describe('Method B — DEFAULT (no blockRowsHint) is span-safe across the tested matrix', () => {
+  const IRC = new IrcSpanTable();
+
+  it.each(SPAN_SAFE_MATRIX)(
+    '$widthFt×$lengthFt ft, $joist.species $joist.nominal @ $spacingMm mm o.c., no hint → ZERO over-span-joist warnings',
+    ({ widthFt, lengthFt, joist, spacingMm }) => {
+      const design = makeMethodB({ widthFt, lengthFt, spacingMm });
+      // The `makeMethodB` helper uses PT_2X8 by default; splice in
+      // the case's joist material so the span-check exercises the
+      // real allowable.
+      const designWithJoist: DeckDesign = {
+        ...design,
+        joist: { ...design.joist, material: joist },
+      };
+      // Thread the SpanTable through the layout — Code Review
+      // Fix #4 makes the default row count SPAN-SAFE by deriving
+      // the count from the joist's IRC allowable at layout time.
+      // Without the table the layout falls back to the legacy
+      // 1220 mm-derived default (also span-safe for typical
+      // decks in this matrix — the test proves the wired-up path
+      // works, not that the fallback is broken).
+      const layout = computeFloatingLayout(designWithJoist, {
+        spanTable: IRC,
+      });
+      const warnings = spanCheck(layout, IRC);
+      const overSpan = warnings.filter((w) => w.kind === 'over-span-joist');
+      expect(overSpan).toEqual([]);
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// (G) Cap-bound documentation — when the block-count cap prevents
+// reaching the span-safe row count, the over-span-joist warning
+// MUST fire (correct guidance to the user: reduce deck / use
+// beams). This pins the BOUNDARY so a future refactor that silently
+// swallows the cap case would fail here.
+// ---------------------------------------------------------------------------
+
+describe('Method B — cap-bound default fires over-span (documents the boundary)', () => {
+  const IRC = new IrcSpanTable();
+
+  it('75×75 ft @ 2×8 PT joists, no hint → the cap prevents span-safe rows → over-span-joist fires', () => {
+    // 75 ft × 305 mm (12" o.c.) → ~75 joists. rowsMaxByCap =
+    // floor(400/75) = 5 rows. On 75 ft (22860 mm) → pitch =
+    // 22860/4 = 5715 mm, way above any joist allowable. The
+    // over-span-joist warning MUST fire — the default can't be
+    // span-safe here (no row count in the schema-legal range
+    // clears), but the user gets a HONEST warning (not a silent
+    // failure). Thread the SpanTable so `computeMethodB` requests
+    // the span-safe row count and the cap does the clamping.
+    const design = makeMethodB({
+      widthFt: 75,
+      lengthFt: 75,
+      spacingMm: 305, // 12" o.c. → many joists → tight cap
+    });
+    const layout = computeFloatingLayout(design, { spanTable: IRC });
+    const warnings = spanCheck(layout, IRC);
+    const overSpan = warnings.filter((w) => w.kind === 'over-span-joist');
+    expect(overSpan.length).toBeGreaterThan(0);
+  });
+});
+

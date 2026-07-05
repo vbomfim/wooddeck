@@ -92,24 +92,35 @@
 }
 
 /* -------------------------------------------------------------------------
- * LengthField / SelectField shared row layout.
+ * LengthField / SelectField / BlockRowCountField shared row layout.
+ *
+ * `wd-block-row-count-field` (feat/block-count-per-joist) shares
+ * the exact same row/label/input/hint structure as `wd-length-field`
+ * — visually a labeled numeric input with a hint below. We reuse
+ * the same rules (Code Review Fix #3) instead of duplicating them
+ * so a future token/spacing update automatically propagates and
+ * the integer field renders with visual parity to the length
+ * field it replaced.
  * ------------------------------------------------------------------------- */
 .wd-length-field,
-.wd-select-field {
+.wd-select-field,
+.wd-block-row-count-field {
   display: flex;
   flex-direction: column;
   gap: var(--wd-space-1);
 }
 
 .wd-length-field__label,
-.wd-select-field__label {
+.wd-select-field__label,
+.wd-block-row-count-field__label {
   font-size: 0.875rem;
   font-weight: 500;
   color: var(--wd-color-text);
 }
 
 .wd-length-field__input,
-.wd-select-field__select {
+.wd-select-field__select,
+.wd-block-row-count-field__input {
   padding: var(--wd-space-2) var(--wd-space-3);
   font-size: 1rem;
   color: var(--wd-color-text);
@@ -122,17 +133,20 @@
   box-sizing: border-box;
 }
 
-.wd-length-field__input[aria-invalid='true'] {
+.wd-length-field__input[aria-invalid='true'],
+.wd-block-row-count-field__input[aria-invalid='true'] {
   border-color: var(--wd-color-banner-full-border);
 }
 
-.wd-length-field__hint {
+.wd-length-field__hint,
+.wd-block-row-count-field__hint {
   margin: 0;
   font-size: 0.8125rem;
   color: var(--wd-color-text-muted);
 }
 
-.wd-length-field__error {
+.wd-length-field__error,
+.wd-block-row-count-field__error {
   margin: 0;
   font-size: 0.8125rem;
   color: var(--wd-color-banner-full-text);
@@ -184,9 +198,10 @@
  *
  * Currently empty — reserved for future transitions. All future
  * transition/animation properties on .wd-parameter-panel__* /
- * .wd-length-field__* / .wd-select-field__* / .wd-unit-switcher__*
- * MUST live inside this @media block. AppShell.test.tsx "Fix G"
- * asserts this per stylesheet.
+ * .wd-length-field__* / .wd-select-field__* /
+ * .wd-block-row-count-field__* / .wd-unit-switcher__* MUST live
+ * inside this @media block. AppShell.test.tsx "Fix G" asserts
+ * this per stylesheet.
  * ------------------------------------------------------------------------- */
 @media (prefers-reduced-motion: no-preference) {
   /* Empty. */

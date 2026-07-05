@@ -163,13 +163,18 @@ import type { SpanTable } from './span-table';
 // `no-circular` blocks it). `block-grid.ts` imports zero span
 // modules, so the direct file edge is cycle-free. Same rationale
 // for the direct file edge to `floating-layout.ts` (feat/block-
-// spacing HIGH #3 — `resolveMethodBGrid` reflects the
-// spacing-primary Method B resolver so the remediation's
-// `currentRows` mirrors what the layout actually produces).
+// spacing HIGH #3 — `resolveMethodBGrid` reflects the count-
+// primary Method B resolver so the remediation's `currentRows`
+// mirrors what the layout actually produces; Code Review Fix #5:
+// `clampMethodBRows` is the shared helper so the remediation
+// NEVER proposes a count the resolver would clamp back).
 import {
   MIN_BLOCK_SPACING_MM,
 } from '../layout/floating/block-grid';
-import { resolveMethodBGrid, MAX_METHOD_B_BLOCK_COUNT } from '../layout/floating/floating-layout';
+import {
+  resolveMethodBGrid,
+  clampMethodBRows,
+} from '../layout/floating/floating-layout';
 import { layoutFloatingJoists } from '../layout/floating/floating-joist-layout';
 
 // ==========================================================
@@ -1363,20 +1368,28 @@ function produceAddSupportRow(
   // minimum". Take the larger of currentRows+1 and requiredRows.
   const desiredProposedRows = Math.max(currentRows + 1, requiredRows);
 
-  // Effective ceilings under count-primary:
-  //   - rowsMaxByCap: `numJoists × rows ≤ MAX_METHOD_B_BLOCK_COUNT`.
-  //   - rowsMaxByGap: adjacent-row gap ≥ MIN_BLOCK_SPACING_MM.
-  // Both floor at 2 so the perimeter-two invariant holds.
-  const rowsMaxByCap = Math.max(
-    2,
-    Math.floor(MAX_METHOD_B_BLOCK_COUNT / Math.max(1, numJoists)),
+  // Effective clamped proposed count (Code Review Fix #5):
+  // pass `desiredProposedRows` through the SHARED clamp helper
+  // `clampMethodBRows` — the SAME helper `resolveMethodBGrid`
+  // uses at layout time — so the count we propose is BYTE-
+  // IDENTICAL to what the resolver would keep. Duplicating the
+  // clamp math risked the remediation proposing a count the
+  // resolver would silently clamp back (breaking `wouldClear`).
+  const proposedRows = clampMethodBRows(
+    desiredProposedRows,
+    numJoists,
+    lengthMm,
   );
+
+  // The two individual ceilings are needed for the DISABLED-BRANCH
+  // reasons below (gap-limited vs cap-limited produce different
+  // `disabledReason` strings). Recomputing here — same formulas
+  // as inside `clampMethodBRows`. Kept as local constants to keep
+  // the branch predicates readable.
   const rowsMaxByGap = Math.max(
     2,
     Math.floor(lengthMm / MIN_BLOCK_SPACING_MM) + 1,
   );
-  const effectiveMaxRows = Math.min(rowsMaxByCap, rowsMaxByGap);
-  const proposedRows = Math.min(desiredProposedRows, effectiveMaxRows);
 
   // Derived spacing (kept in the patch shape for backwards
   // compatibility with legacy consumers of `proposedSpacingMm`;
