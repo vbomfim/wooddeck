@@ -1824,3 +1824,95 @@ describe('computeRemediations — count-primary Method-B remediation', () => {
     }
   });
 });
+
+// ==========================================================
+// Review-gate Fix #B — remediation currentRows derives via the
+// SAME spanTable path as the layout (removes the `void table;`
+// coincidence).
+// ==========================================================
+//
+// Opus MEDIUM (2026-07-05 diff review): `produceAddSupportRow`
+// used to omit `spanTable` from its `resolveMethodBGrid` call
+// (there was a `void table;` smell), so in the "absent both
+// hints" branch the layout used `max(legacyDefault, spanSafeRows)`
+// while the remediation computed `currentRows` from
+// `legacyDefault` only. Correct by coincidence today (all real
+// IRC allowables ≥ 1220 mm ⇒ spanSafeRows ≤ legacyDefault ⇒ same
+// answer), but coincidence is fragile. This test uses a SYNTHETIC
+// SpanTable with a below-1220 mm allowable to force
+// `spanSafeRows > legacyDefault`, then asserts the remediation's
+// reported `currentRows` equals the layout's actual row count.
+// Pre-fix the remediation reported `legacyDefault` (~6); post-fix
+// it reports whatever the layout actually renders (~21).
+
+describe('Fix #B — produceAddSupportRow.currentRows == layout row count (span-table threaded)', () => {
+  it('reports the same currentRows the layout renders when spanSafeRows > legacyDefault (cap-bound over-span)', () => {
+    // Synthetic table: joist allowable = 250 mm (unrealistically
+    // low — well below the 1220 mm legacyDefault pitch — chosen
+    // to force spanSafeRows > legacyDefault AND force an
+    // over-span-joist warning even at the layout's clamped rows).
+    const LOW_ALLOWABLE_TABLE: SpanTable = {
+      edition: 'SYNTHETIC-250',
+      lookupJoistMaxSpan(): Mm {
+        return 250;
+      },
+      lookupBeamMaxSpan(): Mm {
+        return 250;
+      },
+      citationFor(_: MemberKind): string {
+        return 'SYNTHETIC-250';
+      },
+    };
+    // Recompute must use the SAME custom table for both layout
+    // (default row derivation) and span-check (warning emission).
+    const recomputeSynthetic = (
+      design: DeckDesign,
+    ): readonly Warning[] => {
+      const layout = computeLayout(design, { spanTable: LOW_ALLOWABLE_TABLE });
+      return spanCheck(layout, LOW_ALLOWABLE_TABLE);
+    };
+    // Method-B design with NEITHER blockRowsHint NOR
+    // blockSpacingMm set — exercises the absent-both-hints
+    // default derivation.
+    const design = makeFloating({
+      widthFt: 12,
+      lengthFt: 20,
+      framing: 'joists-on-blocks',
+    });
+    // Sanity: the LAYOUT (with synthetic table) renders more rows
+    // than legacyDefault (span-safe max path bites).
+    const layout = computeLayout(design, { spanTable: LOW_ALLOWABLE_TABLE });
+    const actualBlockRowsFromLayout = new Set(
+      layout.members
+        .filter((m) => m.kind === 'block')
+        .map((b) => b.position.z),
+    ).size;
+    // legacyDefault @ 6096 mm = ceil(6096/1220)+1 = 6.
+    expect(actualBlockRowsFromLayout).toBeGreaterThan(6);
+
+    // The synthetic table's tight allowable produces an
+    // over-span-joist warning on the clamped layout.
+    const warnings = recomputeSynthetic(design);
+    const joistWarning = warnings.find((w) => w.kind === 'over-span-joist');
+    expect(joistWarning).toBeDefined();
+    if (!joistWarning) return;
+
+    // The remediation MUST report currentRows equal to what the
+    // layout renders — NOT the legacyDefault-only fallback.
+    const options = computeRemediations(
+      joistWarning,
+      design,
+      LOW_ALLOWABLE_TABLE,
+      recomputeSynthetic,
+    );
+    const addSupport = options.find((o) => o.kind === 'add-support-row');
+    expect(addSupport).toBeDefined();
+    if (!addSupport) return;
+    if (addSupport.patch.kind === 'add-support-row') {
+      // Pre-fix this was `6` (legacyDefault) — a lie. Post-fix it
+      // is `actualBlockRowsFromLayout` (byte-identical to the
+      // layout's own resolver).
+      expect(addSupport.patch.currentRows).toBe(actualBlockRowsFromLayout);
+    }
+  });
+});

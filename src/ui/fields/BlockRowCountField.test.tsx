@@ -206,6 +206,53 @@ describe('<BlockRowCountField /> — default surface', () => {
     );
     expect(input.value).toBe(String(actualRowCount));
   });
+
+  // ---- Review-gate Fix #A (no-lying UI at the >100-row extreme) --
+  // GPT MEDIUM (2026-07-05 diff review): the layout-derived
+  // fallback used to clamp the DISPLAYED value to
+  // `MAX_BLOCK_ROWS_HINT` (100) before rendering. A legal legacy
+  // spacing-only design can produce > 100 rows (100 ft × narrow
+  // deck + `blockSpacingMm = MIN_BLOCK_SPACING_MM (300)` →
+  // ~102 rows), and the field silently showed "100" — the exact
+  // "field lies about the rendered count" bug fix #2 was meant to
+  // kill, at the extreme. The user's EDIT is still clamped by the
+  // schema; only the READ-ONLY DISPLAY of the effective current
+  // count must equal the true rendered row count.
+  // -----------------------------------------------------------------
+
+  it('displays the ACTUAL rendered row count when the legacy spacing path exceeds MAX_BLOCK_ROWS_HINT', () => {
+    // Extreme legal case: 100 ft × 12 ft deck, wide joist spacing
+    // (~6 ft) so numJoists is small enough that the cap doesn't
+    // bind, plus MIN blockSpacingMm — the layout renders ~102
+    // block rows. The field must reflect that number, NOT the
+    // schema max of 100.
+    act(() => {
+      useDesignStore.getState().applyParameters({
+        structure: 'floating',
+        floatingFraming: 'joists-on-blocks',
+        foundation: {
+          type: 'tuffblocks',
+          product: { productId: 'tuffblock-12x12x4' },
+          blockSpacingMm: 300,
+        },
+        footprint: { widthMm: 12 * 304.8, lengthMm: 100 * 304.8 },
+        joist: { spacingMm: 1829 },
+      });
+    });
+    const layout = useDesignStore.getState().bundle.layout;
+    const blocks = layout.members.filter((m) => m.kind === 'block');
+    const uniqueZ = new Set(blocks.map((b) => b.position.z));
+    const actualRowCount = uniqueZ.size;
+
+    // Sanity: we DID construct an over-schema-max case.
+    expect(actualRowCount).toBeGreaterThan(MAX_BLOCK_ROWS_HINT);
+
+    render(<BlockRowCountField />);
+    const input = screen.getByLabelText<HTMLInputElement>(
+      /blocks along each joist/i,
+    );
+    expect(input.value).toBe(String(actualRowCount));
+  });
 });
 
 // ---------------------------------------------------------------------------

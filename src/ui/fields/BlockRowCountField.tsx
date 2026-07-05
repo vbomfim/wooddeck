@@ -166,17 +166,31 @@ export function BlockRowCountField(): JSX.Element | null {
   }, [layout.members]);
 
   // Effective displayed number when the hint is absent — the
-  // layout's actual row count, clamped into the schema-legal
-  // range (fail-safe against a degenerate layout with < MIN
-  // blocks). Falls back to `MIN_BLOCK_ROWS_HINT + 1` = 3 ONLY
-  // when there are no block members (e.g. the visibility gate
-  // is about to return null anyway).
+  // layout's ACTUAL row count. Code Review Fix #A (2026-07-05
+  // diff review, GPT MEDIUM): do NOT clamp the DISPLAYED
+  // layout-derived value to `MAX_BLOCK_ROWS_HINT` — a legal
+  // legacy spacing-only Method-B deck can render > 100 rows
+  // (100 ft × narrow deck + `blockSpacingMm = MIN_BLOCK_SPACING_MM`
+  // → ~102 rows), and clamping the display would silently lie
+  // about the true rendered count. The schema clamp
+  // `[MIN_BLOCK_ROWS_HINT, MAX_BLOCK_ROWS_HINT]` still applies
+  // to what gets WRITTEN by `handleChange` (see
+  // `clampCountForDispatch`); it must not apply to the read-only
+  // display of the effective current count.
+  //
+  // Floor at `MIN_BLOCK_ROWS_HINT` only — a rendered count below
+  // 2 would violate the perimeter-two invariant (defensive; the
+  // Method-B layout physically cannot produce fewer than 2
+  // rows). Fallback to `MIN_BLOCK_ROWS_HINT + 1 = 3` for a
+  // ≤ 1-block layout is unreachable per the Method-B perimeter-
+  // two invariant and only applies for Method-A / elevated
+  // hidden-mount states before the visibility gate below returns
+  // null — Code Review Fix #D (2026-07-05 diff review, Opus
+  // LOW): fail-loud is inappropriate at render time; the comment
+  // pins the invariant so a future regression is easy to spot.
   const effectiveDisplayCount =
     effectiveRowCountFromLayout !== null && effectiveRowCountFromLayout >= 1
-      ? Math.max(
-          MIN_BLOCK_ROWS_HINT,
-          Math.min(MAX_BLOCK_ROWS_HINT, effectiveRowCountFromLayout),
-        )
+      ? Math.max(MIN_BLOCK_ROWS_HINT, effectiveRowCountFromLayout)
       : MIN_BLOCK_ROWS_HINT + 1;
   const initialRaw = String(storeHint ?? effectiveDisplayCount);
   const [rawInput, setRawInput] = useState<string>(initialRaw);

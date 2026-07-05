@@ -1258,9 +1258,17 @@ function produceAddSupportRow(
   table: SpanTable,
   recompute: (design: DeckDesign) => readonly Warning[],
 ): RemediationOption | null {
-  // `table` retained for signature symmetry with the other
-  // produce-* helpers (used only by SpanTable-dependent ones).
-  void table;
+  // Code Review Fix #B (2026-07-05 diff review, Opus MEDIUM):
+  // `table` is now threaded into the `resolveMethodBGrid` call
+  // below so `currentRows` derives from the SAME code path the
+  // layout uses. Pre-fix the parameter was suppressed with
+  // `void table;` — under the absent-both-hints branch the
+  // layout used `max(legacyDefault, spanSafeRows)` while the
+  // remediation used `legacyDefault` only. The two agreed by
+  // coincidence today (every real IRC allowable ≥ 1220 mm
+  // ⇒ spanSafeRows ≤ legacyDefault), but coincidence is fragile
+  // — a future weaker joist material or a tightened default
+  // pitch would silently break `wouldClear` consistency.
   // FR-032 elevated clause (S25 pair-fix / Opus HIGH#1): every
   // elevated design gets a DISABLED option with a reason that
   // surfaces the alternative construction MODEL. Elevated designs
@@ -1334,14 +1342,20 @@ function produceAddSupportRow(
   // now `blockRowsHint` (a COUNT). Use the ACTIVE resolver so
   // currentRows reflects what the layout renders (whether the
   // design carries the count hint, a legacy blockSpacingMm, or
-  // neither).
+  // neither). Code Review Fix #B + Fix #C: pass `spanTable` +
+  // joist material/spacing so the "absent both hints" branch
+  // derives the SAME span-safe default the layout uses (removes
+  // the pre-fix `void table;` coincidence); the vestigial
+  // `_legacyColsHint` param has been dropped from the signature.
   const currentGrid = resolveMethodBGrid(
     widthMm,
     lengthMm,
     design.foundation.blockSpacingMm,
     design.foundation.blockRowsHint,
-    design.foundation.blockColsHint,
     numJoists,
+    table,
+    design.joist.material,
+    design.joist.spacingMm,
   );
   const currentRows = currentGrid.rows;
 

@@ -317,7 +317,13 @@ export const MAX_BLOCK_ROWS_HINT = 100;
  *
  * `cols = numJoists`. Every joist has a block column beneath it —
  * the fix/joists-on-blocks-flying invariant survives the pivot
- * unchanged. `blockColsHint` remains a NO-OP for Method B.
+ * unchanged. The `foundation.blockColsHint` model field REMAINS
+ * on the schema for back-compat with pre-flying-joists .deck
+ * files, but has been a genuine NO-OP for Method B since PR #66
+ * (and is not surfaced by any UI control). Code Review Fix #C
+ * (2026-07-05 diff review, Opus LOW) removed the no-op param
+ * from this signature — the field lives on the model, but the
+ * resolver never inspects it.
  *
  * ## Degenerate corner — `numJoists × 2 > MAX_METHOD_B_BLOCK_COUNT`
  *
@@ -331,15 +337,16 @@ export function resolveMethodBGrid(
   lengthMm: Mm,
   requestedSpacingMm: number | undefined,
   blockRowsHint: number | undefined,
-  _legacyColsHint: number | undefined,
   numJoists: number,
   spanTable?: SpanTable,
   joistMaterial?: MaterialRef,
   joistSpacingMm?: Mm,
 ): { cols: number; rows: number } {
-  // `widthMm` and `_legacyColsHint` are retained for API symmetry
-  // but no longer influence the column count — columns are
-  // externally fixed at `numJoists` (see docstring).
+  // `widthMm` is retained for API symmetry but no longer
+  // influences the column count — columns are externally fixed
+  // at `numJoists` (see docstring). Code Review Fix #C removed
+  // the previously-vestigial `_legacyColsHint` parameter — it
+  // was a genuine no-op that only served to lie about the API.
   void widthMm;
 
   const cols = numJoists;
@@ -709,7 +716,6 @@ function computeMethodB(
     lengthMm,
     design.foundation.blockSpacingMm,
     design.foundation.blockRowsHint,
-    design.foundation.blockColsHint,
     numJoists,
     spanTable,
     design.joist.material,
