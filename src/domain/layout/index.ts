@@ -45,7 +45,6 @@ export type { BlocksUnderPostsInput } from './foundation/blocks-under-posts';
 export {
   BEAM_TO_BEAM_MAX_SPACING_MM,
   BLOCK_ROW_MAX_SPACING_MM,
-  MAX_BLOCKING_SPACING_MM,
   computeFloatingLayout,
 } from './floating/floating-layout';
 export type { ComputeFloatingLayoutOptions } from './floating/floating-layout';
@@ -59,3 +58,20 @@ export {
   computeYStackFloating,
 } from './floating/y-stack-floating';
 export type { FloatingYStack } from './floating/y-stack-floating';
+
+// -----------------------------------------------------------------
+// Issue #72 — blocking between joists (IRC R502.7 / R502.7.1)
+// -----------------------------------------------------------------
+//
+// `MAX_BLOCKING_SPACING_MM` is exported from the ACTIVE helper
+// `./blocking-layout` (= 2438 mm = 8 ft, per IRC R502.7.1). Do
+// NOT re-export the identically-named legacy constant from
+// `./floating/floating-layout` (= 1220 mm = 4 ft) — that is the
+// pre-#72 legacy value with no runtime consumer, and was deleted
+// as part of PR #73 review MEDIUM #4 to eliminate the name
+// collision. See `./index.barrel.test.ts` for the regression pin.
+export {
+  MAX_BLOCKING_SPACING_MM,
+  layoutBlockingBetweenJoists,
+} from './blocking-layout';
+export type { BlockingLayoutInput } from './blocking-layout';

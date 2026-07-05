@@ -23,17 +23,28 @@
  *
  * ## IRC R502.7 / R502.7.1 — where the row rule comes from
  *
- *   - R502.7 requires **lateral restraint at supports** — the deck
- *     ends are already restrained by the rim joist / ledger (for
- *     elevated) or by the rim beam (for floating Method A). This
- *     helper does NOT emit end-rows because those ends are
- *     already restrained.
+ *   - R502.7 requires **lateral restraint at supports** — i.e.
+ *     the joist ENDS need to be tied (rim joist / band board /
+ *     ledger / rim beam). This helper does NOT emit end-rows
+ *     because it is scoped to INTERIOR bridging only. End
+ *     restraint is:
+ *       - **Elevated** — provided by the rim joist / ledger at
+ *         each end (part of the elevated framing model).
+ *       - **Floating Method A** (`beams-and-joists`) — provided
+ *         by the two rim beams the layout emits along the near
+ *         / far edges.
+ *       - **Floating Method B** (`joists-on-blocks`) — NOT YET
+ *         provided; Method B currently has no rim/band member.
+ *         Adding a joist-depth band across the joist ends for
+ *         Method B is tracked in **issue #74** (deferred from
+ *         PR #73 to keep #72 scoped to interior bridging).
  *   - R502.7.1 requires **on-center spacing ≤ 8 ft** for solid
- *     blocking used as lateral restraint. Constant:
- *     `MAX_BLOCKING_SPACING_MM = 2438` mm (8 ft × 304.8 mm/ft ≈
- *     2438.4 mm — rounded down to an integer for exact-arithmetic
- *     ceil-count semantics on the typical 8/10/12/14/16 ft deck
- *     lengths).
+ *     blocking used as INTERIOR lateral restraint / anti-rotation
+ *     bridging (which is exactly what this helper emits).
+ *     Constant: `MAX_BLOCKING_SPACING_MM = 2438` mm (8 ft × 304.8
+ *     mm/ft ≈ 2438.4 mm — rounded down to an integer for
+ *     exact-arithmetic ceil-count semantics on typical
+ *     8/10/12/14/16 ft deck lengths).
  *
  * ## Row placement along +z (deck LENGTH)
  *
@@ -89,6 +100,37 @@
  *     blocking between. Fail-loud is the CALLER's responsibility;
  *     this helper stays graceful because upstream validation
  *     already rejects <2-joist designs (`validateJoistSpacing`).
+ *   - **Zero-width bay (clear gap ≤ EPS)** — `validateJoistSpacing`
+ *     admits `actualSpacing == joistThickness` (adjacent joists
+ *     touching face-to-face). In that case the CLEAR gap between
+ *     joist faces is zero, and the bay is physically DEGENERATE.
+ *     The helper SKIPS any bay whose `clearGap ≤ CLEAR_GAP_EPS_MM`
+ *     — fail-safe, not a throw — so no invisible zero-width mesh
+ *     and no zero-length BOM cut is ever emitted. See
+ *     `CLEAR_GAP_EPS_MM` docstring for how the tolerance stays
+ *     in lock-step with the upstream validator.
+ *
+ * ## Member-count bounds — PR #73 review MEDIUM #2
+ *
+ * The emitted count is `rows × openBays` where
+ *   - `rows = max(1, ceil(lengthMm / 2438) − 1)`. With the
+ *     `MAX_DECK_DIMENSION_MM = 30480 mm` cap the elevated /
+ *     floating pipelines enforce on `lengthMm`, `rows ≤ ceil(30480
+ *     / 2438) − 1 = 12`.
+ *   - `openBays ≤ joistXCenters.length − 1`. Joist count is bounded
+ *     by `widthMm / joistThickness ≤ 30480 / 38 ≈ 802`. However,
+ *     any bay whose clear gap ≤ EPS is SKIPPED by the zero-width
+ *     guard above, so the pathological "joists touching, ~800
+ *     bays" case emits ~0 blocking (not ~800).
+ * At realistic joist spacing (12″ = 305 mm; 16″ = 406 mm; 24″ = 610
+ * mm) a maximally-wide 30480 mm deck has ~50 to ~100 open bays,
+ * so a maximally-long 30480 mm deck emits ~600 to ~1200 blocking
+ * members — proportionate to a legally-huge (~10,000 sq ft) deck.
+ * NO arbitrary numeric cap is applied here: silently dropping rows
+ * on a legal large deck would be silent under-bracing (worse than
+ * the DoS an arbitrary cap would defend against). The zero-width
+ * guard + the upstream footprint cap together bound the count
+ * without introducing a lying UI.
  *
  * ## Stable ids
  *
@@ -118,6 +160,31 @@ import type { Mm } from '../units';
  * SAME source-of-truth constant (no duplicated magic numbers).
  */
 export const MAX_BLOCKING_SPACING_MM = 2438;
+
+/**
+ * Tolerance for the "clear gap ≤ 0" degenerate-bay guard, in mm.
+ *
+ * Kept in strict lock-step with `EPS_MM = 1e-6` in
+ * `layout-shared.ts::validateJoistSpacing`. Both seams answer the
+ * same physical question ("is the on-center joist spacing ≥ the
+ * joist thickness?") and MUST agree on where the threshold is:
+ *
+ *   - `validateJoistSpacing` REJECTS a design when
+ *     `actualSpacing + EPS_MM < joistThickness`, i.e. it ADMITS
+ *     `actualSpacing == joistThickness` (adjacent joists touching
+ *     face-to-face; clear gap == 0).
+ *   - THIS helper, receiving an admitted design, SKIPS any bay
+ *     whose clear gap ≤ `EPS_MM` — because there is physically no
+ *     room to nail a noggin between two touching joists, so
+ *     emitting a `size.x == 0` invisible mesh + zero-length BOM
+ *     cut would be a lying UI.
+ *
+ * Same EPS on both sides means "how close to zero counts as zero"
+ * is answered identically at both ends of the pipeline. If you
+ * ever loosen either seam, loosen BOTH — or the two will disagree
+ * about what a degenerate design looks like.
+ */
+const CLEAR_GAP_EPS_MM = 1e-6;
 
 /**
  * Pure input contract for {@link layoutBlockingBetweenJoists}.
@@ -231,6 +298,13 @@ export function layoutBlockingBetweenJoists(
       const rightCenter = joistXCenters[bay + 1]!;
       const midX = (leftCenter + rightCenter) / 2;
       const clearGap = rightCenter - leftCenter - joistThicknessMm;
+      // Degenerate-bay guard — see `CLEAR_GAP_EPS_MM` docstring.
+      // `validateJoistSpacing` admits `actualSpacing ==
+      // joistThickness` (clear gap = 0). Skipping the bay is
+      // fail-SAFE: no invisible zero-width mesh, no zero-length
+      // BOM cut, and no crash. The row loop continues so open
+      // bays in the same row still emit blocking normally.
+      if (clearGap <= CLEAR_GAP_EPS_MM) continue;
       out.push({
         id: `blocking-r${rowIdx}-b${bay}`,
         kind: 'blocking',

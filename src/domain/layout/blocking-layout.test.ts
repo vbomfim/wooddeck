@@ -430,3 +430,96 @@ describe('layoutBlockingBetweenJoists — LayoutMember field contract', () => {
     expect(a).toEqual(b);
   });
 });
+
+// ---------------------------------------------------------------
+// Zero-width blocking guard — PR #73 review response
+// ---------------------------------------------------------------
+//
+// `validateJoistSpacing` (layout-shared.ts) rejects `actualSpacing +
+// EPS_MM < joistThickness` — so `actualSpacing == joistThickness`
+// (adjacent joists touching face-to-face) is LEGAL. At that exact
+// boundary the CLEAR gap between joist faces is zero, and the
+// blocking bay is physically DEGENERATE — there is no room to nail
+// a noggin between two touching joists. Emitting a `size.x == 0`
+// mesh + a zero-length BOM cut is a "lying UI" (invisible mesh,
+// dropped cut). The helper MUST SKIP any bay whose clear gap ≤
+// `EPS_MM = 1e-6` (same EPS the upstream validator uses so the
+// two seams agree on "how close to zero counts as zero").
+//
+// A separate rim/band member (issue #74) will eventually restrain
+// the joist ENDS on Method B, but for INTERIOR blocking the
+// physically-correct answer for touching joists is "none in that
+// bay" — safer than "invisible zero-size stub."
+
+describe('layoutBlockingBetweenJoists — zero-width bay guard [PR #73 review]', () => {
+  it('SKIPS bays with clear gap == 0 exactly (touching joists — no blocking emitted for those bays)', () => {
+    // Construct a joist grid where every adjacent pair of centers
+    // is EXACTLY `joistThicknessMm` apart, i.e. every clear gap is
+    // zero. `computeJoistXCenters` produces exactly this whenever
+    // `widthMm − joistThicknessMm` is an integer multiple of
+    // `joistThicknessMm`. E.g. thickness=38, widthMm = 38 + 4×38 =
+    // 190 → xCenters at [-76, -38, 0, 38, 76], every adjacent gap
+    // = 38 = thickness → clear gap = 0.
+    const thickness = JOIST_THICKNESS_MM;
+    const centers = [-2, -1, 0, 1, 2].map((k) => k * thickness);
+    const result = layoutBlockingBetweenJoists(
+      makeInput({
+        joistXCenters: centers,
+        joistThicknessMm: thickness,
+      }),
+    );
+    // All 4 bays are degenerate ⇒ nothing emitted at ALL for
+    // this deck (interior rows still counted, but every bay in
+    // every row skipped).
+    expect(result).toEqual([]);
+  });
+
+  it('never emits any member with size.x ≤ 0 for a mixed grid (some touching, some open bays)', () => {
+    // Mixed grid — bays 0, 1 touch (clear gap = 0), bays 2, 3
+    // have a healthy positive gap. The 2 touching bays must be
+    // SKIPPED; the 2 open bays must still emit blocking.
+    const thickness = JOIST_THICKNESS_MM;
+    const centers = [
+      -3 * thickness,
+      -2 * thickness,
+      -1 * thickness, // bays 0, 1: touching
+       200,           // gap from -thickness ⇒ 200 - (-38) - 38 = 200 (positive)
+       400,           // gap from 200      ⇒ 400 - 200      - 38 = 162 (positive)
+    ];
+    const result = layoutBlockingBetweenJoists(
+      makeInput({
+        joistXCenters: centers,
+        joistThicknessMm: thickness,
+      }),
+    );
+    expect(result.length).toBeGreaterThan(0);
+    for (const m of result) {
+      expect(m.size.x).toBeGreaterThan(0);
+    }
+    // Verify we still have blocking in the open bays: rows × open-bay-count.
+    // 16 ft deck ⇒ N = 2 interior rows (see other suite). 2 open bays × 2 rows = 4.
+    expect(result.length).toBe(4);
+  });
+
+  it('still emits blocking when the clear gap is tiny but strictly positive (near-touch, gap > EPS)', () => {
+    // 1 mm clear gap is degenerate carpentry but the emitter is
+    // NOT a code-check tool — its job is to reflect what
+    // `validateJoistSpacing` admitted. As long as the gap is
+    // strictly > EPS the member is emitted with a truthful
+    // positive size.x.
+    const thickness = JOIST_THICKNESS_MM;
+    const gap = 1; // 1 mm clear gap
+    const centers = [0, thickness + gap];
+    const result = layoutBlockingBetweenJoists(
+      makeInput({
+        joistXCenters: centers,
+        joistThicknessMm: thickness,
+      }),
+    );
+    expect(result.length).toBeGreaterThan(0);
+    for (const m of result) {
+      expect(m.size.x).toBeCloseTo(gap, 9);
+      expect(m.size.x).toBeGreaterThan(0);
+    }
+  });
+});

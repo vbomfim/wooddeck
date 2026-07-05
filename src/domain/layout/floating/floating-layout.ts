@@ -134,14 +134,14 @@ export const BLOCK_ROW_MAX_SPACING_MM_PRACTICAL: Mm = 610;
  */
 export const BLOCK_ROW_MAX_SPACING_MM: Mm = BLOCK_ROW_MAX_SPACING_MM_PRACTICAL;
 
-/**
- * Retired constant (kept as a legacy export for source-compat).
- * Blocking is OMITTED from both S26 methods; this value has no
- * runtime consumer left in `floating-layout.ts`. It is preserved
- * here so a future ticket that resurrects between-joist blocking
- * has a stable import name to use.
- */
-export const MAX_BLOCKING_SPACING_MM: Mm = 1220;
+// NOTE: A pre-#72 stub `export const MAX_BLOCKING_SPACING_MM: Mm =
+// 1220;` used to live here as a source-compat placeholder while
+// blocking-between-joists was DORMANT. It was deleted as part of
+// PR #73 review (GPT-5.5 MEDIUM #4): the name is now owned by the
+// ACTIVE helper `../blocking-layout.ts` (value 2438 = 8 ft per IRC
+// R502.7.1), and the barrel `../index.ts` re-exports it from
+// there. Restoring a second const under the same name would
+// re-create the value collision — do NOT re-add.
 
 /**
  * feat/block-spacing — DEFAULT distance between adjacent foundation

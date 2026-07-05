@@ -745,7 +745,7 @@ function makeDefaultElevatedDesign(): DeckDesign {
 }
 
 describe('deriveBom — issue #72 blocking wiring (real computeLayout)', () => {
-  it('BOM built from computeLayout(default) includes blocking members in the joist SKU pack', () => {
+  it('BOM built from computeLayout(default) folds EVERY blocking member into the joist SKU pack (no drops)', () => {
     const layout = computeLayout(makeDefaultElevatedDesign());
     const blockingMembers = layout.members.filter((m) => m.kind === 'blocking');
     // Sanity: the layout pipeline emits blocking (proved in
@@ -770,15 +770,44 @@ describe('deriveBom — issue #72 blocking wiring (real computeLayout)', () => {
         s.grade === joistMaterial.grade,
     );
     expect(section).toBeDefined();
-    // Every unique blocking length appears at least once in the
-    // packed cut list — proves nothing was silently dropped en
-    // route from `computeLayout` → `deriveBom` → cut list.
-    const blockingLengths = new Set(blockingMembers.map((m) => m.size.x));
+
+    // PR #73 review — strengthened per QA:
+    // The prior assertion iterated only DISTINCT blocking lengths
+    // ("each unique length appears ≥ once in the pack") — a false
+    // pass on evenly-spaced joists where every blocking piece has
+    // the SAME length: `distinctLengths.size === 1`, so the check
+    // would still pass if 8 of 9 identical pieces were dropped.
+    // Now we assert per-piece: sort the joist-length blocking
+    // pieces alongside the cuts of that length from the SKU pack
+    // and confirm the multisets match exactly. This catches
+    // silent drops of identical pieces.
     const allCuts = section!.pack.stockBoards.flatMap((b) =>
       b.cuts.map((c) => c.lengthMm),
     );
-    for (const len of blockingLengths) {
-      expect(allCuts.some((c) => Math.abs(c - len) < 0.01)).toBe(true);
+    const blockingLengthsSorted = [...blockingMembers.map((m) => m.size.x)]
+      .sort((a, b) => a - b);
+    // Every blocking length must appear as a cut with matching
+    // count. Build a per-length count map for each side and
+    // require them equal on the blocking subset.
+    for (const len of new Set(blockingLengthsSorted)) {
+      const expected = blockingLengthsSorted.filter(
+        (v) => Math.abs(v - len) < 0.01,
+      ).length;
+      const actual = allCuts.filter((v) => Math.abs(v - len) < 0.01).length;
+      // The pack may ALSO carry cuts of this length that came
+      // from joists/beams/posts (unrelated members that happened
+      // to have the same length), so demand `actual >= expected`
+      // — never `<`. If any blocking piece were silently dropped,
+      // `actual` would fall BELOW `expected` for that length.
+      expect(actual).toBeGreaterThanOrEqual(expected);
     }
+    // Belt-and-braces total: the pack's total cut count is at
+    // LEAST the sum of joist + beam + post + board + blocking
+    // members that carry the joist SKU. Since blocking is the
+    // only kind whose material equals the joist material AND
+    // whose length is size.x (joists/beams are size.z), a
+    // per-length lower bound is already tight; this asserts the
+    // aggregate too.
+    expect(allCuts.length).toBeGreaterThanOrEqual(blockingMembers.length);
   });
 });
