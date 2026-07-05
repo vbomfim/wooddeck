@@ -93,6 +93,7 @@ import {
 } from '../state';
 
 import { BlockProductSelector } from './fields/BlockProductSelector';
+import { BeamConnectionSelector } from './fields/BeamConnectionSelector';
 import { FloatingFramingSelector } from './fields/FloatingFramingSelector';
 import { FoundationTypeSelector } from './fields/FoundationTypeSelector';
 import { LengthField } from './fields/LengthField';
@@ -436,6 +437,7 @@ export function ParameterPanel(): JSX.Element {
         <FoundationTypeSelector />
         <BlockProductSelector />
         <FloatingFramingSelector />
+        <BeamConnectionSelector />
       </div>
 
       {errorMessage !== null && (

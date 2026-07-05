@@ -53,6 +53,7 @@ const GOLDEN_DECK_DESIGN: DeckDesign = {
   // S17 addition — the elevated + posts-on-footings default.
   structure: 'elevated',
   floatingFraming: 'beams-and-joists',
+  beamConnection: 'drop',
   foundation: {
     type: 'posts-on-footings',
     post: { nominal: '6x6', species: 'PT', grade: 'No2' },
@@ -137,6 +138,7 @@ describe('model — AC4 DeckDesign JSON round-trip (golden fixture)', () => {
       '"footprint":{"widthMm":3658,"lengthMm":4877,"heightMm":914},' +
       '"structure":"elevated",' +
       '"floatingFraming":"beams-and-joists",' +
+      '"beamConnection":"drop",' +
       '"foundation":{"type":"posts-on-footings",' +
       '"post":{"nominal":"6x6","species":"PT","grade":"No2"},' +
       '"footing":{"widthMm":300,"depthMm":300}},' +

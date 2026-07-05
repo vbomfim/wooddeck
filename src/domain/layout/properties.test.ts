@@ -84,6 +84,7 @@ const designArb = fc
     },
     structure: 'elevated',
     floatingFraming: 'beams-and-joists',
+    beamConnection: 'drop',
     foundation: {
       type: 'posts-on-footings',
       post: { nominal: '6x6', species: 'PT', grade: 'No2' },
@@ -259,6 +260,7 @@ describe('layout engine — AC3 property: no same-kind bounding-box overlap', ()
         footprint: { widthMm: r.widthMm, lengthMm: r.lengthMm, heightMm: r.heightMm },
         structure: 'elevated',
         floatingFraming: 'beams-and-joists',
+        beamConnection: 'drop',
         foundation: {
           type: 'posts-on-footings',
           post: { nominal: '6x6', species: 'PT', grade: 'No2' },
@@ -465,6 +467,7 @@ describe('layout engine — AC4 width/length swap ⇒ rotated layout', () => {
       footprint: { widthMm: 3660, lengthMm: 6096, heightMm: 914 },
       structure: 'elevated',
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
       foundation: {
         type: 'posts-on-footings',
         post: { nominal: '6x6', species: 'PT', grade: 'No2' },

@@ -284,6 +284,7 @@ describe('applyRemediation — S25 add-support-row', () => {
       },
       structure: 'floating',
       floatingFraming: framing,
+      beamConnection: 'drop',
       foundation:
         blockRowsHint !== undefined
           ? {

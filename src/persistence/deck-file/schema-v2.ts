@@ -264,8 +264,12 @@ export function deserialize(json: string): DeserializeResult {
       // the invariant "every load path finalizes the same way" cannot
       // drift on a future rewrite. Idempotent on already-stamped
       // designs.
+      //
+      // S27 (feat/joist-beam-connection) — `finalizeDesign` also
+      // stamps `beamConnection: 'drop'` if absent (default), mirroring
+      // the finalize discipline for `floatingFraming`. Idempotent.
       return {
-        design: finalizeFloatingFraming(validated.design),
+        design: finalizeDesign(validated.design),
         meta,
         migrated: true,
       };
@@ -290,7 +294,12 @@ export function deserialize(json: string): DeserializeResult {
         // the field will now serialize it — that's an INTENTIONAL
         // upgrade, not a compat break (the on-disk value is
         // byte-additive).
-        design: finalizeFloatingFraming(envelope.design),
+        //
+        // S27 (feat/joist-beam-connection) — same pattern for
+        // `beamConnection`: OPTIONAL on-disk; loader stamps `'drop'`
+        // (the pre-S27 implicit convention) when absent. See
+        // `finalizeBeamConnection`.
+        design: finalizeDesign(envelope.design),
         meta,
         migrated: false,
       };
@@ -483,6 +492,94 @@ function stampFloatingFraming(
     footprint: design.footprint,
     structure: design.structure,
     floatingFraming: value,
+    beamConnection: design.beamConnection,
+    foundation: design.foundation,
+    joist: design.joist,
+    beam: design.beam,
+    decking: design.decking,
+    layout: design.layout,
+  };
+}
+
+/**
+ * S27 (feat/joist-beam-connection) — the composite finalizer.
+ *
+ * Runs BOTH `finalizeFloatingFraming` (S26) AND
+ * `finalizeBeamConnection` (S27) so every load path (v1 migrate,
+ * v2 native) has ONE finalization seam. Idempotent on
+ * already-populated designs. The order below matters ONLY for
+ * canonical property-order preservation (both stamp helpers copy
+ * the design field-by-field in the canonical order defined by
+ * `DeckDesign` in `model.ts`) — either order yields the same
+ * key sequence because the helpers respect the interface order.
+ */
+function finalizeDesign(design: DeckDesign): DeckDesign {
+  return finalizeBeamConnection(finalizeFloatingFraming(design));
+}
+
+/**
+ * S27 (feat/joist-beam-connection) — finalize `beamConnection`
+ * for a validated design regardless of load path.
+ *
+ * ## Why "finalize" and not "default"
+ *
+ * The v2 schema makes `beamConnection` OPTIONAL so pre-S27 v2
+ * files remain load-compatible, but the domain `DeckDesign` type
+ * REQUIRES the field — this helper is the seam that reconciles
+ * the two. Mirrors the `finalizeFloatingFraming` idiom (S26).
+ *
+ * ## The default is `'drop'`
+ *
+ * Every pre-S27 fixture implicitly used drop-beam construction
+ * (`joistBottomY === beamTopY`). Choosing `'drop'` as the load-
+ * default preserves layout math byte-for-byte for every pre-S27
+ * `.deck` file — a round-trip through this version produces the
+ * SAME `Layout` output as the original file would have under a
+ * pre-S27 build. That's the "no silent regression" contract.
+ *
+ * ## Behavior matrix
+ *
+ *   | present, valid | absent |
+ *   |----------------|--------|
+ *   | pass-through   | stamp 'drop' |
+ *
+ * Present-but-invalid enum values are REJECTED by Ajv upstream —
+ * this helper only sees `undefined` or a legal value.
+ */
+function finalizeBeamConnection(design: DeckDesign): DeckDesign {
+  const record = design as unknown as Record<string, unknown>;
+  const value = record['beamConnection'];
+  if (value === 'drop' || value === 'flush') {
+    return design;
+  }
+  return stampBeamConnection(design, 'drop');
+}
+
+/**
+ * S27 residual — stamp `beamConnection` at the CANONICAL property
+ * position (immediately after `floatingFraming`), NOT at the end
+ * of the object. Same rationale as `stampFloatingFraming`: a
+ * naive `{ ...design, beamConnection: X }` spread would append
+ * the field to the END of the key order, breaking the byte-for-
+ * byte round-trip property (`model.test` AC4) and producing
+ * externally-visible JSON diffs against the default factory's
+ * output.
+ *
+ * Any future addition to `DeckDesign` MUST be added here in the
+ * same position it appears in the interface (mirrors
+ * `stampFloatingFraming`).
+ */
+function stampBeamConnection(
+  design: DeckDesign,
+  value: 'drop' | 'flush',
+): DeckDesign {
+  return {
+    id: design.id,
+    createdAt: design.createdAt,
+    footprint: design.footprint,
+    structure: design.structure,
+    floatingFraming: design.floatingFraming,
+    beamConnection: value,
     foundation: design.foundation,
     joist: design.joist,
     beam: design.beam,

@@ -68,6 +68,7 @@ describe('<StructureSelector /> — AC1 rendering', () => {
       useDesignStore.getState().applyParameters({
         structure: 'floating',
         floatingFraming: 'beams-and-joists',
+        beamConnection: 'drop',
         foundation: {
           type: 'tuffblocks',
           product: { productId: 'tuffblock-12x12x4' },
@@ -124,6 +125,7 @@ describe('<StructureSelector /> — AC1 atomic dispatch (structure + foundation 
       useDesignStore.getState().applyParameters({
         structure: 'floating',
         floatingFraming: 'beams-and-joists',
+        beamConnection: 'drop',
         foundation: {
           type: 'tuffblocks',
           product: { productId: 'tuffblock-12x12x4' },

@@ -62,9 +62,10 @@
 import { useMemo, type JSX } from 'react';
 
 import { deriveBom, type BomResult } from '../domain/bom/derive-bom';
-import { useLayout, useUiUnits } from '../state';
+import { useDesign, useLayout, useUiUnits } from '../state';
 
 import { FoundationRow } from './bom/FoundationRow';
+import { HardwareRow } from './bom/HardwareRow';
 import { LumberRow } from './bom/LumberRow';
 
 // ---------------------------------------------------------------------------
@@ -88,15 +89,25 @@ export const EMPTY_LAYOUT_TEXT =
 
 export function BomPanel(): JSX.Element {
   const layout = useLayout();
+  const design = useDesign();
   const units = useUiUnits();
 
-  // Memoize on the layout reference — see module header §
-  // Memoization. `deriveBom` is pure so this is safe. Default
-  // options → kerfMm defaults to 3 mm inside deriveBom.
-  const bom: BomResult = useMemo(() => deriveBom(layout, {}), [layout]);
+  // Memoize on the layout + beamConnection references — see
+  // module header § Memoization. `deriveBom` is pure so this is
+  // safe. Default options → kerfMm defaults to 3 mm inside
+  // deriveBom. S27: pass `design.beamConnection` so the
+  // `hardware` section (joist hangers) reflects the current
+  // connection choice.
+  const bom: BomResult = useMemo(
+    () => deriveBom(layout, { beamConnection: design.beamConnection }),
+    [layout, design.beamConnection],
+  );
 
   const isEmpty =
-    bom.lumber.length === 0 && bom.foundation.length === 0 && bom.footings.length === 0;
+    bom.lumber.length === 0 &&
+    bom.foundation.length === 0 &&
+    bom.footings.length === 0 &&
+    bom.hardware.length === 0;
 
   return (
     <section aria-labelledby="wd-bom-panel__title" className="wd-bom-panel">
@@ -111,6 +122,7 @@ export function BomPanel(): JSX.Element {
           {bom.lumber.length > 0 && <LumberSection bom={bom} units={units} />}
           {bom.foundation.length > 0 && <FoundationSection bom={bom} />}
           {bom.footings.length > 0 && <FootingsSection bom={bom} />}
+          {bom.hardware.length > 0 && <HardwareSection bom={bom} />}
         </>
       )}
     </section>
@@ -224,6 +236,44 @@ function FootingsSection({ bom }: { bom: BomResult }): JSX.Element {
               </tr>
             );
           })}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Hardware section (S27 — joist hangers for flush-beam connection)
+// ---------------------------------------------------------------------------
+
+/**
+ * One row per hardware SKU (S27 — currently joist hangers only,
+ * emitted for `beamConnection: 'flush'`). Hangers are counted
+ * (integer), not cut, so no unit formatting or pack table. The
+ * SKU string is human-readable (`"Joist hangers (2×8)"`) so
+ * homeowners can shop it directly.
+ */
+function HardwareSection({ bom }: { bom: BomResult }): JSX.Element {
+  return (
+    <section
+      aria-labelledby="wd-bom-panel__hardware-title"
+      className="wd-bom-panel__section wd-bom-panel__section--hardware"
+    >
+      <h3 id="wd-bom-panel__hardware-title">Hardware</h3>
+      <table className="wd-bom-panel__table wd-bom-panel__table--hardware">
+        <caption className="wd-bom-panel__caption">
+          Hardware to purchase (joist hangers, brackets, fasteners).
+        </caption>
+        <thead>
+          <tr>
+            <th scope="col">Item</th>
+            <th scope="col">Count</th>
+          </tr>
+        </thead>
+        <tbody>
+          {bom.hardware.map((section) => (
+            <HardwareRow key={section.sku} section={section} />
+          ))}
         </tbody>
       </table>
     </section>

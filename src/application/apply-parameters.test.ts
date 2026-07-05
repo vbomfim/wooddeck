@@ -728,6 +728,7 @@ describe('applyParameters — discriminator switch REPLACES the subtree (S23)', 
     const patch: DeepPartial<DeckDesign> = {
       structure: 'floating',
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
       foundation: {
         type: 'tuffblocks',
         product: { productId: 'tuffblock-12x12x4' },
@@ -980,6 +981,7 @@ describe('applyParameters — S23 pair-fix #1: orphan variant keys (FR-026 shape
     const patch: DeepPartial<DeckDesign> = {
       structure: 'floating',
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
       foundation: {
         type: 'tuffblocks',
         product: { productId: 'tuffblock-12x12x4' },
@@ -1249,6 +1251,7 @@ describe('applyParameters — S23 pair-fix iter-2 #2: nested shape validation on
     const patch: DeepPartial<DeckDesign> = {
       structure: 'floating',
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
       foundation: {
         type: 'tuffblocks',
         product: { productId: 'tuffblock-12x12x4' },
@@ -1278,6 +1281,7 @@ describe('applyParameters — S23 pair-fix iter-2 #2: nested shape validation on
     const patch: DeepPartial<DeckDesign> = {
       structure: 'elevated',
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
       // floating fixture's footprint.heightMm is minimal for a
       // ground-level deck; the elevated variant needs a taller
       // stack (posts extent > 0), so bump the height to a safe
@@ -1300,5 +1304,44 @@ describe('applyParameters — S23 pair-fix iter-2 #2: nested shape validation on
     expect(Object.keys(bundle.design.foundation.footing).sort()).toEqual(
       ['depthMm', 'widthMm'].sort(),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S27 — beamConnection carries through the merge (own-key of DeckDesign)
+// ---------------------------------------------------------------------------
+
+describe('applyParameters — beamConnection (S27)', () => {
+  const table = new IrcSpanTable();
+
+  it('patch { beamConnection: "flush" } flips the field and re-runs layout', () => {
+    // Start from an elevated FIXTURE that defaults to drop. A
+    // beamConnection-only patch is a top-level scalar own-key of
+    // DeckDesign — it must survive the deep-merge unchanged and
+    // trigger a fresh layout (which changes the post height).
+    const before = applyParameters(FIXTURE, {}, table);
+    expect(before.design.beamConnection).toBe('drop');
+    const beforePost = before.layout.members.find((m) => m.kind === 'post');
+    if (beforePost === undefined) throw new Error('expected posts in FIXTURE');
+
+    const after = applyParameters(FIXTURE, { beamConnection: 'flush' }, table);
+    expect(after.design.beamConnection).toBe('flush');
+    const afterPost = after.layout.members.find((m) => m.kind === 'post');
+    if (afterPost === undefined) throw new Error('expected posts after flush');
+    // Post grows taller because the framing stack is shorter.
+    expect(afterPost.size.y).toBeGreaterThan(beforePost.size.y);
+  });
+
+  it('unrelated patch leaves beamConnection untouched (deep-merge preserves own keys)', () => {
+    // Patching an unrelated field (heightMm) must not clobber the
+    // top-level `beamConnection` value that came in on the CURRENT
+    // design.
+    const flushed = applyParameters(FIXTURE, { beamConnection: 'flush' }, table);
+    const after = applyParameters(
+      flushed.design,
+      { footprint: { heightMm: 1200 } },
+      table,
+    );
+    expect(after.design.beamConnection).toBe('flush');
   });
 });

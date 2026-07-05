@@ -102,6 +102,7 @@ function buildDesign(spec: GeneratedDesignSpec): DeckDesign {
     },
     structure: 'elevated',
     floatingFraming: 'beams-and-joists',
+    beamConnection: 'drop',
     foundation: {
       type: 'posts-on-footings',
       post: { nominal: '6x6', species: 'PT', grade: 'No2' },
@@ -133,6 +134,7 @@ function buildDesign(spec: GeneratedDesignSpec): DeckDesign {
       ...base,
       structure: 'floating',
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
       // Foundation for floating: tuffblocks. Same block SKU used
       // by span-check-floating.test.ts.
       foundation: {

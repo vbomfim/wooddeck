@@ -888,6 +888,7 @@ describe('useDesignStore — applyRemediation action (S16 issue #38)', () => {
       },
       structure: 'floating',
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
       foundation: {
         type: 'tuffblocks',
         product: { productId: 'tuffblock-12x12x4' },
@@ -1388,6 +1389,7 @@ describe('useDesignStore — S23 QA G3: structure switch + undo has no orphan ke
     useDesignStore.getState().applyParameters({
       structure: 'floating',
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
       foundation: {
         type: 'tuffblocks',
         product: { productId: 'tuffblock-12x12x4' },
@@ -1443,6 +1445,7 @@ describe('useDesignStore — S23 QA G3: structure switch + undo has no orphan ke
     useDesignStore.getState().applyParameters({
       structure: 'floating',
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
       foundation: {
         type: 'tuffblocks',
         product: { productId: 'tuffblock-12x12x4' },
@@ -1464,6 +1467,7 @@ describe('useDesignStore — S23 QA G3: structure switch + undo has no orphan ke
     useDesignStore.getState().applyParameters({
       structure: 'elevated',
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
       foundation: {
         type: 'posts-on-footings',
         post: {

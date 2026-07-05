@@ -508,6 +508,49 @@ export interface DeckDesign {
    */
   readonly floatingFraming: FloatingFraming;
   /**
+   * S27 (feat/joist-beam-connection) — joist-to-beam connection
+   * geometry. Selects HOW the joists frame into the beams:
+   *
+   *   - `'drop'` (DEFAULT — pre-S27 behavior): **drop beam**. The
+   *     joists rest ON TOP of the beams. `joistBottomY === beamTopY`
+   *     — every existing MVP fixture uses this convention.
+   *     Traditional post-frame residential deck.
+   *
+   *   - `'flush'`: **flush beam**. The joists are hung on the SIDE
+   *     of the beams via joist hangers, so the joist TOP is level
+   *     with the beam TOP (`joistTopY === beamTopY`). The beam
+   *     extends DOWNWARD beside the joist ends rather than below
+   *     them. Yields a shorter deck stack — total above-ground
+   *     height is smaller by the joist/beam overlap
+   *     (`min(joistDepth, beamDepth)`, typically the full joist
+   *     depth since the beam is usually the same or deeper than
+   *     the joist). Common when maximizing headroom under the
+   *     deck matters (over walk-outs, low-ceiling patio doors).
+   *
+   * ## Only meaningful when the design HAS both beams AND joists
+   *
+   * Which is:
+   *   - `structure === 'elevated'` (any foundation type — all three
+   *     elevated variants frame joists on beams), AND
+   *   - `structure === 'floating'` with `floatingFraming ===
+   *     'beams-and-joists'` (Method A — 2 rim beams + N joists).
+   *
+   * `structure === 'floating'` with `floatingFraming ===
+   * 'joists-on-blocks'` (Method B) has NO beam layer, so the field
+   * is IGNORED for those designs. Serializing / persisting the
+   * field is still legal (round-trip stability) but the layout
+   * engine treats it as a no-op.
+   *
+   * ## Placement rationale
+   *
+   * Placed IMMEDIATELY AFTER `floatingFraming` in the interface,
+   * in `default-design.ts`, in the model.test golden fixture, and
+   * in every persistence fixture / property arb so the two framing
+   * sub-discriminators sit together. Mirrors S26 FIX #7 field-
+   * order discipline for `floatingFraming`.
+   */
+  readonly beamConnection: BeamConnection;
+  /**
    * Epic 2 / S17 addition (FR-026) — foundation TYPE + parameters.
    * Discriminated on `.type` so an omitted branch in a downstream
    * `switch` fails-compile. See `FoundationSpec`.
@@ -546,6 +589,25 @@ export interface DeckDesign {
  * future third method would require re-fanning-out otherwise).
  */
 export type FloatingFraming = 'beams-and-joists' | 'joists-on-blocks';
+
+/**
+ * S27 (feat/joist-beam-connection) — the two joist-to-beam
+ * connection geometries.
+ *
+ *   - `'drop'`  — drop beam: joists sit ON TOP of the beams
+ *                 (`joistBottomY === beamTopY`). Default; matches
+ *                 every pre-S27 fixture.
+ *   - `'flush'` — flush beam: joists are hung on the SIDE of the
+ *                 beams via joist hangers; joist TOP is level with
+ *                 beam TOP (`joistTopY === beamTopY`).
+ *
+ * See `DeckDesign.beamConnection` for the full contract (which
+ * designs the field applies to, y-stack semantics, BOM impact).
+ * Exported as a named type alias so the UI selector, application-
+ * layer patch handlers, persistence schemas, and property-based
+ * test arbitraries can refer to the union by name.
+ */
+export type BeamConnection = 'drop' | 'flush';
 
 // ==========================================================
 // LAYOUT COORDINATE FRAME — the binding contract for S4 & S10

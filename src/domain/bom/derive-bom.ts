@@ -78,6 +78,7 @@
 import { lookupFoundationProduct } from '../foundation-catalog';
 import { lookupMaterial } from '../materials-catalog';
 import type {
+  BeamConnection,
   FoundationProductId,
   Grade,
   Layout,
@@ -154,11 +155,33 @@ export interface BomSection_Footing {
 }
 
 /**
+ * A hardware group in the BOM — currently only joist hangers.
+ * S27 (feat/joist-beam-connection) introduces this section to
+ * make the shopping list HONEST for flush-beam construction: the
+ * user needs one hanger per joist end that frames into a beam
+ * (elevated + floating Method A = 2 rim beams → 2 hangers/joist).
+ *
+ * `sku` is a human-readable label like `"Joist hangers (2×8)"`
+ * where the nominal reflects the joist size. `count` is a plain
+ * integer. Hangers are neither cut (no PackResult) nor a catalog
+ * block (no productId) — they're a simple line item.
+ *
+ * For `beamConnection: 'drop'` (the default) there are NO hangers
+ * (joists rest on beam tops); the `hardware` array is empty in
+ * that case.
+ */
+export interface BomSection_Hardware {
+  readonly sku: string;
+  readonly count: number;
+}
+
+/**
  * The BOM result. `lumber` sections are sorted by `sku` ascending;
  * `foundation` sections are sorted by `productId` ascending;
- * `footings` sections are sorted by (widthMm asc, depthMm asc).
- * All three orderings are canonical so the JSON output is byte-
- * for-byte stable given the same input (aside from `generatedAt`).
+ * `footings` sections are sorted by (widthMm asc, depthMm asc);
+ * `hardware` sections are sorted by `sku` ascending. Every ordering
+ * is canonical so the JSON output is byte-for-byte stable given
+ * the same input (aside from `generatedAt`).
  *
  * `generatedAt` is an ISO-8601 timestamp captured at derivation
  * time. Display-only — do NOT rely on it for cache-invalidation
@@ -168,17 +191,28 @@ export interface BomResult {
   readonly lumber: readonly BomSection_Lumber[];
   readonly foundation: readonly BomSection_Foundation[];
   readonly footings: readonly BomSection_Footing[];
+  readonly hardware: readonly BomSection_Hardware[];
   readonly generatedAt: string;
 }
 
 /**
- * Optional configuration. `kerfMm` defaults to `DEFAULT_KERF_MM`
- * (3 mm — see below). Ticket §17 Q1: kerfMm is not configurable in
- * the S21 UI (MVP simplification); a downstream story can lift the
- * option into the UI layer if user feedback requests it.
+ * Optional configuration.
+ *
+ *   - `kerfMm` defaults to `DEFAULT_KERF_MM` (3 mm — see below).
+ *     Ticket §17 Q1: kerfMm is not configurable in the S21 UI (MVP
+ *     simplification); a downstream story can lift the option into
+ *     the UI layer if user feedback requests it.
+ *
+ *   - `beamConnection` (S27, feat/joist-beam-connection):
+ *     defaults to `'drop'` when omitted (BACKWARD COMPAT for
+ *     pre-S27 callers). Under `'flush'`, `deriveBom` emits a
+ *     `hardware` line for joist hangers (`joistCount × beamCount`
+ *     hangers). Under `'drop'` the `hardware` section is empty
+ *     (joists rest on beam tops).
  */
 export interface DeriveBomOptions {
   readonly kerfMm?: Mm;
+  readonly beamConnection?: BeamConnection;
 }
 
 // ---------------------------------------------------------------------------
@@ -212,6 +246,7 @@ export const DEFAULT_KERF_MM: Mm = 3;
  */
 export function deriveBom(layout: Layout, options: DeriveBomOptions = {}): BomResult {
   const kerfMm = options.kerfMm ?? DEFAULT_KERF_MM;
+  const beamConnection: BeamConnection = options.beamConnection ?? 'drop';
 
   // Partition members: lumber → per-SKU grouped cuts; block → per-
   // productId counts; footing → per-(widthMm × depthMm) counts.
@@ -220,6 +255,15 @@ export function deriveBom(layout: Layout, options: DeriveBomOptions = {}): BomRe
   const lumberGroups = new Map<string, LumberGroup>();
   const blockGroups = new Map<FoundationProductId, number>();
   const footingGroups = new Map<string, FootingGroup>();
+
+  // S27 hardware pre-tally: count joists / beams in one pass so
+  // the hardware section (below) can compute `joists × beams`
+  // hangers for flush. Beams counted separately per SKU is
+  // overkill — the joist nominal drives the hanger sku (hangers
+  // are sized to the JOIST that hangs from them, not the beam).
+  let joistCount = 0;
+  let beamCount = 0;
+  const joistLumberNominalCounts = new Map<LumberNominal, number>();
 
   for (const member of layout.members) {
     // ---- Fold footing-kind members into `footings` (FIX 2) -------------
@@ -263,6 +307,16 @@ export function deriveBom(layout: Layout, options: DeriveBomOptions = {}): BomRe
           });
         } else {
           existing.cuts.push({ memberId: member.id, lengthMm: cutLengthMm });
+        }
+        // S27 hardware pre-tally — joists/beams drive hanger count.
+        if (member.kind === 'joist') {
+          joistCount += 1;
+          joistLumberNominalCounts.set(
+            mat.nominal,
+            (joistLumberNominalCounts.get(mat.nominal) ?? 0) + 1,
+          );
+        } else if (member.kind === 'beam') {
+          beamCount += 1;
         }
         break;
       }
@@ -344,10 +398,35 @@ export function deriveBom(layout: Layout, options: DeriveBomOptions = {}): BomRe
     return a.depthMm - b.depthMm;
   });
 
+  // ---- Build hardware sections (S27: joist hangers for flush) ---------
+  // Rule: for `beamConnection: 'flush'`, EACH joist end that frames
+  // into a beam needs a joist hanger. Elevated + floating Method A
+  // both have 2 rim beams, so hangers = joistCount × beamCount.
+  // For `'drop'` there are no hangers (joists rest on beam tops).
+  // Also: if there are no beams (Method B floating shape), flush is
+  // meaningless — emit no hangers (defensive; matches ticket's
+  // "IGNORED for Method B" clause).
+  const hardware: BomSection_Hardware[] = [];
+  if (beamConnection === 'flush' && joistCount > 0 && beamCount > 0) {
+    // Group hangers by joist nominal. When mixed joist sizes are
+    // present the BOM lists each nominal separately — a homeowner
+    // ordering hangers needs one line per joist size.
+    for (const [nominal, count] of joistLumberNominalCounts.entries()) {
+      hardware.push(
+        Object.freeze({
+          sku: formatHangerSku(nominal),
+          count: count * beamCount,
+        }),
+      );
+    }
+  }
+  hardware.sort((a, b) => (a.sku < b.sku ? -1 : a.sku > b.sku ? 1 : 0));
+
   return Object.freeze({
     lumber: Object.freeze(lumber),
     foundation: Object.freeze(foundation),
     footings: Object.freeze(footings),
+    hardware: Object.freeze(hardware),
     generatedAt: new Date().toISOString(),
   });
 }
@@ -489,4 +568,25 @@ function formatFootingDisplayName(widthMm: Mm, depthMm: Mm): string {
     `Concrete footing ${String(widthMm)} × ${String(widthMm)} mm footprint ` +
     `× ${String(depthMm)} mm deep`
   );
+}
+
+/**
+ * Human-readable label for a joist-hanger SKU. Format:
+ * `"Joist hangers (2×8)"` where the nominal reflects the joist
+ * that the hanger supports (hangers are sized to the JOIST, not
+ * the beam — a 2×8 hanger accepts a 2×8 joist).
+ *
+ * Uses the Unicode multiplication sign (U+00D7) rather than a
+ * lowercase 'x' to match the visual convention used by the
+ * `formatFootingDisplayName` helper above and by hardware-store
+ * signage.
+ *
+ * S27 (feat/joist-beam-connection) — emitted only for
+ * `beamConnection: 'flush'` designs.
+ */
+function formatHangerSku(nominal: LumberNominal): string {
+  // `LumberNominal` values are strings like '2x8', '2x10', '5/4x6'.
+  // Replace the ASCII 'x' with the Unicode multiplication sign for
+  // display consistency with other BOM labels.
+  return `Joist hangers (${nominal.replace('x', '×')})`;
 }

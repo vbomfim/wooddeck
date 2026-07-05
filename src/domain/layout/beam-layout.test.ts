@@ -33,6 +33,7 @@ function makeDesign(overrides: Partial<{
     },
     structure: 'elevated',
     floatingFraming: 'beams-and-joists',
+    beamConnection: 'drop',
     foundation: {
       type: 'posts-on-footings',
       post: { nominal: '6x6', species: 'PT', grade: 'No2' },

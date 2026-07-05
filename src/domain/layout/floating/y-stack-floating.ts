@@ -51,6 +51,35 @@
  * fields (`joistCenterY`, `beamCenterY`, `deckingCenterY`) and let
  * the y-value tell the truth.
  *
+ * ## S27 — drop vs flush under Method A
+ *
+ * Method A (which HAS beams) dispatches further on
+ * `design.beamConnection`:
+ *
+ *   - `'drop'` (default): joist BOTTOM sits on beam TOP (pre-S27).
+ *
+ *         y = deckingTop
+ *           ↑ decking thickness
+ *           ↑ joist depth       ← joist bottom = beam top
+ *           ↑ beam depth
+ *         y = 0                  ← block top / beam bottom
+ *
+ *   - `'flush'` (S27 new): joist TOP is LEVEL with beam TOP; the
+ *     joist is hung on the beam side with joist hangers. Deck
+ *     rides the joist top (= beam top). Stack is shorter by
+ *     `min(joistDepth, beamDepth)`. Above-ground min height =
+ *     max(beam.depth, joist.depth) + decking.thickness.
+ *
+ *         y = deckingTop
+ *           ↑ decking thickness
+ *           ↑ max(joist, beam) depth   ← joist top === beam top; the
+ *                                         deeper member sets the height
+ *         y = 0                          ← block top / beam bottom
+ *
+ * Method B (`'joists-on-blocks'`) has NO beam layer — it IGNORES
+ * `design.beamConnection` (Method B stack is identical for both
+ * enum values).
+ *
  * ## `blockHeightMm` is derived from the design's foundation product
  *
  * Both floating-legal foundations (`deck-blocks` / `tuffblocks`)
@@ -225,13 +254,38 @@ export function computeYStackFloating(design: DeckDesign): FloatingYStack {
   const blockCenterY = -blockHeightMm / 2;
   const blockTopY = 0;
 
-  const beamBottomY = 0;
-  const beamTopY = beamDepthMm;
-  const beamCenterY = beamDepthMm / 2;
+  // Method A dispatches further on `design.beamConnection` (S27):
+  //   - 'drop':  joist BOTTOM on beam TOP (pre-S27 behavior)
+  //   - 'flush': joist TOP LEVEL with beam TOP (joists hung on
+  //              beam side by joist hangers)
+  //
+  // Method B has no beam layer, so `beamConnection` is meaningless
+  // and IGNORED (the stack is identical either way).
+  const beamBottomY: Mm = 0;
+  const beamTopY: Mm = beamDepthMm;
+  const beamCenterY: Mm = beamDepthMm / 2;
 
-  const joistBottomY = beamTopY;
-  const joistTopY = joistBottomY + joistDepthMm;
-  const joistCenterY = joistBottomY + joistDepthMm / 2;
+  let joistBottomY: Mm;
+  let joistTopY: Mm;
+  let joistCenterY: Mm;
+  if (design.floatingFraming === 'beams-and-joists' && design.beamConnection === 'flush') {
+    // Flush: joist top === beam top. Beam still on the block; the
+    // joist is hung on its side by joist hangers with joistTop
+    // level with beamTop. Joist bottom may fall BELOW beamBottom
+    // when joistDepth > beamDepth — supported by the hanger, not
+    // by the block; hanger inherits the joist's tributary load
+    // into the beam.
+    joistTopY = beamTopY;
+    joistBottomY = beamTopY - joistDepthMm;
+    joistCenterY = beamTopY - joistDepthMm / 2;
+  } else {
+    // Drop (Method A) OR Method B — joist BOTTOM on the layer
+    // below (beam top for Method A, block top / beam-degenerate
+    // for Method B).
+    joistBottomY = beamTopY;
+    joistTopY = joistBottomY + joistDepthMm;
+    joistCenterY = joistBottomY + joistDepthMm / 2;
+  }
 
   const deckingBottomY = joistTopY;
   const deckingCenterY = joistTopY + deckingThicknessMm / 2;
@@ -260,12 +314,21 @@ export function computeYStackFloating(design: DeckDesign): FloatingYStack {
 /**
  * The minimum legal `footprint.heightMm` for a floating design.
  *
- * Method A: `beam.height + joist.height + decking.thickness`
- * Method B: `joist.height + decking.thickness`
+ * The formula depends on `floatingFraming` and (for Method A)
+ * `beamConnection`:
+ *
+ *   Method A + drop  → beam.depth + joist.depth + decking.thickness
+ *   Method A + flush → max(beam.depth, joist.depth) + decking.thickness
+ *   Method B         → joist.depth + decking.thickness
  *
  * NO `MIN_POST_HEIGHT_MM` component (floating decks have no posts).
  * Blocks live BELOW y=0 and do NOT contribute to the visible
  * above-ground height.
+ *
+ * Direct read: the min height is exactly `deckingTopY` from the
+ * y-stack — the walking-surface anchor already carries the right
+ * dispatch (it's `beamDepth + joistDepth + decking` for drop and
+ * `max(beam, joist) + decking` for flush).
  *
  * The layout-engine's floating-path validator calls this to
  * reject designs whose `heightMm` is set below the physical stack
@@ -277,5 +340,9 @@ export function computeYStackFloating(design: DeckDesign): FloatingYStack {
  */
 export function computeMinFloatingHeightMm(design: DeckDesign): Mm {
   const stack = computeYStackFloating(design);
-  return stack.beamDepthMm + stack.joistDepthMm + stack.deckingThicknessMm;
+  // `deckingTopY` already encodes the dispatch:
+  //   drop  : joistTop = beamTop + joistDepth  → deckTop = beam + joist + decking
+  //   flush : joistTop = beamTop               → deckTop = max(beam, joist) + decking
+  //   (Method B collapses beamDepth to 0.)
+  return stack.deckingTopY;
 }

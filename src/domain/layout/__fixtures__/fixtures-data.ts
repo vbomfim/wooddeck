@@ -111,6 +111,12 @@ function design(args: {
     // to the default so every fixture satisfies the required
     // `DeckDesign.floatingFraming` invariant.
     floatingFraming: 'beams-and-joists',
+    // S27 (feat/joist-beam-connection) — every helper-built
+    // fixture uses the classic drop-beam connection (joists on
+    // TOP). Field is REQUIRED on the DeckDesign type; stamping
+    // 'drop' here keeps the layout math byte-identical to
+    // pre-S27 fixtures (drop is the pre-S27-only behavior).
+    beamConnection: 'drop',
   };
 }
 
@@ -204,6 +210,7 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       decking: { material: PT_54, orientation: 'parallel-to-width' },
       layout: { bayRemainderStrategy: 'extra-bay-at-end' },
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
     },
   },
   {
@@ -220,6 +227,7 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       decking: { material: PT_54, orientation: 'parallel-to-width' },
       layout: { bayRemainderStrategy: 'extra-bay-at-end' },
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
     },
   },
   {
@@ -280,6 +288,7 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       decking: { material: PT_54, orientation: 'parallel-to-width' },
       layout: { bayRemainderStrategy: 'extra-bay-at-end' },
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
     },
   },
   {
@@ -349,6 +358,7 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       decking: { material: PT_54, orientation: 'parallel-to-width' },
       layout: { bayRemainderStrategy: 'extra-bay-at-end' },
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
     },
   },
   {
@@ -372,6 +382,7 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       decking: { material: PT_54, orientation: 'parallel-to-width' },
       layout: { bayRemainderStrategy: 'extra-bay-at-end' },
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
     },
   },
   {
@@ -398,6 +409,7 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       decking: { material: PT_54, orientation: 'parallel-to-width' },
       layout: { bayRemainderStrategy: 'extra-bay-at-end' },
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
     },
   },
   {
@@ -424,6 +436,7 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       decking: { material: PT_54, orientation: 'parallel-to-width' },
       layout: { bayRemainderStrategy: 'extra-bay-at-end' },
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
     },
   },
   // -----------------------------------------------------------------
@@ -465,6 +478,7 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       decking: { material: PT_54, orientation: 'parallel-to-width' },
       layout: { bayRemainderStrategy: 'extra-bay-at-end' },
       floatingFraming: 'beams-and-joists',
+      beamConnection: 'drop',
     },
   },
 ];

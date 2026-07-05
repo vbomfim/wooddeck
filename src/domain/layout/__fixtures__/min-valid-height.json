@@ -48,7 +48,8 @@
     "layout": {
       "bayRemainderStrategy": "extra-bay-at-end"
     },
-    "floatingFraming": "beams-and-joists"
+    "floatingFraming": "beams-and-joists",
+    "beamConnection": "drop"
   },
   "expected": {
     "designId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",

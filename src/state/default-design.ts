@@ -183,6 +183,15 @@ export function makeDefaultDesign(id: string, createdAt: string): DeckDesign {
     // field-order consistency across model.ts, model.test golden,
     // and property fixtures (S26 FIX #7).
     floatingFraming: 'beams-and-joists',
+    // S27 (feat/joist-beam-connection) — the default carries the
+    // `'drop'` joist-to-beam connection (joists on TOP of beams —
+    // matches every pre-S27 fixture and preserves the elevated /
+    // floating Method-A layout math byte-for-byte). Users can flip
+    // to `'flush'` via the BeamConnectionSelector. Placed
+    // immediately after `floatingFraming` for field-order
+    // consistency across model.ts, model.test golden, migrate-v1-
+    // to-v2, deck-designs fixture, and property arb.
+    beamConnection: 'drop',
     foundation: defaultFoundationFor('posts-on-footings'),
     joist: {
       material: { nominal: joistNominal, species, grade },
