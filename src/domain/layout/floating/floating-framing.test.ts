@@ -402,11 +402,26 @@ describe('FIX #2 — floating joist-spacing validation (safety guard)', () => {
 
       it('REJECTS spacingMm below joist thickness (would overlap joists)', () => {
         // 2×8 dressed widthMm = 38 → spacing < 38 must be rejected.
+        // NOTE (PR #73 review): the MIN_JOIST_SPACING_MM = 305 guard
+        // also rejects 30 mm now, and fires FIRST. Either message is
+        // acceptable — both prove the fail-loud invariant.
         const design = makeFloatingDesign({
           floatingFraming: framing,
           spacingMm: 30,
         });
         expect(() => computeFloatingLayout(design)).toThrowError(LayoutError);
+      });
+
+      it('REJECTS spacingMm strictly below MIN_JOIST_SPACING_MM=305 (PR #73 review)', () => {
+        // A value comfortably below the min AND above thickness so
+        // we know the rejection came from the MIN guard, not the
+        // thickness guard.
+        const design = makeFloatingDesign({
+          floatingFraming: framing,
+          spacingMm: 200,
+        });
+        expect(() => computeFloatingLayout(design)).toThrowError(LayoutError);
+        expect(() => computeFloatingLayout(design)).toThrowError(/305/);
       });
 
       it('ACCEPTS typical spacings (305, 406, 610 mm) unchanged', () => {

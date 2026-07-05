@@ -420,6 +420,64 @@ describe('validateDeckFileV2 — S18 v2 schema', () => {
       expect(dfe.message).toMatch(/structure|foundation/i);
     }
   });
+
+  it('rejects a v2 design whose joist.spacingMm is below the 305 mm minimum (PR #73 review — MIN_JOIST_SPACING_MM defense-in-depth)', () => {
+    // PR #73 review (GPT-5.5 HIGH #2 root fix) added a
+    // 305 mm (12″ o.c.) practical minimum for joist.spacingMm.
+    // Enforced at THREE layers:
+    //   (1) domain — `validateJoistSpacing` throws LayoutError
+    //   (2) persistence schema — `joist.spacingMm.minimum = 305`
+    //   (3) UI — joist-spacing LengthField hint text
+    // Layer (2) — this test — protects against a hand-crafted
+    // `.deck` file that ships a sub-min value: it must be
+    // REJECTED at deserialize (as a clean schema-validation
+    // failure) rather than reaching the domain and throwing an
+    // opaque LayoutError from deep inside `computeLayout`.
+    const envelope = {
+      schema: 2,
+      generator: 'wooddeck',
+      generatorVersion: '0.0.0-test',
+      createdAt: '2026-07-04T00:00:00.000Z',
+      design: {
+        ...GOLDEN_DECK_DESIGN,
+        joist: {
+          ...GOLDEN_DECK_DESIGN.joist,
+          spacingMm: 200, // BELOW the 305 mm minimum
+        },
+      },
+    };
+    try {
+      validateDeckFileV2(envelope);
+      throw new Error('expected DeckFileError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(DeckFileError);
+      const dfe = err as DeckFileError;
+      expect(dfe.code).toBe('schema-validation-failed');
+      // Message names the offending field (Ajv reports the failing
+      // instance path, which includes "spacingMm"). We do not
+      // require a specific error phrasing beyond that so future
+      // Ajv upgrades or schema wording changes do not brittly
+      // fail this test.
+      expect(dfe.message).toMatch(/spacingMm|minimum|305/i);
+    }
+  });
+
+  it('ACCEPTS a v2 design whose joist.spacingMm is exactly the 305 mm minimum (inclusive boundary — PR #73 review)', () => {
+    const envelope = {
+      schema: 2,
+      generator: 'wooddeck',
+      generatorVersion: '0.0.0-test',
+      createdAt: '2026-07-04T00:00:00.000Z',
+      design: {
+        ...GOLDEN_DECK_DESIGN,
+        joist: {
+          ...GOLDEN_DECK_DESIGN.joist,
+          spacingMm: 305,
+        },
+      },
+    };
+    expect(() => validateDeckFileV2(envelope)).not.toThrow();
+  });
 });
 
 // ---------------------------------------------------------------------------

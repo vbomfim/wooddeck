@@ -79,6 +79,7 @@ import {
   LayoutError,
   MAX_DECK_DIMENSION_MM,
   MIN_DECK_DIMENSION_MM,
+  MIN_JOIST_SPACING_MM,
   validateFlushBeamDepth,
   validateJoistSpacing,
 } from './layout-shared';
@@ -88,7 +89,7 @@ import { FOOTING_WIDTH_MM, MIN_POST_HEIGHT_MM, computeFramingStackMm, computeYSt
 // (`import { LayoutError, MIN_DECK_DIMENSION_MM } from './layout-engine'`)
 // remains unchanged for existing callers. See `layout-shared.ts`
 // module header for the cycle-break rationale.
-export { LayoutError, MAX_DECK_DIMENSION_MM, MIN_DECK_DIMENSION_MM };
+export { LayoutError, MAX_DECK_DIMENSION_MM, MIN_DECK_DIMENSION_MM, MIN_JOIST_SPACING_MM };
 
 // -----------------------------------------------------------------
 // `MIN_DECK_DIMENSION_MM` and `LayoutError` were extracted to

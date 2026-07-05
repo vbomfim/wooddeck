@@ -358,64 +358,57 @@ describe('Method B — hard cap reduces ROWS only; columns stay pinned to joists
     }
   });
 
-  it('degenerate case: numJoists × 2 > MAX terminates deterministically with rows = 2 (bounded)', () => {
-    // FR-035 degenerate exception — the ONE case where the
+  it('degenerate case: numJoists × 2 > MAX is now UNREACHABLE via validated designs — MIN_JOIST_SPACING_MM=305 (PR #73 review)', () => {
+    // FR-035 degenerate exception — the ONE code path where the
     // perimeter-two floor (rows ≥ 2) supersedes the hard cap
-    // (total ≤ MAX_METHOD_B_BLOCK_COUNT). Only reachable with
-    // pathological joist spacing on a near-max footprint.
+    // (total ≤ MAX_METHOD_B_BLOCK_COUNT). Pre-PR-#73 this case
+    // was reachable with pathologically-tight joist spacing on a
+    // near-max footprint:
+    //   `{ widthFt: 100, lengthFt: 100, spacingMm: 40 }` →
+    //   ~763 joists × 2 rows = 1526 blocks > 400 cap.
     //
-    // Design: 100 ft × 100 ft (MAX_DECK_DIMENSION_MM) at a joist
-    // pitch (40 mm) that packs ~763 joists across the width —
-    // just above the joist thickness floor (~38 mm for a 2×8)
-    // and above the `validateJoistSpacing` actual-anchor check
-    // (which rejects 38 exactly because the even-anchor
-    // algorithm produces a slightly-smaller actual spacing).
-    // Yields numJoists × 2 ≈ 1526 blocks — well over the 400
-    // cap. Rows CANNOT drop below 2 (perimeter floor), so the
-    // total STAYS above MAX. The postcondition in
-    // `resolveMethodBGrid` exempts `rows === 2` from the cap
-    // assertion.
+    // PR #73 review (GPT-5.5 HIGH #2 root fix) added a practical
+    // MIN_JOIST_SPACING_MM = 305 mm (12″ o.c.) guard at
+    // `validateJoistSpacing`. That guard now GATES OUT the
+    // pathological input BEFORE it reaches the block-cap logic:
+    // spacingMm=40 fails validation, `computeFloatingLayout`
+    // throws `LayoutError`, and the degenerate-exception code
+    // path is UNREACHABLE via any legal design.
+    //
+    // The FR-035 exception code in `resolveMethodBGrid` is
+    // RETAINED as defense-in-depth (belt-and-braces) so a future
+    // consumer that bypasses the MIN guard still gets a bounded
+    // failure, not an OOM. This test now proves the OUTER guard
+    // rejects the pathological input up front.
     const design = makeMethodB({
       widthFt: 100,
       lengthFt: 100,
-      spacingMm: 40, // just above 2×8 thickness (38 mm)
+      spacingMm: 40, // just above 2×8 thickness (38 mm), well below MIN=305
       blockSpacingMm: MIN_BLOCK_SPACING_MM,
     });
 
-    // Must terminate deterministically — no unbounded loop, no
-    // throw (the postcondition exempts rows === 2).
-    expect(() => computeFloatingLayout(design)).not.toThrow();
-    const layout = computeFloatingLayout(design);
+    // OUTER guard: MIN_JOIST_SPACING_MM=305 rejects at validation.
+    expect(() => computeFloatingLayout(design)).toThrowError(/305|spacing/i);
+
+    // Sanity: the largest LEGAL spacing (MIN=305) on the same
+    // 100×100 ft footprint yields a bounded, cap-respecting
+    // layout — confirms the MIN guard is enough to keep the
+    // pathological corner out of reach for every legal input.
+    const legalDesign = makeMethodB({
+      widthFt: 100,
+      lengthFt: 100,
+      spacingMm: 305,
+      blockSpacingMm: MIN_BLOCK_SPACING_MM,
+    });
+    expect(() => computeFloatingLayout(legalDesign)).not.toThrow();
+    const layout = computeFloatingLayout(legalDesign);
     const blocks = layout.members.filter((m) => m.kind === 'block');
     const joists = layout.members.filter((m) => m.kind === 'joist');
-
-    // Prove we're actually in the degenerate corner:
-    // numJoists × 2 > MAX.
-    expect(joists.length * 2).toBeGreaterThan(MAX_METHOD_B_BLOCK_COUNT);
-
-    // Unique z rows — perimeter-two floor holds even in the
-    // degenerate corner (this is what causes the cap overrun).
-    const zs = new Set(
-      blocks.map((b) => Math.round(b.position.z * 1e3) / 1e3),
-    );
-    expect(zs.size).toBe(2);
-
-    // The cap IS exceeded (that's the whole point of the
-    // exception — proving the FR-035 clause fires as documented,
-    // not vacuously).
-    expect(blocks.length).toBeGreaterThan(MAX_METHOD_B_BLOCK_COUNT);
-
-    // Every joist still supported (columns pinned).
-    expect(blocks.length).toBe(joists.length * 2);
-
-    // Bounded — the "no OOM" clause. Total ≤ numJoists × 2
-    // (perimeter rows), and numJoists is itself bounded by
-    // MAX_DECK_DIMENSION_MM / MIN_JOIST_SPACING. In practice a
-    // 100 ft deck at ~40 mm spacing yields ~763 joists → ~1526
-    // blocks. A generous upper bound of 2000 defends against
-    // any future regression that would let the row count grow
-    // unbounded (e.g. a broken clamp making rows > 2 in the
-    // degenerate corner and thus multiplying).
+    // At MIN, joists = 101 → blocks = joists × 2 = 202 (or fewer
+    // if the row-cap allows more rows and the col-cap kicks in).
+    // The important bound: total blocks stay under the
+    // no-OOM 2000-block sanity ceiling.
+    expect(joists.length).toBeLessThanOrEqual(101);
     expect(blocks.length).toBeLessThan(2000);
   });
 });

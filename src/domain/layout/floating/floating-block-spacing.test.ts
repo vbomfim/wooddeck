@@ -125,14 +125,19 @@ describe('Method B block grid — count is DERIVED FROM BOTH joist count AND blo
   it('block count SCALES with joist count (13 joists vs 33 joists → more blocks; same row count)', () => {
     // Post-fix: block columns are pinned to joist x-centers, so
     // block count IS a function of joist count. Changing joist
-    // spacing 16″ → 6″ increases both the joist count AND (linearly)
-    // the block count. Rows stay identical (blockSpacingMm did
-    // not change).
-    const wide = makeMethodB({ widthFt: 16, lengthFt: 16, spacingMm: 406 });
+    // spacing 24″ → 12″ increases both the joist count AND
+    // (linearly) the block count. Rows stay identical
+    // (blockSpacingMm did not change).
+    //
+    // PR #73 review update: was 16″ → 6″; the 6″ side is now
+    // below MIN_JOIST_SPACING_MM=305. Switched to catalog
+    // spacings (24″ / 610 mm vs 12″ / 305 mm) which prove the
+    // SAME scaling relationship without hitting the MIN guard.
+    const wide = makeMethodB({ widthFt: 16, lengthFt: 16, spacingMm: 610 });
     const tight = makeMethodB({
       widthFt: 16,
       lengthFt: 16,
-      spacingMm: 152, // 6"
+      spacingMm: 305, // 12" — the MIN allowed
     });
     const wideLayout = computeFloatingLayout(wide);
     const tightLayout = computeFloatingLayout(tight);

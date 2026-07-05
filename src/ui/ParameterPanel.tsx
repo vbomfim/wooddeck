@@ -498,7 +498,7 @@ export function ParameterPanel(): JSX.Element {
           label="Joist spacing"
           mmValue={design.joist.spacingMm}
           system={units}
-          hint="16 in o.c. (406 mm) is the common IRC choice."
+          hint="12 in o.c. (305 mm) minimum; 16 in o.c. (406 mm) is the common IRC choice."
           onChangeMm={(spacingMm): void => apply({ joist: { spacingMm } })}
         />
         {/*

@@ -19,7 +19,7 @@
  * min-deck-dimension input control) are also re-exported.
  */
 
-export { LayoutError, MAX_DECK_DIMENSION_MM, MIN_DECK_DIMENSION_MM, computeLayout } from './layout-engine';
+export { LayoutError, MAX_DECK_DIMENSION_MM, MIN_DECK_DIMENSION_MM, MIN_JOIST_SPACING_MM, computeLayout } from './layout-engine';
 export type { ComputeLayoutOptions } from './layout-engine';
 export { layoutJoists } from './joist-layout';
 export { layoutBeams } from './beam-layout';

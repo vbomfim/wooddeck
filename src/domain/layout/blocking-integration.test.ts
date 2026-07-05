@@ -313,38 +313,53 @@ describe('issue #72 — clear-gap size.x at spacing extremes [BOUNDARY]', () => 
     expect(blocking[0]!.size.x).toBeGreaterThan(0);
   });
 
-  it('at the TIGHTEST legal spacing the pipeline never emits a negative or NaN clear gap', () => {
-    // `validateJoistSpacing` admits `actualSpacing == joistThickness`
-    // (clear gap == 0). Sweep a family of tight spacings against a
-    // 2×10 joist (thickness 38 mm) and confirm every emitted
-    // blocking has a FINITE, NON-NEGATIVE size.x — i.e. the pipeline
-    // never produces a negative-width or NaN member even at the
-    // degenerate limit.
-    for (const spacingMm of [40, 45, 50, 60]) {
+  it('at the TIGHTEST legal spacing (MIN_JOIST_SPACING_MM=305) the pipeline never emits a negative or NaN clear gap', () => {
+    // PR #73 review (GPT-5.5 HIGH #2 root fix): the previous
+    // version of this test swept `[40, 45, 50, 60]` — all below
+    // the new `MIN_JOIST_SPACING_MM = 305 mm` guard, which now
+    // REJECTS the design at `validateJoistSpacing` before any
+    // layout runs. Those cases are covered by the "REJECTS sub-min
+    // spacing" tests in `layout-engine.test.ts` /
+    // `floating-framing.test.ts`.
+    //
+    // The invariant this test proves — "the pipeline never emits
+    // negative or NaN blocking size.x" — is still meaningful at
+    // the NEW tightest legal spacing (305). Sweep spacings at and
+    // just above the min to prove no arithmetic edge case leaks
+    // negative or NaN dimensions.
+    for (const spacingMm of [305, 320, 350, 400]) {
       const design = makeDesign('elevated-footings', 16, 12, spacingMm, 'PT');
       const layout = computeLayout(design, { now: () => design.createdAt });
       const blocking = layout.members.filter((m) => m.kind === 'blocking');
       expect(blocking.length).toBeGreaterThan(0);
       for (const b of blocking) {
         expect(Number.isFinite(b.size.x)).toBe(true);
-        expect(b.size.x).toBeGreaterThanOrEqual(0);
+        expect(b.size.x).toBeGreaterThan(0); // MIN=305 >> thickness=38 → all bays open
       }
     }
   });
 
-  it('[EDGE] degenerate limit: spacing == thickness ⇒ blocking SKIPPED in the touching bays (PR #73 review — no size.x==0 members)', () => {
-    // Directly exercise the seam `computeJoistXCenters` → helper at
-    // the exact boundary the validator allows. width chosen so
-    // usableSpan is an exact multiple of the 38 mm thickness →
-    // actualSpacing == 38 mm == thickness → clear gap == 0.
+  it('[EDGE] degenerate limit: touching joists — HELPER-LEVEL guard (post-MIN=305 the pipeline can no longer produce this input)', () => {
+    // PR #73 review (GPT-5.5 HIGH #1 + HIGH #2 root fixes,
+    // interaction):
     //
-    // PR #73 review GPT #1 flagged that the pre-guard helper emitted
-    // `size.x === 0` members here — an invisible mesh + a
-    // zero-length BOM cut (a lying UI). The helper now applies a
-    // CLEAR_GAP_EPS_MM (1e-6) guard (matching the EPS in
-    // `validateJoistSpacing`) and SKIPS bays with clear gap ≤ EPS.
-    // Physically correct: there is no room to nail a noggin
-    // between two touching joists.
+    //   - HIGH #1 (helper-level guard): `layoutBlockingBetweenJoists`
+    //     SKIPS any bay whose clear gap ≤ CLEAR_GAP_EPS_MM (matching
+    //     `validateJoistSpacing`'s EPS). Fail-safe skip; no
+    //     zero-width invisible mesh, no zero-length BOM cut.
+    //   - HIGH #2 (pipeline-level MIN): `MIN_JOIST_SPACING_MM = 305`
+    //     at `validateJoistSpacing` REJECTS any `computeLayout` /
+    //     `computeFloatingLayout` design that could produce a
+    //     touching-joist geometry (thickness ≤ 38 mm < 305 min).
+    //
+    // Both guards are retained (belt-and-braces). This test
+    // exercises the HELPER directly with synthetic touching centers
+    // — bypassing the pipeline MIN — to prove the helper-level
+    // guard still holds. That defense-in-depth matters because the
+    // helper is exported (`layoutBlockingBetweenJoists` in the
+    // barrel); a future consumer that calls it with primitive
+    // inputs bypasses the pipeline MIN and MUST still get correct
+    // behaviour on the degenerate limit.
     const thickness = 38;
     const widthMm = thickness + thickness * 50; // usableSpan = 50 × 38
     const xCenters = computeJoistXCenters(widthMm, thickness, thickness);

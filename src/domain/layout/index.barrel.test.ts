@@ -38,3 +38,32 @@ describe('layout barrel — MAX_BLOCKING_SPACING_MM re-export', () => {
     expect(BARREL_MAX).toBe(CANONICAL_MAX);
   });
 });
+
+// ---------------------------------------------------------------
+// PR #73 review-gate follow-up — MIN_JOIST_SPACING_MM barrel export
+// ---------------------------------------------------------------
+//
+// PR #73 review GPT-5.5 HIGH #2 follow-up: the user chose the ROOT
+// FIX for the theoretical member-count blowup — a practical MIN
+// joist spacing at validation. Value = 305 mm (12" o.c.) — mirrors
+// `TABULATED_SPACINGS_MM[0]` in `remediations.ts` (the codebase's
+// canonical tightest sensible spacing and the floor of the
+// `reduce-joist-spacing` remediation). Bounds joist count AND its
+// blocking multiplier — a 100 ft deck at MIN caps at ~100 joists
+// → ~1200 blocking, proportionate.
+//
+// The constant lives in `./layout-shared` (co-located with
+// `validateJoistSpacing`) and MUST be re-exported by the barrel so
+// UI / persistence / test consumers reference the single source
+// of truth.
+
+import { MIN_JOIST_SPACING_MM as BARREL_MIN_JOIST } from './index';
+import { MIN_JOIST_SPACING_MM as CANONICAL_MIN_JOIST } from './layout-shared';
+
+describe('layout barrel — MIN_JOIST_SPACING_MM re-export', () => {
+  it('re-exports the canonical value 305 mm (12″ o.c.) from ./layout-shared', () => {
+    expect(CANONICAL_MIN_JOIST).toBe(305);
+    expect(BARREL_MIN_JOIST).toBe(305);
+    expect(BARREL_MIN_JOIST).toBe(CANONICAL_MIN_JOIST);
+  });
+});
