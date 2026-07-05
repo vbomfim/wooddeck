@@ -76,9 +76,10 @@ import { layoutPostsAndBlocks, layoutPostsAndFootings } from './post-layout';
 import {
   LayoutError,
   MIN_DECK_DIMENSION_MM,
+  validateFlushBeamDepth,
   validateJoistSpacing,
 } from './layout-shared';
-import { FOOTING_WIDTH_MM, MIN_POST_HEIGHT_MM } from './y-stack';
+import { FOOTING_WIDTH_MM, MIN_POST_HEIGHT_MM, computeFramingStackMm } from './y-stack';
 
 // Re-export the shared symbols so the pre-S19 public API surface
 // (`import { LayoutError, MIN_DECK_DIMENSION_MM } from './layout-engine'`)
@@ -179,11 +180,12 @@ export function computeMinStructuralHeightMm(design: DeckDesign): Mm {
       { cause: err },
     );
   }
-  const framingStackMm =
-    decking.actual.widthMm +
-    joist.actual.heightMm +
-    beam.actual.heightMm +
-    MIN_POST_HEIGHT_MM;
+  const framingStackMm = computeFramingStackMm({
+    beamConnection: design.beamConnection,
+    deckingThicknessMm: decking.actual.widthMm,
+    joistDepthMm: joist.actual.heightMm,
+    beamDepthMm: beam.actual.heightMm,
+  });
 
   // S20 — elevated + deck-blocks lifts the framing stack by the
   // block's actual height. Other foundation types (posts-on-footings,
@@ -538,6 +540,16 @@ function validateDesign(design: DeckDesign): void {
   // floating share `computeJoistXCenters` — the same DoS pathway
   // now exists in both).
   validateJoistSpacing(design);
+
+  // S27 review-response HIGH #2 — flush-beam depth guard. A flush
+  // stack with `joistDepth > beamDepth` puts the joist bottom BELOW
+  // the beam bottom (physically impossible — the joist has no beam
+  // to hang from). Must run BEFORE `computeMinStructuralHeightMm`
+  // so the caller sees the *specific* remediation, not the generic
+  // height-below-minimum message. Elevated always has 2 beams so no
+  // extra structure guard is needed here (the check itself no-ops
+  // for `beamConnection === 'drop'`).
+  validateFlushBeamDepth(design);
 
   // Height min: the y-stack must fit above ground with strictly
   // positive posts. See `computeMinStructuralHeightMm` for the

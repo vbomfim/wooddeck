@@ -268,23 +268,46 @@ export function computeYStackFloating(design: DeckDesign): FloatingYStack {
   let joistBottomY: Mm;
   let joistTopY: Mm;
   let joistCenterY: Mm;
-  if (design.floatingFraming === 'beams-and-joists' && design.beamConnection === 'flush') {
-    // Flush: joist top === beam top. Beam still on the block; the
-    // joist is hung on its side by joist hangers with joistTop
-    // level with beamTop. Joist bottom may fall BELOW beamBottom
-    // when joistDepth > beamDepth — supported by the hanger, not
-    // by the block; hanger inherits the joist's tributary load
-    // into the beam.
-    joistTopY = beamTopY;
-    joistBottomY = beamTopY - joistDepthMm;
-    joistCenterY = beamTopY - joistDepthMm / 2;
-  } else {
-    // Drop (Method A) OR Method B — joist BOTTOM on the layer
-    // below (beam top for Method A, block top / beam-degenerate
-    // for Method B).
+  // Method B has no beam layer, so `beamConnection` is meaningless
+  // and IGNORED — the stack is identical either way (joist bottom
+  // rests on the block top / degenerate beam top at y=0). Handle
+  // the "no beams" case UP FRONT so the subsequent switch only
+  // needs to reason about Method A.
+  if (design.floatingFraming !== 'beams-and-joists') {
     joistBottomY = beamTopY;
     joistTopY = joistBottomY + joistDepthMm;
     joistCenterY = joistBottomY + joistDepthMm / 2;
+  } else {
+    // Method A — dispatch on `beamConnection` with the same
+    // exhaustive-switch idiom the elevated `computeYStack` uses.
+    // The if/else form (pre-S27-review-response) was fine but
+    // could silently drift if the union widens; `assertNever`
+    // guarantees fail-loud consistency across both pipelines.
+    // Hardening INFO #1 (Security review PR #64).
+    switch (design.beamConnection) {
+      case 'flush':
+        // Flush: joist top === beam top. Beam still on the block; the
+        // joist is hung on its side by joist hangers with joistTop
+        // level with beamTop. `validateFlushBeamDepth` guarantees
+        // `beamDepth >= joistDepth` so `joistBottomY >= 0` (the
+        // joist bottom stays on or above the block top) — no
+        // member below grade.
+        joistTopY = beamTopY;
+        joistBottomY = beamTopY - joistDepthMm;
+        joistCenterY = beamTopY - joistDepthMm / 2;
+        break;
+      case 'drop':
+        // Drop: joist BOTTOM on beam TOP (pre-S27 behavior).
+        joistBottomY = beamTopY;
+        joistTopY = joistBottomY + joistDepthMm;
+        joistCenterY = joistBottomY + joistDepthMm / 2;
+        break;
+      default:
+        assertNever(
+          design.beamConnection,
+          'computeYStackFloating: design.beamConnection',
+        );
+    }
   }
 
   const deckingBottomY = joistTopY;

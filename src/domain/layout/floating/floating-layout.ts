@@ -80,6 +80,7 @@ import { assertNever } from '../../assert-never';
 import {
   LayoutError,
   MIN_DECK_DIMENSION_MM,
+  validateFlushBeamDepth,
   validateJoistSpacing,
 } from '../layout-shared';
 import { FOOTING_WIDTH_MM } from '../y-stack';
@@ -425,6 +426,16 @@ function validateFloatingDesign(design: DeckDesign): void {
   // `computeJoistXCenters` — S26 makes both methods share the
   // joist layer, so the guard must apply to both.
   validateJoistSpacing(design);
+
+  // S27 review-response HIGH #2 — flush-beam depth guard. Only
+  // applies to Method A (Method A has 2 rim beams; Method B has NO
+  // beam layer so `beamConnection` is ignored — flush-vs-drop is
+  // meaningless without a beam to hang from). Must run BEFORE
+  // `computeMinFloatingHeightMm` so the caller sees the specific
+  // remediation instead of the generic height message.
+  if (design.floatingFraming === 'beams-and-joists') {
+    validateFlushBeamDepth(design);
+  }
 
   let minHeightMm: Mm;
   try {

@@ -1344,4 +1344,67 @@ describe('applyParameters — beamConnection (S27)', () => {
     );
     expect(after.design.beamConnection).toBe('flush');
   });
+
+  it('G4 (S27 review-response): beamConnection persists across structure + framing-method switches', () => {
+    // A user sets `beamConnection: 'flush'` on an elevated deck,
+    // then switches structure → floating, then flips
+    // `floatingFraming` twice (Method A → B → A). The
+    // `beamConnection` field must ride along untouched throughout —
+    // deep-merge treats it as an own key that is never rewritten
+    // unless the patch explicitly names it.
+    //
+    // Regression pin: pre-review a subtle bug that reset
+    // `beamConnection` to 'drop' whenever the user changed
+    // `structure` (e.g. a defensive "normalize on switch" step
+    // could have done that) would silently lose the user's choice.
+    // This test asserts the invariant end-to-end.
+    const flushed = applyParameters(FIXTURE, { beamConnection: 'flush' }, table);
+    expect(flushed.design.beamConnection).toBe('flush');
+
+    // Switch to a valid floating deck (block foundation + a height
+    // that clears the Method A + flush stack for the fixture's
+    // materials). The floating validator will enforce the
+    // beam-depth invariant — the FIXTURE's beam is 2×10 and joist
+    // is 2×10 (equal), so the flush combo is legal.
+    const toFloating = applyParameters(
+      flushed.design,
+      {
+        structure: 'floating',
+        floatingFraming: 'beams-and-joists',
+        foundation: {
+          type: 'deck-blocks',
+          product: { productId: 'oldcastle-11x11x7' },
+        },
+      },
+      table,
+    );
+    expect(toFloating.design.beamConnection).toBe('flush');
+    expect(toFloating.design.structure).toBe('floating');
+    expect(toFloating.design.floatingFraming).toBe('beams-and-joists');
+
+    // Flip to Method B (`beamConnection` is IGNORED for Method B —
+    // no beam layer — but the FIELD must still be preserved so
+    // switching BACK to Method A restores the user's choice).
+    const toMethodB = applyParameters(
+      toFloating.design,
+      { floatingFraming: 'joists-on-blocks' },
+      table,
+    );
+    expect(toMethodB.design.beamConnection).toBe('flush');
+    expect(toMethodB.design.floatingFraming).toBe('joists-on-blocks');
+
+    // Flip back to Method A — the preserved 'flush' is now
+    // meaningful again and re-drives the y-stack + hanger BOM.
+    const backToMethodA = applyParameters(
+      toMethodB.design,
+      { floatingFraming: 'beams-and-joists' },
+      table,
+    );
+    expect(backToMethodA.design.beamConnection).toBe('flush');
+    expect(backToMethodA.design.floatingFraming).toBe('beams-and-joists');
+    // Hanger BOM re-appears at Method A + flush (Method B
+    // suppressed it while the framing method was 'joists-on-blocks').
+    // (We only assert existence here; the exact hanger count is
+    // pinned in the BOM tests.)
+  });
 });

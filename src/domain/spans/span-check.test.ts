@@ -1169,3 +1169,42 @@ describe('spanCheck — FIX 4 non-lumber joist/beam fails loud (fail-safe warnin
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// G6 (S27 review-response) — beamConnection does NOT affect span-check
+// ---------------------------------------------------------------------------
+//
+// The span check is a function of TRIBUTARY LOAD + MEMBER GEOMETRY on the
+// horizontal plane (spacing, joist span, beam span between posts). Toggling
+// `beamConnection` between 'drop' and 'flush' only changes VERTICAL stacking
+// (y-positions and — under HIGH #1 — the joist `size.z` clear-span shortening).
+// The span check MUST ignore the y-stack change: warnings for the same design
+// under drop and flush must be identical (same kinds, same allowable, same
+// message).
+//
+// The HIGH #1 shortening of flush joist `size.z` narrows the flush joist span
+// slightly (by roughly beamThickness), so we compare under a design whose
+// UNSHORTENED span is comfortably within limits — the flush span is even
+// shorter and therefore also within limits. Both should yield ZERO warnings.
+describe('spanCheck — G6: beamConnection does NOT change warnings for the same design', () => {
+  it('drop and flush produce IDENTICAL warnings for an in-limit design (empty set)', () => {
+    // Reuse the AC1 in-limit design: 12×12 ft, 2×10 PT joists @ 16" o.c.
+    // The joist span (~4200 mm under drop, ~4162 mm under flush) is well
+    // under the 4877 mm allowable for 2×10 PT @ 16"; neither variant
+    // should trigger any warning.
+    const drop = makeDesign({
+      widthFt: 12,
+      lengthFt: 12,
+      joistNominal: '2x10',
+      joistSpecies: 'PT',
+      beamNominal: '2x10',
+      beamSpecies: 'PT',
+      spacingMm: 406,
+    });
+    const flush: DeckDesign = { ...drop, beamConnection: 'flush' };
+    const dropWarnings = spanCheck(layoutFor(drop), IRC);
+    const flushWarnings = spanCheck(layoutFor(flush), IRC);
+    expect(dropWarnings).toEqual(flushWarnings);
+    expect(dropWarnings).toEqual([]);
+  });
+});

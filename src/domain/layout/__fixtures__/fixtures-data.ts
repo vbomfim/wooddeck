@@ -481,4 +481,67 @@ export const FIXTURE_DESIGNS: readonly { name: string; design: DeckDesign }[] = 
       beamConnection: 'drop',
     },
   },
+  // -----------------------------------------------------------------
+  // S27 review-response G2 — end-to-end FLUSH golden fixtures.
+  //
+  // Two goldens (one elevated, one floating Method A) snapshot-guard
+  // the FULL layout under the flush framing option, so any downstream
+  // regression in beam-position, joist-clear-span, hanger placement,
+  // decking Y, or post height fires here. Each uses 2×8 joist + 2×10
+  // beam — the canonical VALID unequal-flush combo under
+  // `validateFlushBeamDepth` (beam MUST be at least as deep as joist).
+  //
+  // heightMm is picked well above the FLUSH minimum for the material
+  // triple so the fixture stays valid across small future changes to
+  // MIN_POST_HEIGHT_MM etc.:
+  //
+  //   - Elevated flush min (12 ft × 12 ft, 2×8 joist / 2×10 beam,
+  //     5/4×6 decking): 25 + 235 (beam depth wins) + 25 = 285 mm.
+  //     3 ft (914 mm) is 2.5× the min — comfortable margin.
+  //   - Floating Method A flush min (16 ft × 14 ft, same materials):
+  //     25 + 235 = 260 mm. 500 mm gives the same margin.
+  // -----------------------------------------------------------------
+  {
+    name: 'elevated-12x12-flush',
+    design: {
+      id: '66666666-6666-4666-8666-000000000027',
+      createdAt: '2026-07-05T00:00:00.000Z',
+      footprint: {
+        widthMm: 12 * MM_PER_FOOT,
+        lengthMm: 12 * MM_PER_FOOT,
+        heightMm: 3 * MM_PER_FOOT,
+      },
+      structure: 'elevated',
+      floatingFraming: 'beams-and-joists',
+      beamConnection: 'flush',
+      foundation: FIXTURE_FOUNDATION,
+      joist: { material: PT_2X8, spacingMm: 406 },
+      beam: { material: PT_2X10 }, // deeper beam — legal flush combo
+      decking: { material: PT_54, orientation: 'parallel-to-width' },
+      layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+    },
+  },
+  {
+    name: 'floating-16x14-oldcastle-flush',
+    design: {
+      id: '77777777-7777-4777-8777-000000000027',
+      createdAt: '2026-07-05T00:00:01.000Z',
+      footprint: {
+        widthMm: 16 * MM_PER_FOOT,
+        lengthMm: 14 * MM_PER_FOOT,
+        heightMm: 500,
+      },
+      structure: 'floating',
+      // Oldcastle 11×11×7 accepts 2×6/2×8/2×10 — needed for the
+      // 2×10 beam here. The tuffblock foundation only accepts
+      // 2×6/2×8, so it cannot host the flush-compat combo.
+      foundation: FIXTURE_OLDCASTLE_FOUNDATION,
+      joist: { material: PT_2X8, spacingMm: 406 },
+      beam: { material: PT_2X10 },
+      decking: { material: PT_54, orientation: 'parallel-to-width' },
+      layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+      floatingFraming: 'beams-and-joists',
+      beamConnection: 'flush',
+    },
+  },
 ];

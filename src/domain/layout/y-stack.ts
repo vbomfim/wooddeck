@@ -242,3 +242,46 @@ export function computeYStack(design: DeckDesign): YStack {
     footingTopY,
   };
 }
+
+/**
+ * S27 review-response HIGH #3 — compute the framing-stack contribution
+ * to the minimum structural height in ONE place, dispatched on
+ * `beamConnection`. Both `layout-engine.computeMinStructuralHeightMm`
+ * (elevated) and any future caller MUST derive their min-height from
+ * the same helper — the min IS the y-stack, just with the post
+ * collapsed to `MIN_POST_HEIGHT_MM`.
+ *
+ *   - `'drop'`  (unchanged from pre-S27):
+ *       `decking + joist + beam + MIN_POST`
+ *       — joist stacks ON TOP of beam, no overlap.
+ *   - `'flush'` (S27 new):
+ *       `decking + max(joistDepth, beamDepth) + MIN_POST`
+ *       — joist and beam OVERLAP vertically (tops flush); the taller
+ *       of the two dictates the stack. `validateFlushBeamDepth`
+ *       guarantees `beamDepth >= joistDepth` for flush, so this is
+ *       equivalent to `decking + beamDepth + MIN_POST` in practice —
+ *       but computing it as `max(...)` documents the geometry
+ *       correctly and stays correct even if a future caller applies
+ *       this helper before validation.
+ *
+ * Pure function on primitives so it is trivially unit-testable and
+ * has no material-catalog dependency (callers do the lookup).
+ */
+export function computeFramingStackMm(input: {
+  readonly beamConnection: DeckDesign['beamConnection'];
+  readonly deckingThicknessMm: Mm;
+  readonly joistDepthMm: Mm;
+  readonly beamDepthMm: Mm;
+}): Mm {
+  const { beamConnection, deckingThicknessMm, joistDepthMm, beamDepthMm } = input;
+  switch (beamConnection) {
+    case 'drop':
+      return deckingThicknessMm + joistDepthMm + beamDepthMm + MIN_POST_HEIGHT_MM;
+    case 'flush':
+      return (
+        deckingThicknessMm + Math.max(joistDepthMm, beamDepthMm) + MIN_POST_HEIGHT_MM
+      );
+    default:
+      assertNever(beamConnection, 'computeFramingStackMm: beamConnection');
+  }
+}

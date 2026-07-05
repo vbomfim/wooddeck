@@ -149,45 +149,60 @@ describe('computeYStack — beamConnection: "flush" (new S27 behavior)', () => {
 // ---------------------------------------------------------------------------
 
 describe('computeYStack — drop vs flush height comparison', () => {
-  it('flush post height > drop post height by min(joistDepth, beamDepth)', () => {
+  // Opus #2 (S27 review-response) — use UNEQUAL depths (2×8 joist,
+  // 2×10 beam) so the drop-vs-flush deltas are NOT a coincidence
+  // of equal-depth arithmetic. Under `validateFlushBeamDepth` the
+  // valid unequal-flush combo is `beam depth >= joist depth`,
+  // so 2×8 joist + 2×10 beam is the canonical unequal test case.
+  const PT_2X8: MaterialRef = { nominal: '2x8', species: 'PT', grade: 'No2' };
+  const UNEQUAL = { joist: PT_2X8, beam: PT_2X10 } as const;
+
+  it('flush post height > drop post height by joistDepth (the joist collapses into the beam window)', () => {
     // Both designs have the same footprint.heightMm — the walking
-    // surface is pinned. In drop the framing extends beam+joist
-    // BELOW the decking; in flush the beam and joist overlap so
-    // the framing depth shrinks by that overlap. The post picks
-    // up the difference (grows taller).
-    const dropDesign = makeElevated({ beamConnection: 'drop' });
-    const flushDesign = makeElevated({ beamConnection: 'flush' });
-    const drop = computeYStack(dropDesign);
-    const flush = computeYStack(flushDesign);
-    const beam = lookupMaterial(PT_2X10.nominal, PT_2X10.species, PT_2X10.grade);
-    const joist = lookupMaterial(PT_2X10.nominal, PT_2X10.species, PT_2X10.grade);
-    const overlap = Math.min(beam.actual.heightMm, joist.actual.heightMm);
-    // For 2×10 / 2×10 the overlap == joist depth == 235 mm.
-    expect(flush.postHeightMm - drop.postHeightMm).toBe(overlap);
+    // surface is pinned. In DROP the framing extends beam+joist
+    // BELOW the decking; in FLUSH the joist collapses into the
+    // beam's y-range (tops flush), so the framing depth shrinks
+    // by exactly `joistDepth` (given beam >= joist). The post
+    // picks up the difference (grows taller).
+    const drop = computeYStack(makeElevated({ beamConnection: 'drop', ...UNEQUAL }));
+    const flush = computeYStack(makeElevated({ beamConnection: 'flush', ...UNEQUAL }));
+    const joist = lookupMaterial(PT_2X8.nominal, PT_2X8.species, PT_2X8.grade);
+    // TRUE formula (Opus #2): the delta is EXACTLY the joist depth
+    // — NOT `min(joist, beam)`. `min(joist, beam) == joist` here
+    // only because beam > joist (the valid flush invariant); the
+    // pre-review test used equal depths so both formulas evaluated
+    // to the same 235 mm, masking whether the code was actually
+    // correct.
+    expect(flush.postHeightMm - drop.postHeightMm).toBe(joist.actual.heightMm);
+    // Sanity check — 2×8 joist depth is 184 mm.
+    expect(flush.postHeightMm - drop.postHeightMm).toBe(184);
   });
 
-  it('flush stack (deckingTop - beamBottom) is SHORTER than drop stack by the overlap', () => {
-    const drop = computeYStack(makeElevated({ beamConnection: 'drop' }));
-    const flush = computeYStack(makeElevated({ beamConnection: 'flush' }));
+  it('flush stack (deckingTop - beamBottom) is SHORTER than drop stack by joistDepth', () => {
+    const drop = computeYStack(makeElevated({ beamConnection: 'drop', ...UNEQUAL }));
+    const flush = computeYStack(makeElevated({ beamConnection: 'flush', ...UNEQUAL }));
     const dropStackDepth = drop.deckingTopY - drop.beamBottomY;
     const flushStackDepth = flush.deckingTopY - flush.beamBottomY;
     expect(flushStackDepth).toBeLessThan(dropStackDepth);
-    expect(dropStackDepth - flushStackDepth).toBe(
-      Math.min(drop.joistDepthMm, drop.beamDepthMm),
-    );
+    // TRUE formula (Opus #2): drop stack = decking + joist + beam;
+    // flush stack = decking + max(joist, beam) = decking + beam
+    // (given beam >= joist). Delta = joistDepth.
+    expect(dropStackDepth - flushStackDepth).toBe(drop.joistDepthMm);
+    // Explicit numeric pin: 2×8 joist = 184 mm.
+    expect(dropStackDepth - flushStackDepth).toBe(184);
   });
 
   it('deckingTopY (walking surface) equal across drop & flush for identical footprint', () => {
     // The walking surface is a user-set invariant; drop/flush only
     // changes what happens BELOW it.
-    const drop = computeYStack(makeElevated({ beamConnection: 'drop' }));
-    const flush = computeYStack(makeElevated({ beamConnection: 'flush' }));
+    const drop = computeYStack(makeElevated({ beamConnection: 'drop', ...UNEQUAL }));
+    const flush = computeYStack(makeElevated({ beamConnection: 'flush', ...UNEQUAL }));
     expect(drop.deckingTopY).toBe(flush.deckingTopY);
   });
 
   it('deckingBottomY equal across drop & flush (decking rides joist top in both)', () => {
-    const drop = computeYStack(makeElevated({ beamConnection: 'drop' }));
-    const flush = computeYStack(makeElevated({ beamConnection: 'flush' }));
+    const drop = computeYStack(makeElevated({ beamConnection: 'drop', ...UNEQUAL }));
+    const flush = computeYStack(makeElevated({ beamConnection: 'flush', ...UNEQUAL }));
     expect(drop.deckingBottomY).toBe(flush.deckingBottomY);
   });
 
@@ -195,16 +210,20 @@ describe('computeYStack — drop vs flush height comparison', () => {
     // Same joist depth + same decking bottom → same joist center.
     // Drop puts the BEAM below the joist; flush puts the BEAM
     // LEVEL with the joist. The joist itself does not move.
-    const drop = computeYStack(makeElevated({ beamConnection: 'drop' }));
-    const flush = computeYStack(makeElevated({ beamConnection: 'flush' }));
+    const drop = computeYStack(makeElevated({ beamConnection: 'drop', ...UNEQUAL }));
+    const flush = computeYStack(makeElevated({ beamConnection: 'flush', ...UNEQUAL }));
     expect(drop.joistCenterY).toBe(flush.joistCenterY);
   });
 
-  it('beamCenterY differs: flush beam is HIGHER than drop beam by the overlap', () => {
-    const drop = computeYStack(makeElevated({ beamConnection: 'drop' }));
-    const flush = computeYStack(makeElevated({ beamConnection: 'flush' }));
-    const overlap = Math.min(drop.joistDepthMm, drop.beamDepthMm);
-    expect(flush.beamCenterY - drop.beamCenterY).toBe(overlap);
+  it('beamCenterY differs: flush beam is HIGHER than drop beam by joistDepth', () => {
+    const drop = computeYStack(makeElevated({ beamConnection: 'drop', ...UNEQUAL }));
+    const flush = computeYStack(makeElevated({ beamConnection: 'flush', ...UNEQUAL }));
+    // TRUE formula (Opus #2): the beam floats up by the joist
+    // depth (its top now coincides with the joist top, i.e. the
+    // decking bottom, rather than sitting UNDER the joist).
+    expect(flush.beamCenterY - drop.beamCenterY).toBe(drop.joistDepthMm);
+    // Sanity numeric pin: 2×8 joist = 184 mm.
+    expect(flush.beamCenterY - drop.beamCenterY).toBe(184);
   });
 });
 

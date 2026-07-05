@@ -1047,4 +1047,22 @@ describe('deserialize — S27 beamConnection load defaults + canonical order', (
     const second = serialize(design, OPTS);
     expect(second).toBe(first);
   });
+
+  // G5 (S27 review-response) — parametrized byte-identity save/load
+  // round-trip over drop AND flush. Pins that the presence of the
+  // 'flush' value on the wire does not break canonical ordering
+  // (already the case for 'drop' — the golden defaults there). If a
+  // future refactor accidentally lower-cased or reordered the field
+  // for one variant only, this test fires.
+  it.each(['drop', 'flush'] as const)(
+    'G5: byte-identity round-trip for beamConnection = %s',
+    (bc) => {
+      const design = { ...GOLDEN_DECK_DESIGN, beamConnection: bc };
+      const first = serialize(design, OPTS);
+      const { design: reloaded } = deserialize(first);
+      expect(reloaded.beamConnection).toBe(bc);
+      const second = serialize(reloaded, OPTS);
+      expect(second).toBe(first);
+    },
+  );
 });

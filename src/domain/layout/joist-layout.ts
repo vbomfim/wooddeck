@@ -74,15 +74,88 @@ import { lookupMaterial } from '../materials-catalog';
 import type { DeckDesign, LayoutMember } from '../model';
 import type { Mm } from '../units';
 
-import { computeYStack } from './y-stack';
+import { FOOTING_WIDTH_MM, computeYStack } from './y-stack';
+
+/**
+ * S27 review-response HIGH #1 — joist length dispatch.
+ *
+ * Under DROP framing the joist runs the FULL deck length and may
+ * cantilever past the beams (a normal detail). Under FLUSH framing
+ * the joist is HUNG OFF THE BEAM FACE via a joist hanger, so it
+ * physically CANNOT extend past the beam — it ENDS at the beam
+ * inner face. Both elevated `layoutBeams` and floating
+ * `computeFloatingRimBeams` inset each beam center by
+ * `FOOTING_WIDTH_MM / 2` from the corresponding z-end (so the
+ * supporting footings/blocks stay inside the footprint), so the
+ * clear span between beam INNER faces is:
+ *
+ *   nearBeamInnerZ = -lengthMm/2 + FOOTING_WIDTH_MM/2 + beamThickness/2
+ *   farBeamInnerZ  = +lengthMm/2 - FOOTING_WIDTH_MM/2 - beamThickness/2
+ *   clearSpanMm    = farBeamInnerZ - nearBeamInnerZ
+ *                  = lengthMm - FOOTING_WIDTH_MM - beamThickness
+ *
+ * Extracted here so the elevated joist layer AND the floating
+ * Method-A joist layer (`floating-joist-layout.ts`) share ONE
+ * derivation — the invariant "flush joist = clear span between
+ * beam inner faces" cannot drift between the two pipelines.
+ *
+ * The joist is CENTERED on the length axis (`position.z = 0`)
+ * either way, so the caller does not need to know about which end
+ * it is inspecting — the two end faces are symmetric about z=0.
+ *
+ * @throws {Error} from `lookupMaterial` when the beam material
+ *   triple is not in the catalog. Only invoked for `'flush'`, so
+ *   drop callers never trigger the lookup (unchanged perf).
+ */
+export function computeJoistLengthMm(design: DeckDesign): Mm {
+  // Method B floating (`joists-on-blocks`) has NO beam layer —
+  // `beamConnection` is IGNORED and the joist runs the full deck
+  // length. This guard MUST come before the switch, because a
+  // pathological Method-B design carrying `beamConnection: 'flush'`
+  // would otherwise attempt to compute a "clear span" against
+  // phantom beams. The visibility gate in `ParameterPanel` hides
+  // the flush option for Method B, but a persisted `.deck` file
+  // (or a future API) could still smuggle it in.
+  const hasBeams =
+    design.structure === 'elevated' ||
+    (design.structure === 'floating' && design.floatingFraming === 'beams-and-joists');
+  if (!hasBeams) return design.footprint.lengthMm;
+
+  switch (design.beamConnection) {
+    case 'drop':
+      return design.footprint.lengthMm;
+    case 'flush': {
+      const beamMat = lookupMaterial(
+        design.beam.material.nominal,
+        design.beam.material.species,
+        design.beam.material.grade,
+      );
+      const beamThicknessMm = beamMat.actual.widthMm;
+      return design.footprint.lengthMm - FOOTING_WIDTH_MM - beamThicknessMm;
+    }
+    default:
+      // Fall back to full length for any unknown value — the union
+      // narrowing above should make this unreachable, but staying
+      // defensive avoids a runtime `undefined` propagating into
+      // `size.z`. `validateDesign` fails loud on the invariant
+      // before this ever runs for a legitimate flush design.
+      return design.footprint.lengthMm;
+  }
+}
 
 /**
  * Compute joist positions for a design. Every returned joist:
  *   - has `kind: 'joist'`,
- *   - runs the full length of the deck (`size.z = footprint.lengthMm`),
  *   - is centered on z=0,
+ *   - has `size.z` = `computeJoistLengthMm(design)` — DROP uses the
+ *     full deck length (may cantilever past the beams); FLUSH uses
+ *     the clear span between the two beam inner faces (joists END
+ *     at the beam face because they are hung from it via a joist
+ *     hanger — a joist that passes THROUGH the beam is physically
+ *     impossible). See `computeJoistLengthMm` above for the
+ *     derivation.
  *   - sits at the y-position from `computeYStack(design).joistCenterY`
- *     (see y-stack.ts — this file only owns X placement).
+ *     (see y-stack.ts — this file only owns X placement + length).
  *
  * @throws {Error} from `lookupMaterial` when the joist material triple
  *   is not in the catalog. The layout engine wraps this as `LayoutError`.
@@ -97,7 +170,9 @@ export function layoutJoists(design: DeckDesign): LayoutMember[] {
   const depthMm = joistMat.actual.heightMm;
   const widthMm = design.footprint.widthMm;
   const spacingMm = design.joist.spacingMm;
-  const lengthMm = design.footprint.lengthMm;
+  // S27 review-response HIGH #1 — dispatch length on beamConnection.
+  // Drop keeps `footprint.lengthMm` byte-identical to pre-S27.
+  const lengthMm = computeJoistLengthMm(design);
 
   const xCenters = computeJoistXCenters(widthMm, spacingMm, thicknessMm);
   // Delegate y-placement to the shared y-stack — the single source of

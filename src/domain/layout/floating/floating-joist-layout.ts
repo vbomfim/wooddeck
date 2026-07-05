@@ -51,7 +51,7 @@
 import { lookupMaterial } from '../../materials-catalog';
 import type { DeckDesign, LayoutMember } from '../../model';
 
-import { computeJoistXCenters } from '../joist-layout';
+import { computeJoistLengthMm, computeJoistXCenters } from '../joist-layout';
 
 import { computeYStackFloating } from './y-stack-floating';
 
@@ -73,7 +73,14 @@ export function layoutFloatingJoists(design: DeckDesign): readonly LayoutMember[
   const depthMm = joistMat.actual.heightMm;
   const widthMm = design.footprint.widthMm;
   const spacingMm = design.joist.spacingMm;
-  const lengthMm = design.footprint.lengthMm;
+  // S27 review-response HIGH #1 — same clear-span dispatch as the
+  // elevated joist layer. For Method A + flush, joists END at the
+  // rim-beam inner faces; for Method A + drop OR Method B they run
+  // the full deck length (Method B has no beams so `beamConnection`
+  // is irrelevant — `computeJoistLengthMm` returns full length for
+  // any non-flush design, and Method B designs never carry
+  // `beamConnection: 'flush'` in a validated pipeline).
+  const lengthMm = computeJoistLengthMm(design);
 
   const xCenters = computeJoistXCenters(widthMm, spacingMm, thicknessMm);
   const yCenter = computeYStackFloating(design).joistCenterY;

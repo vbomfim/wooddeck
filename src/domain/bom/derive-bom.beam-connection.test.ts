@@ -201,6 +201,44 @@ describe('deriveBom — hardware section for beamConnection: "flush"', () => {
 });
 
 // ---------------------------------------------------------------------------
+// S27 review-response HIGH #1 — flush joists are SHORTER than drop
+// joists (they end at the beam inner faces). The BOM cut list reads
+// `size.z` directly (see `getMemberLengthMm`), so the correct joist
+// length flows through automatically — this assertion pins that
+// invariant so a future regression that hard-codes `footprint.lengthMm`
+// in the BOM fires here.
+// ---------------------------------------------------------------------------
+
+describe('deriveBom — flush joist cut length reflects size.z (not footprint length)', () => {
+  it('flush joist members with SHORTENED size.z appear at the SHORTENED length in the cut list', () => {
+    // Fake layout: 3 joists at 2500 mm (a clear span, deliberately
+    // shorter than any real footprint length) + 2 beams. Under drop
+    // the joist would be footprint.lengthMm; under flush the
+    // domain shortens it to the clear span. The BOM cut list must
+    // preserve the domain length exactly.
+    const shortenedMm = 2500;
+    const members: LayoutMember[] = [
+      makeMember('beam-near', 'beam', PT_2x8, 5 * MM_PER_FOOT),
+      makeMember('beam-far', 'beam', PT_2x8, 5 * MM_PER_FOOT),
+      makeMember('j-0', 'joist', PT_2x8, shortenedMm),
+      makeMember('j-1', 'joist', PT_2x8, shortenedMm),
+      makeMember('j-2', 'joist', PT_2x8, shortenedMm),
+    ];
+    const result = deriveBom(makeLayout(members), { beamConnection: 'flush' });
+    // Find the 2×8 PT lumber group and confirm every joist cut is
+    // exactly `shortenedMm`. Cuts live inside pack.stockBoards.
+    const joistGroup = result.lumber.find((g) => g.nominal === '2x8');
+    if (joistGroup === undefined) throw new Error('expected a 2×8 lumber group');
+    const allCuts = joistGroup.pack.stockBoards.flatMap((b) => b.cuts);
+    const joistCuts = allCuts.filter((c) => c.memberId.startsWith('j-'));
+    expect(joistCuts).toHaveLength(3);
+    for (const cut of joistCuts) {
+      expect(cut.lengthMm).toBe(shortenedMm);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Determinism + ordering
 // ---------------------------------------------------------------------------
 

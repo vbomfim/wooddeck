@@ -206,9 +206,10 @@ export interface BomResult {
  *   - `beamConnection` (S27, feat/joist-beam-connection):
  *     defaults to `'drop'` when omitted (BACKWARD COMPAT for
  *     pre-S27 callers). Under `'flush'`, `deriveBom` emits a
- *     `hardware` line for joist hangers (`joistCount × beamCount`
- *     hangers). Under `'drop'` the `hardware` section is empty
- *     (joists rest on beam tops).
+ *     `hardware` line for joist hangers (`joistCount × 2` — two
+ *     ends per joist, beam-count-invariant; see the hardware
+ *     build site for the full rationale). Under `'drop'` the
+ *     `hardware` section is empty (joists rest on beam tops).
  */
 export interface DeriveBomOptions {
   readonly kerfMm?: Mm;
@@ -257,10 +258,13 @@ export function deriveBom(layout: Layout, options: DeriveBomOptions = {}): BomRe
   const footingGroups = new Map<string, FootingGroup>();
 
   // S27 hardware pre-tally: count joists / beams in one pass so
-  // the hardware section (below) can compute `joists × beams`
-  // hangers for flush. Beams counted separately per SKU is
-  // overkill — the joist nominal drives the hanger sku (hangers
-  // are sized to the JOIST that hangs from them, not the beam).
+  // the hardware section (below) can compute joist-hangers for
+  // flush. Beam count is used ONLY as a "has beams?" gate — the
+  // hanger multiplier is a constant 2 (two ends per joist),
+  // documented at the hardware-build site. Beams counted
+  // separately per SKU is overkill — the joist nominal drives
+  // the hanger sku (hangers are sized to the joist that hangs
+  // from them, not the beam).
   let joistCount = 0;
   let beamCount = 0;
   const joistLumberNominalCounts = new Map<LumberNominal, number>();
@@ -399,13 +403,36 @@ export function deriveBom(layout: Layout, options: DeriveBomOptions = {}): BomRe
   });
 
   // ---- Build hardware sections (S27: joist hangers for flush) ---------
+  //
   // Rule: for `beamConnection: 'flush'`, EACH joist end that frames
   // into a beam needs a joist hanger. Elevated + floating Method A
-  // both have 2 rim beams, so hangers = joistCount × beamCount.
+  // both frame joists into EXACTLY 2 beams (near + far rim beams —
+  // enforced by the MVP invariant in `post-layout.ts` "each beam is
+  // one of BEAM_IDS.near / BEAM_IDS.far; intermediate beams are v2+").
+  //
+  // Hangers formula (S27 review-response Security INFO #1 —
+  // `joistCount * 2`):
+  //
+  //   - "2" is a CONSTANT: it means "two ends per joist" — every
+  //     joist has one near end and one far end, and each end needs
+  //     one hanger. The count is independent of the beam count and
+  //     stays correct even in a hypothetical future rework that
+  //     added intermediate beams (an intermediate beam would carry
+  //     joists on top of it in drop mode; for flush, the joist runs
+  //     would be split at that beam, giving THREE hanger ends per
+  //     joist end-segment which is a separate model — see the v2+
+  //     "intermediate beams" spec placeholder).
+  //   - Multiplying by the CURRENT `beamCount` (pre-review code) was
+  //     mathematically equivalent to `× 2` under the MVP invariant
+  //     but coupled the hardware count to a layout-emission detail
+  //     that could drift. Explicit constant + inline rationale is
+  //     the more defensible form.
+  //   - `beamCount > 0` still gates emission: Method B (no beam
+  //     layer) emits ZERO hangers even if `beamConnection === 'flush'`
+  //     somehow leaks through — flush is meaningless without beams.
+  //
   // For `'drop'` there are no hangers (joists rest on beam tops).
-  // Also: if there are no beams (Method B floating shape), flush is
-  // meaningless — emit no hangers (defensive; matches ticket's
-  // "IGNORED for Method B" clause).
+  const HANGER_ENDS_PER_JOIST = 2;
   const hardware: BomSection_Hardware[] = [];
   if (beamConnection === 'flush' && joistCount > 0 && beamCount > 0) {
     // Group hangers by joist nominal. When mixed joist sizes are
@@ -415,7 +442,7 @@ export function deriveBom(layout: Layout, options: DeriveBomOptions = {}): BomRe
       hardware.push(
         Object.freeze({
           sku: formatHangerSku(nominal),
-          count: count * beamCount,
+          count: count * HANGER_ENDS_PER_JOIST,
         }),
       );
     }
