@@ -97,7 +97,20 @@ export { DEFAULT_DESIGN_PARAMS, makeDefaultDesign } from './default-design';
 // importing `domain/layout/**` directly; the state barrel is the
 // sanctioned seam for value + type re-exports (matches the LayoutError
 // pattern already in `design-store.ts`).
-export { DEFAULT_METHOD_B_BLOCK_SPACING_MM } from '../domain/layout/floating/floating-layout';
+//
+// `MIN_BLOCK_SPACING_MM` / `MAX_BLOCK_SPACING_MM` are ALSO re-exported
+// (HIGH #2 review response) so the `BlockSpacingField` can clamp
+// user input at the boundary — a raw value outside the schema
+// range would poison the design, be silently clamped by the LAYOUT
+// for geometry, but the STORED design would then fail
+// `deserialize` on the next open (save/reload trap).
+export {
+  DEFAULT_METHOD_B_BLOCK_SPACING_MM,
+} from '../domain/layout/floating/floating-layout';
+export {
+  MAX_BLOCK_SPACING_MM,
+  MIN_BLOCK_SPACING_MM,
+} from '../domain/layout/floating/block-grid';
 
 // ---- shared utility types --------------------------------------------------
 //

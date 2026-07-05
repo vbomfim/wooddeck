@@ -22,7 +22,13 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-import { resetDesignStoreForTests, useDesignStore } from '../../state/design-store';
+import { deserialize, serialize } from '../../persistence';
+import {
+  MAX_BLOCK_SPACING_MM,
+  MIN_BLOCK_SPACING_MM,
+  useDesignStore,
+} from '../../state';
+import { resetDesignStoreForTests } from '../../state/design-store';
 
 import { BlockSpacingField } from './BlockSpacingField';
 
@@ -173,5 +179,91 @@ describe('<BlockSpacingField /> — dispatch', () => {
     expect(
       Math.abs((design.foundation.blockSpacingMm ?? 0) - 1828.8),
     ).toBeLessThan(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// HIGH #2 (review) — UI-side clamp so the STORED value is
+// always schema-valid (save/reload cannot trap the user)
+// ---------------------------------------------------------------------------
+//
+// Pre-fix: `BlockSpacingField` dispatched whatever the user typed.
+// The LAYOUT would clamp (300 ≤ s ≤ 2438.4) for geometry, but the
+// stored `foundation.blockSpacingMm` was the raw value. Save →
+// reload path would then throw `schema-validation-failed` on the
+// same design that "worked fine" until close. Fix: clamp AT THE
+// INPUT BOUNDARY so the value STORED is always schema-legal.
+
+describe('<BlockSpacingField /> — HIGH #2: clamp stored value to schema-legal range', () => {
+  it('above-max input (10000 mm ≈ 33 ft) → design stores MAX_BLOCK_SPACING_MM (2438.4)', async () => {
+    flipToMethodB();
+    render(<BlockSpacingField />);
+    const user = userEvent.setup();
+    const input = screen.getByLabelText<HTMLInputElement>(/block spacing/i);
+    await user.clear(input);
+    // 10000 mm — well above MAX_BLOCK_SPACING_MM (2438.4).
+    await user.type(input, '10000 mm');
+    await user.tab();
+
+    const design = useDesignStore.getState().bundle.design;
+    if (
+      design.foundation.type !== 'deck-blocks' &&
+      design.foundation.type !== 'tuffblocks'
+    ) {
+      throw new Error('expected block foundation');
+    }
+    // Stored value MUST be ≤ MAX_BLOCK_SPACING_MM (schema-safe).
+    expect(design.foundation.blockSpacingMm).toBeDefined();
+    expect(
+      (design.foundation.blockSpacingMm ?? Number.POSITIVE_INFINITY),
+    ).toBeLessThanOrEqual(MAX_BLOCK_SPACING_MM);
+  });
+
+  it('below-min input (50 mm) → design stores MIN_BLOCK_SPACING_MM (300)', async () => {
+    flipToMethodB();
+    render(<BlockSpacingField />);
+    const user = userEvent.setup();
+    const input = screen.getByLabelText<HTMLInputElement>(/block spacing/i);
+    await user.clear(input);
+    await user.type(input, '50 mm');
+    await user.tab();
+
+    const design = useDesignStore.getState().bundle.design;
+    if (
+      design.foundation.type !== 'deck-blocks' &&
+      design.foundation.type !== 'tuffblocks'
+    ) {
+      throw new Error('expected block foundation');
+    }
+    expect(design.foundation.blockSpacingMm).toBeDefined();
+    expect(
+      (design.foundation.blockSpacingMm ?? 0),
+    ).toBeGreaterThanOrEqual(MIN_BLOCK_SPACING_MM);
+  });
+
+  it('a design edited via the field ROUND-TRIPS through serialize→deserialize without schema throw (save/reload safety)', async () => {
+    flipToMethodB();
+    render(<BlockSpacingField />);
+    const user = userEvent.setup();
+    const input = screen.getByLabelText<HTMLInputElement>(/block spacing/i);
+
+    // Try three adversarial values that pre-fix would poison the
+    // stored design with. Each MUST end up schema-legal → the
+    // serialize/deserialize round-trip must not throw.
+    for (const raw of ['10000 mm', '50 mm', '3 m']) {
+      await user.clear(input);
+      await user.type(input, raw);
+      await user.tab();
+
+      const design = useDesignStore.getState().bundle.design;
+      const json = serialize(design, {
+        createdAt: design.createdAt,
+        generatorVersion: '1.0.0',
+      });
+      // The critical assertion: reload the just-written file.
+      // Pre-fix, this throws schema-validation-failed for any of
+      // the three inputs above.
+      expect(() => deserialize(json)).not.toThrow();
+    }
   });
 });

@@ -264,3 +264,60 @@ describe('formatRemediationOption — S25 add-support-row', () => {
     expect(out.detail.toLowerCase()).toContain('floating');
   });
 });
+
+// ---------------------------------------------------------------------------
+// HIGH #3 (review — feat/block-spacing): the ACTIVE Method-B
+// path carries `currentSpacingMm` + `proposedSpacingMm` on the
+// patch. The label MUST render length-based headlines
+// ("Reduce block spacing to add support (X → Y)") when those
+// fields are present — the user thinks in spacing, not row
+// counts. Legacy path (fields undefined) still renders the
+// count-arrow.
+// ---------------------------------------------------------------------------
+
+describe('formatRemediationOption — HIGH #3 Method-B spacing-primary headline', () => {
+  it('renders "Reduce block spacing to add support (X → Y)" with unit-aware length values', () => {
+    const option = makeOption({
+      kind: 'add-support-row',
+      memberId: 'joist-3',
+      patch: {
+        kind: 'add-support-row',
+        targetBeamId: 'joist-3',
+        currentRows: 2,
+        proposedRows: 5,
+        currentSpacingMm: 3657.6, // 12 ft
+        proposedSpacingMm: 914.4, // 3 ft
+      },
+    });
+    const imperial = formatRemediationOption(option, 'imperial');
+    const metric = formatRemediationOption(option, 'metric');
+    // Both systems mention "Reduce block spacing".
+    expect(imperial.headline.toLowerCase()).toContain('reduce block spacing');
+    expect(metric.headline.toLowerCase()).toContain('reduce block spacing');
+    // Imperial displays feet/inches; metric displays SI units.
+    expect(imperial.headline).toMatch(/′|ft/); // prime or "ft" (formatLength uses ′)
+    expect(metric.headline).toMatch(/mm|cm|m\b/);
+    // No misleading count-arrow "N → M" alongside the length arrow.
+    // Only the length arrow present.
+    expect(metric.headline).toContain('→');
+    // No lying (5 → 8) — the counts are secondary; the headline
+    // is length-primary.
+    expect(imperial.headline).not.toMatch(/\(5 → 8\)/);
+  });
+
+  it('legacy patch (no spacing fields) still renders the count-arrow ("Add a row of blocks (N → M)")', () => {
+    const option = makeOption({
+      kind: 'add-support-row',
+      memberId: 'beam-near',
+      patch: {
+        kind: 'add-support-row',
+        targetBeamId: 'beam-near',
+        currentRows: 2,
+        proposedRows: 3,
+        // no proposedSpacingMm — legacy path.
+      },
+    });
+    const out = formatRemediationOption(option, 'imperial');
+    expect(out.headline).toBe('Add a row of blocks (2 → 3)');
+  });
+});

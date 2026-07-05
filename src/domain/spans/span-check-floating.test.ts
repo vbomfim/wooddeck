@@ -40,6 +40,7 @@ import type { SpanTable } from './span-table';
 import { spanCheck } from './span-check';
 
 const PT_2X8: MaterialRef = { nominal: '2x8', species: 'PT', grade: 'No2' };
+const PT_2X6: MaterialRef = { nominal: '2x6', species: 'PT', grade: 'No2' };
 const PT_54: MaterialRef = { nominal: '5/4x6', species: 'PT', grade: 'No2' };
 
 const TUFFBLOCK_FOUNDATION: Extract<
@@ -517,5 +518,120 @@ describe('spanCheck (floating Method B) — FIX #1 joist span from blocks', () =
     };
     spanCheck(layout, spy);
     expect(joistLookupCallCount).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// HIGH #5 (review — feat/block-spacing): pin the span-safety
+// property on the NEW `blockSpacingMm` primary path. All the
+// pre-review tests above use the LEGACY `blockRowsHint` seam.
+// The property must hold for the spacing-primary path too:
+//   - large blockSpacingMm → at least one over-span-joist warning
+//   - default spacing → zero joist warnings (negative control)
+//   - every joist evaluated regardless of column position (a joist
+//     whose x is NOT under a block column is STILL span-checked)
+// ---------------------------------------------------------------------------
+
+describe('spanCheck (floating Method B) — HIGH #5: blockSpacingMm span-safety pin', () => {
+  function makeMethodB(overrides: Partial<{
+    widthFt: number;
+    lengthFt: number;
+    blockSpacingMm: number;
+    joist: MaterialRef;
+  }> = {}): DeckDesign {
+    let foundation: FoundationSpec = TUFFBLOCK_FOUNDATION;
+    if (overrides.blockSpacingMm !== undefined) {
+      foundation = { ...foundation, blockSpacingMm: overrides.blockSpacingMm };
+    }
+    return {
+      id: '00000000-0000-4000-8000-0000000000b5',
+      createdAt: '2026-07-04T00:00:00.000Z',
+      footprint: {
+        widthMm: (overrides.widthFt ?? 40) * MM_PER_FOOT,
+        lengthMm: (overrides.lengthFt ?? 40) * MM_PER_FOOT,
+        heightMm: 300,
+      },
+      structure: 'floating',
+      floatingFraming: 'joists-on-blocks',
+      beamConnection: 'drop',
+      foundation,
+      joist: { material: overrides.joist ?? PT_2X8, spacingMm: 610 }, // 24" o.c.
+      beam: { material: PT_2X8 }, // ignored for Method B
+      decking: { material: PT_54, orientation: 'parallel-to-width' },
+      layout: { bayRemainderStrategy: 'extra-bay-at-end' },
+    };
+  }
+
+  it('MAX blockSpacingMm (2438.4 mm) on 40×40 + 2×6 @ 24"oc → at least one over-span-joist warning (actualMm > allowableMm)', () => {
+    // 2×6 PT No.2 @ 24" o.c. allowable ≈ 1981 mm. MAX spacing
+    // (2438.4 mm) yields row-pitch ≤ 2438.4 (bounded by
+    // blockCountForAxis) — well above the 1981 mm allowable →
+    // over-span-joist MUST fire.
+    const design = makeMethodB({
+      widthFt: 40,
+      lengthFt: 40,
+      blockSpacingMm: 2438.4,
+      joist: PT_2X6,
+    });
+    const layout = computeLayout(design, { now: () => design.createdAt });
+    const warnings = spanCheck(layout, new IrcSpanTable());
+    const joistWarnings = warnings.filter(
+      (w) => w.kind === 'over-span-joist',
+    );
+    expect(joistWarnings.length).toBeGreaterThan(0);
+    for (const w of joistWarnings) {
+      expect(w.actualMm).toBeGreaterThan(w.allowableMm);
+    }
+  });
+
+  it('DEFAULT spacing (1220 mm) on the same 40×40 + 2×6 @ 24"oc → ZERO joist warnings (negative control)', () => {
+    // 1220 mm pitch is well within 2×6 PT allowable. Default
+    // spacing must never spurious-warn on a coherent design.
+    const design = makeMethodB({
+      widthFt: 40,
+      lengthFt: 40,
+      blockSpacingMm: 1220,
+      joist: PT_2X6,
+    });
+    const layout = computeLayout(design, { now: () => design.createdAt });
+    const warnings = spanCheck(layout, new IrcSpanTable());
+    const joistWarnings = warnings.filter(
+      (w) => w.kind === 'over-span-joist',
+    );
+    expect(joistWarnings).toEqual([]);
+  });
+
+  it('every joist is span-checked (no joist silently skipped when its x is NOT under a block column)', () => {
+    // With MAX spacing on 40×40, blockCountForAxis(12192, 2438.4) = 6
+    // columns (cols spread evenly across width). Joists at 24" o.c.
+    // = 21 joists — most will NOT sit exactly under a block column.
+    // The `deriveMethodBJoistSpanFromBlockGrid` helper derives span
+    // from ALL block z-positions (grid is regular), so every joist
+    // gets a real span check. Assert we get one warning per joist
+    // (proving no silent skip based on x-position).
+    const design = makeMethodB({
+      widthFt: 40,
+      lengthFt: 40,
+      blockSpacingMm: 2438.4,
+      joist: PT_2X6,
+    });
+    const layout = computeLayout(design, { now: () => design.createdAt });
+    const warnings = spanCheck(layout, new IrcSpanTable());
+    const joistWarnings = warnings.filter(
+      (w) => w.kind === 'over-span-joist',
+    );
+    // Extract memberIds — each joist has a unique id.
+    const uniqueJoistIds = new Set(joistWarnings.map((w) => w.memberId));
+    // At 24" spacing across 40 ft width there are ≈ 21 joists —
+    // every one over-spans at MAX blockSpacingMm. Assert we
+    // evaluated at least ~15 (a comfortable lower bound that
+    // catches a "silently skipped a bunch of joists" regression
+    // without brittle exact counts).
+    expect(uniqueJoistIds.size).toBeGreaterThanOrEqual(15);
+    // Every joist memberId starts with "joist-" — pins that we
+    // are actually checking joists (not beams / blocks).
+    for (const id of uniqueJoistIds) {
+      expect(id).toMatch(/^joist-/);
+    }
   });
 });

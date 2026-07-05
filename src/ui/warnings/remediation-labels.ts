@@ -105,10 +105,23 @@ function headlineFor(option: RemediationOption, units: UnitSystem): string {
       if (option.disabled) {
         return option.summary;
       }
-      // S25 (ticket #47) — reads as
-      // "Add a row of blocks (3 → 4)". The counts are POSITIONAL
-      // in the sentence (source-of-change → target) so screen
-      // readers and translators keep the order predictable.
+      // HIGH #3 (review — feat/block-spacing): when the producer
+      // supplied `proposedSpacingMm` (the ACTIVE Method-B path),
+      // render the length-based label — the user thinks in
+      // "block spacing", not row counts. The unit-aware
+      // `formatLength` handles imperial ⇄ metric.
+      if (
+        patch.currentSpacingMm !== undefined &&
+        patch.proposedSpacingMm !== undefined
+      ) {
+        const from = formatLength(patch.currentSpacingMm, units);
+        const to = formatLength(patch.proposedSpacingMm, units);
+        return `Reduce block spacing to add support (${from} → ${to})`;
+      }
+      // LEGACY path (pre-HIGH#3 producer): the count-based
+      // arrow — kept for backwards compat with any consumer that
+      // synthesizes an add-support-row patch without spacing
+      // fields.
       return `Add a row of blocks (${patch.currentRows} → ${patch.proposedRows})`;
     /* c8 ignore next 6 */
     default: {

@@ -46,6 +46,7 @@ interface Overrides {
   lengthFt?: number;
   spacingMm?: Mm;
   blockSpacingMm?: Mm;
+  blockRowsHint?: number;
 }
 
 /**
@@ -55,11 +56,13 @@ interface Overrides {
 function makeMethodB(overrides: Overrides = {}): DeckDesign {
   const widthMm = (overrides.widthFt ?? 16) * MM_PER_FOOT;
   const lengthMm = (overrides.lengthFt ?? 16) * MM_PER_FOOT;
-  const baseFoundation = TUFFBLOCK_FOUNDATION;
-  const foundation: FoundationSpec =
-    overrides.blockSpacingMm !== undefined
-      ? { ...baseFoundation, blockSpacingMm: overrides.blockSpacingMm }
-      : baseFoundation;
+  let foundation: FoundationSpec = TUFFBLOCK_FOUNDATION;
+  if (overrides.blockSpacingMm !== undefined) {
+    foundation = { ...foundation, blockSpacingMm: overrides.blockSpacingMm };
+  }
+  if (overrides.blockRowsHint !== undefined) {
+    foundation = { ...foundation, blockRowsHint: overrides.blockRowsHint };
+  }
   return {
     id: '00000000-0000-4000-8000-0000000000b2',
     createdAt: '2026-07-04T00:00:00.000Z',
@@ -194,8 +197,14 @@ describe('Method B block grid — placement invariants', () => {
     });
     const layout = computeFloatingLayout(design);
     const blocks = layout.members.filter((m) => m.kind === 'block');
-    const xs = new Set(blocks.map((b) => b.position.x));
-    const zs = new Set(blocks.map((b) => b.position.z));
+    // LOW cleanup (Opus #9, feat/block-spacing review): round to
+    // a mm-resolution key before Set-dedup. Raw float positions
+    // can carry sub-mm drift from arithmetic — a naive `new Set()`
+    // would spuriously classify two "identical" positions as
+    // distinct, breaking the regularity assertion.
+    const roundToMm = (v: number): number => Math.round(v * 1e3) / 1e3;
+    const xs = new Set(blocks.map((b) => roundToMm(b.position.x)));
+    const zs = new Set(blocks.map((b) => roundToMm(b.position.z)));
     // block count === (unique x count) × (unique z count) — the
     // hallmark of a regular grid (no missing / extra cells).
     expect(blocks.length).toBe(xs.size * zs.size);
@@ -275,6 +284,45 @@ describe('Method B block grid — clamp + cap defensive bounds', () => {
     expect(blocks.length).toBeLessThanOrEqual(MAX_METHOD_B_BLOCK_COUNT);
   });
 
+  it('HIGH #1 (review) — huge SCHEMA-LEGAL footprint at MIN spacing still respects the cap (100 × 100 ft)', () => {
+    // Pre-fix (iterative decrement loop with MAX_CAP_ITER=200): a
+    // 100 × 100 ft (30480 mm) deck at MIN_BLOCK_SPACING_MM=300
+    // derives ~102 × 102 = 10404 blocks; the O(N) shrink loop
+    // bails at 200 iterations having decremented cols+rows by 200
+    // → ends around 6100 blocks, VIOLATING the cap. The
+    // closed-form derivation (feat/block-spacing HIGH #1) picks
+    // an effective spacing floor so the cap holds by construction
+    // for EVERY schema-legal footprint.
+    const design = makeMethodB({
+      widthFt: 100, // MAX_DECK_DIMENSION_MM in ft
+      lengthFt: 100,
+      blockSpacingMm: MIN_BLOCK_SPACING_MM,
+    });
+    const layout = computeFloatingLayout(design);
+    const blocks = layout.members.filter((m) => m.kind === 'block');
+    expect(blocks.length).toBeLessThanOrEqual(MAX_METHOD_B_BLOCK_COUNT);
+    // Grid must remain sensible — perimeter-two floor preserved.
+    expect(blocks.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('HIGH #1 (review) — a NON-SQUARE huge footprint keeps ≥2 per axis under the cap (12 × 100 ft)', () => {
+    // 12 × 100 ft at MIN spacing wants ~5 × 102 = 510 blocks. The
+    // closed-form must keep BOTH axes ≥ 2 (a degenerate 1 × N or
+    // N × 1 grid would leave joists cantilevering off blocks).
+    const design = makeMethodB({
+      widthFt: 12,
+      lengthFt: 100,
+      blockSpacingMm: MIN_BLOCK_SPACING_MM,
+    });
+    const layout = computeFloatingLayout(design);
+    const blocks = layout.members.filter((m) => m.kind === 'block');
+    expect(blocks.length).toBeLessThanOrEqual(MAX_METHOD_B_BLOCK_COUNT);
+    const xs = new Set(blocks.map((b) => b.position.x));
+    const zs = new Set(blocks.map((b) => b.position.z));
+    expect(xs.size).toBeGreaterThanOrEqual(2);
+    expect(zs.size).toBeGreaterThanOrEqual(2);
+  });
+
   it('non-finite blockSpacingMm (NaN / Infinity) falls back to the default', () => {
     // NaN → default; Infinity → default. Both must produce a
     // sensible grid, not throw and not explode.
@@ -300,6 +348,74 @@ describe('Method B block grid — clamp + cap defensive bounds', () => {
     ).length;
     expect(nNaN).toBe(nDefault);
     expect(nInf).toBe(nDefault);
+  });
+
+  // ---------------------------------------------------------------
+  // SHOULD-FIX (QA MED#4): zero / negative blockSpacingMm clamps
+  // to MIN — the layout NEVER throws on adversarial input. Pins
+  // the trust-boundary guarantee at the top of resolveMethodBGrid.
+  // ---------------------------------------------------------------
+  it('SHOULD-FIX — zero blockSpacingMm clamps to MIN (grid stays sensible, no throw)', () => {
+    const design = makeMethodB({
+      widthFt: 16,
+      lengthFt: 16,
+      blockSpacingMm: 0,
+    });
+    // Compute must NOT throw; must produce ≥ 4 blocks (2×2 floor).
+    expect(() => computeFloatingLayout(design)).not.toThrow();
+    const blocks = computeFloatingLayout(design).members.filter(
+      (m) => m.kind === 'block',
+    );
+    expect(blocks.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('SHOULD-FIX — negative blockSpacingMm (-1, -1000) clamps to MIN (equivalent grid, no throw)', () => {
+    for (const bad of [-1, -1000]) {
+      const design = makeMethodB({
+        widthFt: 16,
+        lengthFt: 16,
+        blockSpacingMm: bad,
+      });
+      expect(() => computeFloatingLayout(design)).not.toThrow();
+      const blocks = computeFloatingLayout(design).members.filter(
+        (m) => m.kind === 'block',
+      );
+      // Same clamped behavior for every negative — hits MIN_BLOCK_SPACING_MM.
+      expect(blocks.length).toBeGreaterThanOrEqual(4);
+      // ≤ MAX_METHOD_B_BLOCK_COUNT (cap still holds).
+      expect(blocks.length).toBeLessThanOrEqual(400);
+    }
+  });
+
+  // ---------------------------------------------------------------
+  // SHOULD-FIX (QA MED#3, review): PRECEDENCE — when BOTH
+  // `blockSpacingMm` and the legacy `blockRowsHint` are set,
+  // spacing wins (the resolver's PRIMARY path). Pins the ticket's
+  // "blockSpacingMm > legacy hints" contract at the layout seam.
+  // ---------------------------------------------------------------
+  it('SHOULD-FIX — precedence: BOTH blockSpacingMm and blockRowsHint set → blockSpacingMm controls the grid', () => {
+    // Design A: blockSpacingMm=1220, blockRowsHint=10 (a bogus
+    // large hint the resolver MUST ignore).
+    const dBoth = makeMethodB({
+      widthFt: 16,
+      lengthFt: 16,
+      blockSpacingMm: 1220,
+      blockRowsHint: 10,
+    });
+    // Design B: blockSpacingMm=1220 alone.
+    const dSpacingOnly = makeMethodB({
+      widthFt: 16,
+      lengthFt: 16,
+      blockSpacingMm: 1220,
+    });
+    const nBoth = computeFloatingLayout(dBoth).members.filter(
+      (m) => m.kind === 'block',
+    ).length;
+    const nSpacingOnly = computeFloatingLayout(dSpacingOnly).members.filter(
+      (m) => m.kind === 'block',
+    ).length;
+    // Precedence: adding the hint MUST NOT change the grid.
+    expect(nBoth).toBe(nSpacingOnly);
   });
 });
 

@@ -184,7 +184,7 @@ export const MAX_BLOCKING_SPACING_MM: Mm = 1220;
  * pairs the default 1220 mm with an under-sized joist and the
  * span exceeds the IRC allowable, `spanCheck` will surface an
  * `over-span-joist` warning (see
- * `span-check.ts::deriveJoistSpanFromBlocks`) — the existing
+ * `span-check.ts::deriveMethodBJoistSpanFromBlockGrid`) — the existing
  * safety-critical machinery that already handles the previously-
  * pinned Method B model.
  */
@@ -208,16 +208,21 @@ export const DEFAULT_METHOD_B_BLOCK_SPACING_MM: Mm = 1220;
  *   - explode the persisted `.deck` file
  *   - crush the BOM output
  *
- * When the derived grid exceeds the cap, `computeMethodB`
- * inflates the effective spacing (in a bounded loop) until the
- * total count drops back under the cap. The user-facing effect:
- * a design that would draw 1681 blocks silently caps to ≤ 400 —
- * the design is still layout-legal (just coarser than requested).
+ * When the derived grid exceeds the cap, `resolveMethodBGrid`
+ * scales BOTH axes down proportionally in a single deterministic
+ * O(1) closed-form step (feat/block-spacing HIGH #1 — was an
+ * O(N) decrement loop pre-review; that loop bailed at 200 iters
+ * before reaching the floor for large footprints, VIOLATING the
+ * cap for 120 × 120 ft and above). The user-facing effect: a
+ * design that would draw 1681 blocks caps to ≤ 400 with the
+ * aspect ratio preserved — coarser than requested but never over
+ * the cap for ANY schema-legal footprint.
  *
  * Autonomous decision — reversible. If the cap changes, the
  * `blockSpacingMm below MIN clamps up` test in
  * `floating-block-spacing.test.ts` re-checks under-cap counts,
- * and the hard-cap test re-checks the invariant.
+ * and the hard-cap tests (including HIGH #1 huge-footprint pins)
+ * re-check the invariant.
  */
 export const MAX_METHOD_B_BLOCK_COUNT = 400;
 
@@ -242,10 +247,10 @@ export const MAX_METHOD_B_BLOCK_COUNT = 400;
  *      remediation behavior byte-identically — the remediation
  *      writes `blockRowsHint: currentRows + 1`, and the layout
  *      honors that when no spacingMm is set.
- *   3. **Cap** — if `cols * rows > MAX_METHOD_B_BLOCK_COUNT`,
- *      shrink the larger axis by 1 in a bounded loop until the
- *      total fits, respecting the perimeter-two minimum
- *      (cols ≥ 2 AND rows ≥ 2).
+ *   3. **Cap (closed-form)** — if `cols * rows >
+ *      MAX_METHOD_B_BLOCK_COUNT`, scale BOTH axes down
+ *      proportionally in a single deterministic O(1) step
+ *      preserving aspect ratio and the perimeter-two floor.
  *
  * ## Priority: blockSpacingMm > blockRowsHint / blockColsHint
  *
@@ -255,15 +260,27 @@ export const MAX_METHOD_B_BLOCK_COUNT = 400;
  * never combines them (it only writes the hint fields), so this
  * priority order does not regress any remediation behavior.
  *
- * ## Cap enforcement invariant
+ * ## Cap enforcement — closed-form (feat/block-spacing HIGH #1)
  *
- * Loop terminates because `cols + rows` strictly decreases each
- * iteration (or the perimeter-two floor stops us). When both
- * counts reach 2, total is 4 ≤ MAX_METHOD_B_BLOCK_COUNT and the
- * loop exits. Explicit MAX_CAP_ITER=200 bound defends against a
- * future arithmetic bug.
+ * Pre-fix (this PR — first commit) used an O(N) decrement loop
+ * bounded at MAX_CAP_ITER=200 iterations, which VIOLATED the cap
+ * for large footprints (proven by review: 120 × 120 ft →
+ * ~529 blocks; the loop bailed at 200 iters before reaching the
+ * floor). The fix replaces that iteration with a deterministic
+ * O(1) closed-form derivation:
+ *
+ *   - Preserve the requested aspect: `aspect = colsReq / rowsReq`.
+ *   - Solve `capRows * capCols ≤ MAX` under that aspect:
+ *     `capRows = floor(sqrt(MAX / aspect))`,
+ *     `capCols = floor(capRows * aspect)`.
+ *   - Clamp each axis to `≥ 2` (perimeter-two floor) and
+ *     `≤ desired` (never inflate).
+ *   - POSTCONDITION: `cols * rows ≤ MAX_METHOD_B_BLOCK_COUNT`
+ *     is asserted before return; a violation throws a
+ *     `LayoutError` (unreachable given the arithmetic — hard
+ *     `never` guard, not a runtime code path).
  */
-function resolveMethodBGrid(
+export function resolveMethodBGrid(
   widthMm: Mm,
   lengthMm: Mm,
   requestedSpacingMm: number | undefined,
@@ -298,25 +315,47 @@ function resolveMethodBGrid(
         : blockCountForAxis(lengthMm, defaultSpacing);
   }
 
-  // Hard cap enforcement. Shrink the larger axis by 1 per
-  // iteration; keep both axes ≥ perimeter-two (2). Loop bound
-  // is defensive — cols + rows strictly decreases each step so
-  // termination is guaranteed.
-  const MAX_CAP_ITER = 200;
-  let iter = 0;
-  while (
-    cols * rows > MAX_METHOD_B_BLOCK_COUNT &&
-    (cols > 2 || rows > 2) &&
-    iter < MAX_CAP_ITER
-  ) {
-    if (cols >= rows && cols > 2) {
-      cols -= 1;
-    } else if (rows > 2) {
-      rows -= 1;
-    } else {
-      break;
+  // Deterministic O(1) closed-form cap enforcement. Preserves the
+  // colsReq / rowsReq aspect (so the grid stays visually
+  // proportional to the footprint) and the perimeter-two floor
+  // (cols ≥ 2, rows ≥ 2). See doc-block "Cap enforcement" above
+  // for the derivation.
+  if (cols * rows > MAX_METHOD_B_BLOCK_COUNT) {
+    const aspect = cols / rows; // colsReq / rowsReq
+    // Solve rows² × aspect ≤ MAX → rows ≤ sqrt(MAX / aspect).
+    const capRowsFloat = Math.sqrt(MAX_METHOD_B_BLOCK_COUNT / aspect);
+    const capColsFloat = capRowsFloat * aspect;
+    // Floor to integer; clamp to ≥ 2 and ≤ original (never inflate).
+    let capRows = Math.max(2, Math.min(rows, Math.floor(capRowsFloat)));
+    let capCols = Math.max(2, Math.min(cols, Math.floor(capColsFloat)));
+    // Floor arithmetic in the two-axis solution can leave a tiny
+    // headroom the closed form couldn't consume (rare — happens
+    // when aspect is exactly rational and both floors land at the
+    // ceiling of the achievable product). If that headroom pushed
+    // capCols × capRows > MAX after floor + max clamp, tighten the
+    // LARGER axis by one — guaranteed to bring the product under
+    // (each side is ≥ 2, so shrinking one by 1 reduces product by
+    // at least the smaller axis's count ≥ 2). At most one shrink
+    // is ever needed by construction.
+    if (capCols * capRows > MAX_METHOD_B_BLOCK_COUNT) {
+      if (capCols >= capRows && capCols > 2) capCols -= 1;
+      else if (capRows > 2) capRows -= 1;
     }
-    iter += 1;
+    cols = capCols;
+    rows = capRows;
+  }
+
+  // Postcondition: the closed-form must produce a cap-legal grid
+  // for every finite input. A violation here indicates an
+  // arithmetic bug (not a valid runtime path); throw so the defect
+  // surfaces immediately rather than hiding behind a silently-too-
+  // dense grid.
+  /* c8 ignore next 5 */
+  if (cols * rows > MAX_METHOD_B_BLOCK_COUNT) {
+    throw new LayoutError(
+      `Internal invariant violated: Method B block count ${cols}×${rows} = ` +
+        `${cols * rows} exceeds MAX_METHOD_B_BLOCK_COUNT (${MAX_METHOD_B_BLOCK_COUNT}).`,
+    );
   }
 
   return { cols, rows };
@@ -532,7 +571,7 @@ function computeMethodA(design: DeckDesign): LayoutMember[] {
  * (per ticket guidance) — a real build would shim between joist
  * and block where the two disagree. `spanCheck` still derives the
  * joist's between-supports span from the block grid's row pitch
- * (see `deriveJoistSpanFromBlocks` in `span-check.ts`), so the
+ * (see `deriveMethodBJoistSpanFromBlockGrid` in `span-check.ts`), so the
  * IRC safety check remains intact.
  */
 function computeMethodB(design: DeckDesign): LayoutMember[] {

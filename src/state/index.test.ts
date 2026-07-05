@@ -54,4 +54,17 @@ describe('src/state/index.ts — frozen public surface', () => {
     expect('resetDesignStoreForTests' in StateBarrel).toBe(false);
     expect('flushAutosaveForTests' in StateBarrel).toBe(false);
   });
+
+  // ------------------------------------------------------------
+  // feat/block-spacing (review LOW: Opus #10) — pin the
+  // Method B constants re-exports so they cannot silently
+  // regress. Values are duplicated deliberately here — if the
+  // source ever changes the change must be witnessed twice.
+  // ------------------------------------------------------------
+  it('re-exports the Method B block-spacing constants (DEFAULT/MIN/MAX)', () => {
+    expect(StateBarrel.DEFAULT_METHOD_B_BLOCK_SPACING_MM).toBe(1220);
+    expect(StateBarrel.MIN_BLOCK_SPACING_MM).toBe(300);
+    // MAX = 8 ft in mm (2438.4).
+    expect(StateBarrel.MAX_BLOCK_SPACING_MM).toBeCloseTo(2438.4, 6);
+  });
 });
