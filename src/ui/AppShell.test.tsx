@@ -383,3 +383,336 @@ describe('<AppShell /> — CSS invariants (ticket §4 Edge cases)', () => {
     expect(screen.getByRole('note', { name: /product disclaimer/i })).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Bugfix — Independent pane scrolling (fix/independent-pane-scroll)
+//
+// Bug: when the right panel's content grew (many warnings + BOM + plan
+// view), the WHOLE PAGE scrolled and the 3D canvas got pushed off-screen.
+// Fix: on desktop (≥ 1024px), the shell is a FIXED-viewport-height layout;
+// each aside scrolls INTERNALLY (overflow-y:auto + min-height:0), main is
+// overflow:hidden, and the shell itself does not scroll (overflow:hidden).
+// On mobile (< 1024px, stacked), the shell can grow and the PAGE scrolls
+// as before.
+//
+// These invariants are enforced via source-file grep of `app-shell.css`,
+// following the existing pattern used by the WCAG 2.3.3 test above. A
+// pure-CSS overflow behaviour cannot be asserted from jsdom (no layout
+// engine), so we assert the CSS declarations that make the browser behave
+// correctly, plus the classNames the CSS targets are present in the DOM.
+// ---------------------------------------------------------------------------
+
+describe('<AppShell /> — independent pane scrolling (regression guard)', () => {
+  it('renders every classname the layout CSS targets (regression: renaming a class silently breaks the CSS)', () => {
+    const { container } = render(
+      <AppShell
+        leftPanel={<div data-testid="lp" />}
+        rightPanel={<div data-testid="rp" />}
+        main={<div data-testid="m" />}
+      />,
+    );
+    // The five CSS hooks the fix relies on. If any of these class
+    // names change in AppShell.tsx without also updating app-shell.css,
+    // the layout regresses to auto-height scrolling.
+    expect(container.querySelector('.wd-app-shell')).toBeTruthy();
+    expect(container.querySelector('.wd-app-shell__body')).toBeTruthy();
+    expect(container.querySelector('aside.wd-app-shell__left')).toBeTruthy();
+    expect(container.querySelector('aside.wd-app-shell__right')).toBeTruthy();
+    expect(container.querySelector('main.wd-app-shell__main')).toBeTruthy();
+  });
+});
+
+/**
+ * Utility — locate a CSS rule block by selector and return its declarations
+ * as a raw string. Uses a brace-aware scanner because a naïve regex would
+ * fail on nested media queries or pseudo-class blocks. If the selector
+ * appears more than once (e.g. once outside a media query and once inside),
+ * returns the concatenation of every block's declarations so an assertion
+ * against the combined text still catches the property.
+ *
+ * Search targets a top-level rule OR a rule at any nesting depth INSIDE
+ * the anchor block passed via `withinBlock` (defaults to the whole file).
+ *
+ * ## Comment stripping
+ *
+ * `/* ... *\/` blocks are removed BEFORE scanning so bare selectors like
+ * `html` or `body` don't false-match the words "html" or "body" appearing
+ * inside prose comments (e.g. "the body row is `minmax(0, 1fr)`"). Class
+ * selectors like `.wd-app-shell__body` are already unambiguous, but the
+ * strip is universal for defence in depth.
+ */
+function findRuleDeclarations(css: string, selector: string, withinBlock?: string): string {
+  const haystack = stripCssComments(withinBlock ?? css);
+  const pattern = new RegExp(
+    // Match the selector as a full selector-list token — allow other
+    // selectors joined by commas, but require our target selector to
+    // appear as a whole word (bounded by `,`, whitespace, or `{`).
+    `(?:^|[\\s,])${selector.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}[\\s,{]`,
+    'g',
+  );
+  let out = '';
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(haystack)) !== null) {
+    // Find the `{` that opens THIS rule's block. The match ends
+    // just past the selector; the next `{` at the current nesting
+    // level opens the block.
+    let i = match.index + match[0].length - 1;
+    while (i < haystack.length && haystack[i] !== '{') i += 1;
+    if (i >= haystack.length) continue;
+    i += 1; // move past `{`
+    // Walk to the matching `}` at depth 0.
+    let depth = 1;
+    const start = i;
+    while (i < haystack.length && depth > 0) {
+      const ch = haystack[i];
+      if (ch === '{') depth += 1;
+      else if (ch === '}') depth -= 1;
+      i += 1;
+    }
+    out += haystack.slice(start, i - 1) + '\n';
+    pattern.lastIndex = i;
+  }
+  return out;
+}
+
+/**
+ * Utility — strip C-style block comments (`/* ... *\/`) from a CSS source
+ * string so downstream selector-matching regexes don't false-match on
+ * words appearing inside prose comments. CSS has no line comments (only
+ * block), so a single pass is sufficient. `[\s\S]*?` is the non-greedy
+ * "any character including newline" pattern (the `.` in JS regex doesn't
+ * cross newlines by default).
+ */
+function stripCssComments(css: string): string {
+  return css.replace(/\/\*[\s\S]*?\*\//g, '');
+}
+
+/**
+ * Utility — extract the body of a `@media (min-width: 1024px)` block from
+ * the CSS. Returns the concatenation of every such block (there can be
+ * more than one) so a downstream assertion catches the property no matter
+ * which block declares it.
+ */
+function extractDesktopMediaBlock(css: string): string {
+  const source = stripCssComments(css);
+  const pattern = /@media\s*\(min-width:\s*1024px\)\s*\{/g;
+  let out = '';
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(source)) !== null) {
+    let depth = 1;
+    let i = match.index + match[0].length;
+    const start = i;
+    while (i < source.length && depth > 0) {
+      const ch = source[i];
+      if (ch === '{') depth += 1;
+      else if (ch === '}') depth -= 1;
+      i += 1;
+    }
+    out += source.slice(start, i - 1) + '\n';
+    pattern.lastIndex = i;
+  }
+  return out;
+}
+
+describe('<AppShell /> — independent pane scrolling CSS invariants (fix/independent-pane-scroll)', () => {
+  it('caps the shell at viewport height on desktop (≥ 1024px) so panel content does not grow the page', () => {
+    // ROOT INVARIANT of the fix. If the shell can grow beyond the
+    // viewport height on desktop, panel content pushes the 3D canvas
+    // off-screen and the whole page scrolls — the bug we are fixing.
+    // The desktop @media block must declare `height: 100vh` or
+    // `height: 100dvh` on `.wd-app-shell`.
+    const css = readCss('app-shell.css');
+    const desktop = extractDesktopMediaBlock(css);
+    expect(
+      desktop,
+      'app-shell.css must contain a @media (min-width: 1024px) block',
+    ).not.toBe('');
+    const shellRule = findRuleDeclarations(desktop, '.wd-app-shell');
+    expect(
+      shellRule,
+      '.wd-app-shell must have a rule inside @media (min-width: 1024px)',
+    ).not.toBe('');
+    // Accept either `100vh` or `100dvh` (or both — `100dvh` with a
+    // `100vh` fallback is the recommended progressive-enhancement
+    // pattern for iOS Safari where the URL bar changes viewport size).
+    expect(shellRule).toMatch(/height\s*:\s*100(vh|dvh)/);
+  });
+
+  it('clips the shell root on desktop so no child can push the page taller than the viewport', () => {
+    // Belt-and-braces alongside the height cap: if a child ever
+    // overflows the shell despite the height cap, `overflow: hidden`
+    // ensures the page still doesn't grow. Without this, a grid item
+    // whose min-content exceeds its track can visually spill.
+    const css = readCss('app-shell.css');
+    const desktop = extractDesktopMediaBlock(css);
+    const shellRule = findRuleDeclarations(desktop, '.wd-app-shell');
+    expect(shellRule).toMatch(/overflow\s*:\s*hidden/);
+  });
+
+  it('asides scroll internally on desktop (overflow-y: auto + min-height: 0)', () => {
+    // Grid/flex children need BOTH `overflow-y: auto` AND
+    // `min-height: 0` for internal scrolling to work. Without
+    // `min-height: 0`, the aside's min-content expands its track
+    // and the container grows instead of the aside scrolling.
+    const css = readCss('app-shell.css');
+    // The rule may live at top level (mobile default with a media
+    // override) or inside the desktop block — either way, the
+    // combined rule text must declare both properties for both asides.
+    const leftAll = findRuleDeclarations(css, '.wd-app-shell__left');
+    const rightAll = findRuleDeclarations(css, '.wd-app-shell__right');
+    // Overflow-y: auto MUST be present on desktop (either directly or
+    // via a shared rule the desktop @media doesn't override).
+    const desktop = extractDesktopMediaBlock(css);
+    const leftDesktop =
+      findRuleDeclarations(desktop, '.wd-app-shell__left') + '\n' + leftAll;
+    const rightDesktop =
+      findRuleDeclarations(desktop, '.wd-app-shell__right') + '\n' + rightAll;
+    expect(leftDesktop).toMatch(/overflow-y\s*:\s*auto/);
+    expect(rightDesktop).toMatch(/overflow-y\s*:\s*auto/);
+    expect(leftDesktop).toMatch(/min-height\s*:\s*0/);
+    expect(rightDesktop).toMatch(/min-height\s*:\s*0/);
+  });
+
+  it('main clips its content on desktop (overflow: hidden) so the 3D canvas never contributes to page height', () => {
+    // The r3f <Canvas> fills its parent. Without overflow: hidden
+    // on main, a canvas sized in mm world units could visually
+    // expand main and defeat the fixed-viewport layout.
+    const css = readCss('app-shell.css');
+    const mainRule = findRuleDeclarations(css, '.wd-app-shell__main');
+    expect(mainRule).toMatch(/overflow\s*:\s*hidden/);
+    expect(mainRule).toMatch(/min-height\s*:\s*0/);
+  });
+
+  it('body wrapper declares min-height: 0 so its grid track can shrink below content min (grid quirk)', () => {
+    // Without this, a grid item's default `min-height: auto` forces
+    // the track to be at least the content's min height, blowing out
+    // the fixed viewport layout.
+    const css = readCss('app-shell.css');
+    const bodyRule = findRuleDeclarations(css, '.wd-app-shell__body');
+    expect(bodyRule).toMatch(/min-height\s*:\s*0/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Code-review pair-fix — html/body document lock + explicit grid-row pin
+//
+// Bug (found by live-browser code review, missed by the first iteration):
+// even with `.wd-app-shell { overflow: hidden; height: 100vh }`, the
+// DOCUMENT (html/body) could still scroll on desktop via keyboard
+// (PageDown / End / arrows) or wheel-over-header. Confirmed live: pressing
+// End at 1400×800 shifted the whole shell off-screen. Root cause:
+// `overflow: hidden` on the shell only stops the SHELL from scrolling; it
+// does not stop html/body/document from scrolling if their computed height
+// exceeds the viewport (default body margins, layout rounding, focused
+// elements requesting scrollIntoView, etc.).
+//
+// Fix: in the desktop @media block, add `html, body { overflow: hidden;
+// margin: 0; height: 100%; }` so the DOCUMENT itself is a fixed 100 %
+// non-scrollable box, then the shell (100vh, overflow:hidden) fills it
+// exactly. Mobile intentionally does NOT get this lock — the page still
+// scrolls in the stacked layout.
+//
+// Second issue: the shell's `grid-template-rows: auto auto auto auto
+// minmax(0, 1fr)` documents body-in-track-5, but StorageBanner /
+// ContextLostBanner / MigrationToast return null on the happy path, so
+// grid auto-placement puts body in track 3 (or 4). Live probe confirmed
+// `grid-template-rows: 53px 65px 682px 0px 0px` — the body was in
+// track 3. Explicitly pin `.wd-app-shell__body { grid-row: 5 / 6; }` so
+// the CSS matches the docstring and the layout is robust to future banner
+// additions.
+// ---------------------------------------------------------------------------
+
+describe('<AppShell /> — document-scroll lock (code-review HIGH #1)', () => {
+  it('locks html/body scroll on desktop so PageDown/End/wheel-over-header cannot shift the shell', () => {
+    // Without `html, body { overflow: hidden }`, keyboard scroll
+    // (PageDown / End / arrows) and wheel-over-non-scrollable-area
+    // scroll the DOCUMENT — the shell then shifts up and the 3D
+    // canvas top clips off-screen. `.wd-app-shell { overflow: hidden }`
+    // alone does NOT stop document scroll; the document is a
+    // separate scroll container.
+    const css = readCss('app-shell.css');
+    const desktop = extractDesktopMediaBlock(css);
+    // The rule may be `html, body { ... }` OR `body, html { ... }` OR
+    // two separate rules — we care that BOTH selectors get
+    // `overflow: hidden` inside the desktop block.
+    const htmlRule = findRuleDeclarations(desktop, 'html');
+    const bodyRule = findRuleDeclarations(desktop, 'body');
+    expect(
+      htmlRule,
+      'app-shell.css @media (min-width: 1024px) must declare an `html` rule so the document root cannot scroll',
+    ).not.toBe('');
+    expect(
+      bodyRule,
+      'app-shell.css @media (min-width: 1024px) must declare a `body` rule so the document body cannot scroll',
+    ).not.toBe('');
+    expect(htmlRule).toMatch(/overflow\s*:\s*hidden/);
+    expect(bodyRule).toMatch(/overflow\s*:\s*hidden/);
+  });
+
+  it('zeroes body margin on desktop so 100vh + default 8px margin does not overflow the viewport', () => {
+    // Browsers default `<body>` to `margin: 8px`. With the shell at
+    // `height: 100vh`, the total body content is 100vh + 16px, and
+    // the html scrollbar activates. Zeroing the margin removes this
+    // 16px overhang. `height: 100%` on html+body ensures the
+    // sizing chain (viewport → html → body → shell) is bounded top-to-
+    // bottom rather than relying on 100vh alone.
+    const css = readCss('app-shell.css');
+    const desktop = extractDesktopMediaBlock(css);
+    const htmlRule = findRuleDeclarations(desktop, 'html');
+    const bodyRule = findRuleDeclarations(desktop, 'body');
+    expect(bodyRule).toMatch(/margin\s*:\s*0/);
+    expect(htmlRule).toMatch(/height\s*:\s*100%/);
+    expect(bodyRule).toMatch(/height\s*:\s*100%/);
+  });
+
+  it('does NOT lock the document on mobile — page must remain scrollable in the stacked layout', () => {
+    // On mobile the shell is `min-height: 100vh` (grows with content)
+    // and the PAGE scrolls. Locking html/body scroll on mobile would
+    // make the shell content unreachable. Assert the html/body lock
+    // lives ONLY inside the desktop @media block, not at top level.
+    const css = readCss('app-shell.css');
+    // Extract the CSS with every desktop @media block STRIPPED (mirror
+    // of the WCAG-2.3.3 test's stripGuardedMotionBlocks approach).
+    const withoutDesktop = css.replace(
+      /@media\s*\(min-width:\s*1024px\)\s*\{[\s\S]*?\n\}/g,
+      '',
+    );
+    // Search for any top-level html/body rule with overflow: hidden.
+    // If we find one, the mobile layout is unintentionally locked.
+    const topLevelHtml = findRuleDeclarations(withoutDesktop, 'html');
+    const topLevelBody = findRuleDeclarations(withoutDesktop, 'body');
+    expect(topLevelHtml).not.toMatch(/overflow\s*:\s*hidden/);
+    expect(topLevelBody).not.toMatch(/overflow\s*:\s*hidden/);
+  });
+});
+
+describe('<AppShell /> — explicit body grid-row pin (code-review MED #2)', () => {
+  it('pins .wd-app-shell__body to grid-row 5 / 6 so it always lands in the 1fr track', () => {
+    // Auto-placement is unreliable: StorageBanner, ContextLostBanner,
+    // and MigrationToast all return null on the happy path, so the
+    // number of grid children in flow varies from 3 (happy) to 6+
+    // (banners active + WebGL lost). Without a pin, the body
+    // auto-places in whichever track comes next in DOM order —
+    // usually track 3, not track 5. Live probe confirmed
+    // `grid-template-rows: 53px 65px 682px 0px 0px` for the happy
+    // path: body in track 3, minmax(0, 1fr) track 5 empty.
+    //
+    // The pin `grid-row: 5 / 6` (row-start 5, row-end 6) forces body
+    // to always occupy the 1fr track. The chrome tracks (1..4) auto-
+    // place the banners as they come in; empty tracks collapse to
+    // 0 height because they are all `auto` with no content.
+    const css = readCss('app-shell.css');
+    const bodyRule = findRuleDeclarations(css, '.wd-app-shell__body');
+    // Accept `grid-row: 5 / 6` (shorthand) OR
+    // `grid-row-start: 5` + `grid-row-end: 6` (long-hand) — both
+    // are semantically equivalent.
+    const hasShorthandPin = /grid-row\s*:\s*5\s*\/\s*6/.test(bodyRule);
+    const hasLonghandPin =
+      /grid-row-start\s*:\s*5/.test(bodyRule) &&
+      /grid-row-end\s*:\s*6/.test(bodyRule);
+    expect(
+      hasShorthandPin || hasLonghandPin,
+      '.wd-app-shell__body must pin grid-row: 5 / 6 (or long-hand equivalent) so the body always lands in the minmax(0, 1fr) track regardless of which banners are active',
+    ).toBe(true);
+  });
+});
