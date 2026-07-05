@@ -1,12 +1,15 @@
 /**
- * `src/ui/LayerTogglePanel.tsx` — S14 issue #15 AC1..AC3 + AC12.
+ * `src/ui/LayerTogglePanel.tsx` — S14 issue #15 AC1..AC3 + AC12
+ * (extended by S26 issue #48 for blocks + blocking rows).
  *
  * ## Responsibility (single)
  *
  * The rightPanel's first section:
  *
- *   1. Six labelled checkboxes bound to
- *      `useUiStore.layerVisibility` (one per LayerVisibility key).
+ *   1. One labelled checkbox per `LayerVisibility` key, bound to
+ *      `useUiStore.layerVisibility`. The set of rows is driven by
+ *      `LAYER_ITEMS` — adding a layer to the union + a row there
+ *      lights up automatically here.
  *   2. A "Show all" / "Hide all" pair that flips every layer in
  *      one action.
  *   3. Five preset-view buttons (Orbit / Top / Front / Side / Iso)
@@ -68,8 +71,9 @@ import { LAYER_ITEMS, PRESET_ITEMS } from './layer-toggle-items';
 // ---------------------------------------------------------------------------
 
 /**
- * The six-checkbox + bulk-action + preset-view panel. See module
- * header for the ordering + a11y contract.
+ * The layer-checkbox + bulk-action + preset-view panel. See module
+ * header for the ordering + a11y contract. The checkbox rows are
+ * driven by `LAYER_ITEMS` — one row per `LayerVisibility` key.
  */
 export function LayerTogglePanel(): JSX.Element {
   const visibility = useLayerVisibility();
@@ -83,7 +87,8 @@ export function LayerTogglePanel(): JSX.Element {
       <h2 id="wd-layer-toggle-panel__title">Layers &amp; view</h2>
 
       {/*
-       * Six checkboxes. Each label wraps its input so the click
+       * One checkbox per `LayerVisibility` key (driven by
+       * `LAYER_ITEMS`). Each label wraps its input so the click
        * target extends over the full row (no htmlFor/id plumbing).
        * `aria-label` on the checkbox is redundant with the wrapping
        * label text but keeps axe-core happy in case a future CSS
