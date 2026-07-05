@@ -79,14 +79,21 @@ export function patchFromRemediation(
         beam: { material: { species: patch.newSpecies, grade: 'No2' } },
       };
     case 'add-support-row':
-      // S25 (ticket #47) — bump the block-row hint on the
-      // foundation. The whitelist entry in
-      // `apply-parameters.KNOWN_OPTIONAL_LEAF_KEYS` allows this
-      // key even when the current foundation has no such
-      // property yet (typical — hint is undefined on freshly
-      // parametrized designs). Only meaningful on `deck-blocks`
-      // / `tuffblocks` — `produceAddSupportRow` guards emission
-      // and won't produce this patch for `posts-on-footings`.
+      // HIGH #3 (review — feat/block-spacing): the ACTIVE
+      // Method B path dispatches `blockSpacingMm` (the
+      // spacing-primary source of truth). The pre-HIGH#3 path
+      // (undefined `proposedSpacingMm`) still dispatches the
+      // legacy `blockRowsHint` so any consumer that synthesizes
+      // a patch without spacing fields still works. The
+      // whitelist entries `foundation.blockSpacingMm` +
+      // `foundation.blockRowsHint` in
+      // `apply-parameters.KNOWN_OPTIONAL_LEAF_KEYS` allow either
+      // key to be added to a foundation that currently lacks it.
+      if (patch.proposedSpacingMm !== undefined) {
+        return {
+          foundation: { blockSpacingMm: patch.proposedSpacingMm },
+        };
+      }
       return {
         foundation: { blockRowsHint: patch.proposedRows },
       };

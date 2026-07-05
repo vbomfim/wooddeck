@@ -79,13 +79,14 @@ import { MM_PER_FOOT, type Mm } from '../../units';
 import { assertNever } from '../../assert-never';
 import {
   LayoutError,
+  MAX_DECK_DIMENSION_MM,
   MIN_DECK_DIMENSION_MM,
   validateFlushBeamDepth,
   validateJoistSpacing,
 } from '../layout-shared';
 import { FOOTING_WIDTH_MM } from '../y-stack';
 
-import { computeBlockGrid } from './block-grid';
+import { computeAxisCenters, blockCountForAxis, clampBlockSpacingMm, computeBlockGrid, MIN_BLOCK_SPACING_MM } from './block-grid';
 import { computeFloatingRimBeams } from './floating-beam-layout';
 import { layoutFloatingDecking } from './floating-decking';
 import { layoutFloatingJoists } from './floating-joist-layout';
@@ -135,6 +136,259 @@ export const BLOCK_ROW_MAX_SPACING_MM: Mm = BLOCK_ROW_MAX_SPACING_MM_PRACTICAL;
  * has a stable import name to use.
  */
 export const MAX_BLOCKING_SPACING_MM: Mm = 1220;
+
+/**
+ * feat/block-spacing — DEFAULT distance between adjacent foundation
+ * blocks (grid PITCH, mm) applied when a Method B design does NOT
+ * carry `foundation.blockSpacingMm`.
+ *
+ * ## Value rationale (1220 mm = 4 ft)
+ *
+ * 4 ft is a common DIY ground-level default: dense enough to keep
+ * a 2× joist well within the IRC R507.6 allowable (2×8 PT No.2 @
+ * 16″ o.c. is ~2565 mm allowable, well above 1220 mm), sparse
+ * enough that a 16 × 16 ft deck produces a manageable 5 × 5 = 25
+ * blocks (vs the pre-fix ~150 in the "one block per joist × many
+ * rows" model). The DIY-carpentry norm places blocks/piers at 3
+ * to 6 ft along the joist run — 4 ft sits comfortably in the
+ * middle.
+ *
+ * ## Why not tighter (610 mm ≈ 24″)?
+ *
+ * A 24″ default gives 9 × 9 = 81 blocks on the same 16 ft deck.
+ * That's still a big improvement over the pre-fix ~150, but it
+ * doesn't match the "sensible ground-level" ticket guidance —
+ * 24″ is the density used under a full-load rim beam (Method A),
+ * NOT under a mid-joist support (which is what Method B blocks
+ * are). The default MUST balance "reads well" with "isn't
+ * needlessly dense."
+ *
+ * ## Why not looser (1830 mm = 6 ft)?
+ *
+ * A 6 ft default gives 3 × 3 = 9 blocks and pushes the joist
+ * span to 6 ft (1830 mm) — still within the 2×8 @ 16″ o.c.
+ * allowable (2565 mm) but tight for a 2×6 (1934 mm). The 1220 mm
+ * default is safer against joist under-sizing.
+ *
+ * ## Reversibility
+ *
+ * Autonomous decision — reversible by editing this constant. If
+ * the value changes, `floating-block-spacing.test.ts` PINS the
+ * "16 × 16 ft → 25 blocks" expectation; a delta re-derives the
+ * expected count.
+ *
+ * ## Safety net when the default over-spans
+ *
+ * The default is NOT auto-clamped to the design's IRC allowable
+ * (which would require a `SpanTable` at layout time — not always
+ * available; the `.deck` schema does not carry one). If a user
+ * pairs the default 1220 mm with an under-sized joist and the
+ * span exceeds the IRC allowable, `spanCheck` will surface an
+ * `over-span-joist` warning (see
+ * `span-check.ts::deriveMethodBJoistSpanFromBlockGrid`) — the existing
+ * safety-critical machinery that already handles the previously-
+ * pinned Method B model.
+ */
+export const DEFAULT_METHOD_B_BLOCK_SPACING_MM: Mm = 1220;
+
+/**
+ * feat/block-spacing — HARD CAP on the total block count a Method
+ * B layout will ever emit, regardless of the user's requested
+ * `foundation.blockSpacingMm` or the derived grid.
+ *
+ * ## Value rationale (400)
+ *
+ * 400 is generous enough that a physically-sensible user input
+ * never trips it (a 40 × 40 ft deck at the tightest legal
+ * spacing MIN_BLOCK_SPACING_MM=300 mm derives ~41 × 41 = 1681
+ * blocks — that's 4× the cap, and physically absurd; a 30 × 30
+ * ft deck at 610 mm ≈ 15 × 15 = 225 blocks — well under). The
+ * cap defends against pathological inputs that would otherwise:
+ *
+ *   - stall the scene renderer (r3f instances a mesh per block)
+ *   - explode the persisted `.deck` file
+ *   - crush the BOM output
+ *
+ * When the derived grid exceeds the cap, `resolveMethodBGrid`
+ * scales BOTH axes down proportionally in a single deterministic
+ * O(1) closed-form step (feat/block-spacing HIGH #1 — was an
+ * O(N) decrement loop pre-review; that loop bailed at 200 iters
+ * before reaching the floor for large footprints, VIOLATING the
+ * cap for 120 × 120 ft and above). The user-facing effect: a
+ * design that would draw 1681 blocks caps to ≤ 400 with the
+ * aspect ratio preserved — coarser than requested but never over
+ * the cap for ANY schema-legal footprint.
+ *
+ * Autonomous decision — reversible. If the cap changes, the
+ * `blockSpacingMm below MIN clamps up` test in
+ * `floating-block-spacing.test.ts` re-checks under-cap counts,
+ * and the hard-cap tests (including HIGH #1 huge-footprint pins)
+ * re-check the invariant.
+ */
+export const MAX_METHOD_B_BLOCK_COUNT = 400;
+
+/**
+ * feat/block-spacing — Method B grid resolver. Pure — same input
+ * yields same output.
+ *
+ * Turns a REQUESTED spacing + legacy hints (any of them possibly
+ * absent) into `{ cols, rows }` for a Method B block grid on the
+ * given footprint. The sequence:
+ *
+ *   1. **Primary path** — `foundation.blockSpacingMm` set and
+ *      finite: clamp to
+ *      `[MIN_BLOCK_SPACING_MM, MAX_BLOCK_SPACING_MM]`, then
+ *      derive per-axis counts via `blockCountForAxis`
+ *      (ceil-based so adjacent-gap ≤ spacing).
+ *   2. **Legacy fallback** — `blockSpacingMm` absent/non-finite:
+ *      derive counts from `DEFAULT_METHOD_B_BLOCK_SPACING_MM`
+ *      (1220 mm), with `foundation.blockRowsHint` /
+ *      `blockColsHint` (S25 / ticket #47) taking per-axis
+ *      overrides. This preserves S25's `add-support-row`
+ *      remediation behavior byte-identically — the remediation
+ *      writes `blockRowsHint: currentRows + 1`, and the layout
+ *      honors that when no spacingMm is set.
+ *   3. **Cap (closed-form)** — if `cols * rows >
+ *      MAX_METHOD_B_BLOCK_COUNT`, scale BOTH axes down
+ *      proportionally in a single deterministic O(1) step
+ *      preserving aspect ratio and the perimeter-two floor.
+ *
+ * ## Priority: blockSpacingMm > blockRowsHint / blockColsHint
+ *
+ * When BOTH are present, `blockSpacingMm` wins on both axes. This
+ * is the "new user-facing field takes precedence over legacy
+ * remediation-machinery hints" invariant. The S25 remediation
+ * never combines them (it only writes the hint fields), so this
+ * priority order does not regress any remediation behavior.
+ *
+ * ## Cap enforcement — closed-form (feat/block-spacing HIGH #1)
+ *
+ * Pre-fix (this PR — first commit) used an O(N) decrement loop
+ * bounded at MAX_CAP_ITER=200 iterations, which VIOLATED the cap
+ * for large footprints (proven by review: 120 × 120 ft →
+ * ~529 blocks; the loop bailed at 200 iters before reaching the
+ * floor). The fix replaces that iteration with a deterministic
+ * O(1) closed-form derivation:
+ *
+ *   - Preserve the requested aspect: `aspect = colsReq / rowsReq`.
+ *   - Solve `capRows * capCols ≤ MAX` under that aspect:
+ *     `capRows = floor(sqrt(MAX / aspect))`,
+ *     `capCols = floor(capRows * aspect)`.
+ *   - Clamp each axis to `≥ 2` (perimeter-two floor) and
+ *     `≤ desired` (never inflate).
+ *   - POSTCONDITION: `cols * rows ≤ MAX_METHOD_B_BLOCK_COUNT`
+ *     is asserted before return; a violation throws a
+ *     `LayoutError` (unreachable given the arithmetic — hard
+ *     `never` guard, not a runtime code path).
+ */
+export function resolveMethodBGrid(
+  widthMm: Mm,
+  lengthMm: Mm,
+  requestedSpacingMm: number | undefined,
+  legacyRowsHint: number | undefined,
+  legacyColsHint: number | undefined,
+): { cols: number; rows: number } {
+  let cols: number;
+  let rows: number;
+
+  if (
+    requestedSpacingMm !== undefined &&
+    Number.isFinite(requestedSpacingMm)
+  ) {
+    // Primary path — blockSpacingMm is the source of truth.
+    const s =
+      clampBlockSpacingMm(requestedSpacingMm) ??
+      DEFAULT_METHOD_B_BLOCK_SPACING_MM;
+    cols = blockCountForAxis(widthMm, s);
+    rows = blockCountForAxis(lengthMm, s);
+  } else {
+    // Legacy fallback — default spacing, with S25 hint per-axis
+    // overrides (preserves the add-support-row remediation
+    // seam byte-identically).
+    const defaultSpacing = DEFAULT_METHOD_B_BLOCK_SPACING_MM;
+    cols =
+      legacyColsHint !== undefined
+        ? resolveHintCount(legacyColsHint, widthMm)
+        : blockCountForAxis(widthMm, defaultSpacing);
+    rows =
+      legacyRowsHint !== undefined
+        ? resolveHintCount(legacyRowsHint, lengthMm)
+        : blockCountForAxis(lengthMm, defaultSpacing);
+  }
+
+  // Deterministic O(1) closed-form cap enforcement. Preserves the
+  // colsReq / rowsReq aspect (so the grid stays visually
+  // proportional to the footprint) and the perimeter-two floor
+  // (cols ≥ 2, rows ≥ 2). See doc-block "Cap enforcement" above
+  // for the derivation.
+  if (cols * rows > MAX_METHOD_B_BLOCK_COUNT) {
+    const aspect = cols / rows; // colsReq / rowsReq
+    // Solve rows² × aspect ≤ MAX → rows ≤ sqrt(MAX / aspect).
+    const capRowsFloat = Math.sqrt(MAX_METHOD_B_BLOCK_COUNT / aspect);
+    const capColsFloat = capRowsFloat * aspect;
+    // Floor to integer; clamp to ≥ 2 and ≤ original (never inflate).
+    let capRows = Math.max(2, Math.min(rows, Math.floor(capRowsFloat)));
+    let capCols = Math.max(2, Math.min(cols, Math.floor(capColsFloat)));
+    // Floor arithmetic in the two-axis solution can leave a tiny
+    // headroom the closed form couldn't consume (rare — happens
+    // when aspect is exactly rational and both floors land at the
+    // ceiling of the achievable product). If that headroom pushed
+    // capCols × capRows > MAX after floor + max clamp, tighten the
+    // LARGER axis by one — guaranteed to bring the product under
+    // (each side is ≥ 2, so shrinking one by 1 reduces product by
+    // at least the smaller axis's count ≥ 2). At most one shrink
+    // is ever needed by construction.
+    if (capCols * capRows > MAX_METHOD_B_BLOCK_COUNT) {
+      if (capCols >= capRows && capCols > 2) capCols -= 1;
+      else if (capRows > 2) capRows -= 1;
+    }
+    cols = capCols;
+    rows = capRows;
+  }
+
+  // Postcondition: the closed-form must produce a cap-legal grid
+  // for every finite input. A violation here indicates an
+  // arithmetic bug (not a valid runtime path); throw so the defect
+  // surfaces immediately rather than hiding behind a silently-too-
+  // dense grid.
+  /* c8 ignore next 5 */
+  if (cols * rows > MAX_METHOD_B_BLOCK_COUNT) {
+    throw new LayoutError(
+      `Internal invariant violated: Method B block count ${cols}×${rows} = ` +
+        `${cols * rows} exceeds MAX_METHOD_B_BLOCK_COUNT (${MAX_METHOD_B_BLOCK_COUNT}).`,
+    );
+  }
+
+  return { cols, rows };
+}
+
+/**
+ * Legacy S25 hint → integer count, applying the SAME clamp
+ * `computeBlockGrid.resolveGridCount` uses. Mirrors that helper
+ * verbatim so the Method B fallback path stays byte-identical
+ * to the pre-feat/block-spacing behavior for a hint-carrying
+ * design.
+ *
+ *   - Non-finite → treated as "no hint" (caller substitutes the
+ *     default derivation, never reaches this branch).
+ *   - Clamped to `[2, floor(spanMm / MIN_BLOCK_SPACING_MM) + 1]`.
+ *   - Non-integer values rounded DOWN before clamping (`Math.floor`).
+ *
+ * The `resolveGridCount` export from `block-grid.ts` cannot be
+ * reused directly here because its second argument is `spanMm` and
+ * its third is `maxSpacingMm` (used for the "no hint" fallback),
+ * whereas our fallback here is `DEFAULT_METHOD_B_BLOCK_SPACING_MM`
+ * — not the same semantics. Duplicating the ~4 lines of clamp
+ * logic is cheaper than complicating the shared helper's contract.
+ */
+function resolveHintCount(hint: number, spanMm: Mm): number {
+  if (!Number.isFinite(hint)) {
+    return blockCountForAxis(spanMm, DEFAULT_METHOD_B_BLOCK_SPACING_MM);
+  }
+  const maxCount = Math.floor(spanMm / MIN_BLOCK_SPACING_MM) + 1;
+  const asInt = Math.floor(hint);
+  return Math.max(2, Math.min(asInt, maxCount));
+}
 
 /**
  * Options for `computeFloatingLayout` — extends the elevated
@@ -279,42 +533,85 @@ function computeMethodA(design: DeckDesign): LayoutMember[] {
 /**
  * Method B layout — joists directly on blocks; NO beam layer.
  *
- * ## Block grid — Method B
+ * ## Block grid — Method B (feat/block-spacing rework)
  *
- *   - **Columns (along +x):** one block per joist x-center.
- *     Passed as `explicitColXCenters` so every joist has direct
- *     block-bearing along its length. Reversible: a coarser
- *     "col under every other joist" variant would still be
- *     span-legal for tighter joist spacings but the honest
- *     one-block-per-joist model matches the ticket's guidance to
- *     "pick the simplest honest model." Documented in the PR body.
- *   - **Rows (along +z):** derived from
- *     `ceil(lengthMm / BLOCK_ROW_MAX_SPACING_MM_PRACTICAL) + 1`
- *     (subject to `blockRowsHint`). Bounds the along-joist block
- *     gap to keep each joist well-supported.
+ *   - **User-controlled grid pitch** — the user sets
+ *     `foundation.blockSpacingMm` (mm); the layout builds a
+ *     REGULAR grid at that pitch on BOTH axes, anchored so the
+ *     outer blocks lie at the footprint edges (same
+ *     `computeAxisCenters` anchor formula Method A uses).
+ *   - **Absent field** — apply DEFAULT_METHOD_B_BLOCK_SPACING_MM
+ *     (1220 mm ≈ 4 ft) so a user who hasn't set the field yet
+ *     still sees a sensible ground-level grid.
+ *   - **Per-axis count** — `blockCountForAxis(span, spacing) =
+ *     max(2, ceil(span / spacing) + 1)` → adjacent-gap ≤ spacing
+ *     invariant guaranteed.
+ *   - **Clamp** — user input is clamped to
+ *     `[MIN_BLOCK_SPACING_MM (300 mm), MAX_BLOCK_SPACING_MM
+ *     (2438.4 mm ≈ 8 ft)]` in `clampBlockSpacingMm`.
+ *   - **Hard cap** — total block count is capped at
+ *     MAX_METHOD_B_BLOCK_COUNT (400); the resolver widens the
+ *     effective spacing (bounded loop) until the count fits.
+ *
+ * ## Why this replaces the pre-fix "one block per joist" model
+ *
+ * Pre-fix the block columns were pinned to the joist x-centers
+ * (`explicitColXCenters = joists.map(j => j.position.x)`),
+ * producing N columns × M rows = ~150 blocks on a 16 ft × 16 ft
+ * deck at 16″ o.c. joist spacing. The UAT report ("adds too many
+ * blocks; ask the distance between blocks") drove the rework:
+ * decouple block count from joist count, expose the grid pitch
+ * as a user parameter.
+ *
+ * ## Joists no longer sit exactly on a block column
+ *
+ * A subtle consequence of the rework: joist x-centers no longer
+ * align with block columns (they're at
+ * `computeJoistXCenters(design)` spacing; blocks are at the grid
+ * pitch). The design remains an "illustrative / planning" model
+ * (per ticket guidance) — a real build would shim between joist
+ * and block where the two disagree. `spanCheck` still derives the
+ * joist's between-supports span from the block grid's row pitch
+ * (see `deriveMethodBJoistSpanFromBlockGrid` in `span-check.ts`), so the
+ * IRC safety check remains intact.
  */
 function computeMethodB(design: DeckDesign): LayoutMember[] {
   if (design.foundation.type === 'posts-on-footings') {
     throw new LayoutError('unreachable: posts-on-footings in Method B');
   }
-  const joists = layoutFloatingJoists(design);
-  // One block per joist x-center — see Method B docstring for
-  // reversibility rationale.
-  const explicitColXCenters = joists.map((j) => j.position.x);
+  const widthMm = design.footprint.widthMm;
+  const lengthMm = design.footprint.lengthMm;
+
+  // Resolve the effective grid (spacing → cols × rows), applying
+  // default / clamp / hard-cap AND (legacy fallback) the S25
+  // blockRowsHint / blockColsHint when blockSpacingMm is absent.
+  // See resolveMethodBGrid docstring for the priority order.
+  const { cols, rows } = resolveMethodBGrid(
+    widthMm,
+    lengthMm,
+    design.foundation.blockSpacingMm,
+    design.foundation.blockRowsHint,
+    design.foundation.blockColsHint,
+  );
+
+  // Anchor centers via computeAxisCenters — outer blocks sit at
+  // ±spanMm/2 (byte-consistent with Method A's rim-beam anchoring).
+  const xCenters = computeAxisCenters(widthMm, cols);
+  const zCenters = computeAxisCenters(lengthMm, rows);
 
   const blocks = computeBlockGrid({
-    footprintMm: {
-      widthMm: design.footprint.widthMm,
-      lengthMm: design.footprint.lengthMm,
-    },
+    footprintMm: { widthMm, lengthMm },
     foundation: design.foundation,
-    // `beamSpanMaxMm` is unused when `explicitColXCenters` is
-    // supplied; validator requires > 0.
-    beamSpanMaxMm: BLOCK_ROW_MAX_SPACING_MM_PRACTICAL,
-    joistSpanMaxMm: BLOCK_ROW_MAX_SPACING_MM_PRACTICAL,
-    explicitColXCenters,
+    // `beamSpanMaxMm` / `joistSpanMaxMm` are unused when explicit
+    // centers are supplied (validator still requires > 0). Pass
+    // MIN_BLOCK_SPACING_MM defensively — any positive value works.
+    beamSpanMaxMm: MIN_BLOCK_SPACING_MM,
+    joistSpanMaxMm: MIN_BLOCK_SPACING_MM,
+    explicitColXCenters: xCenters,
+    explicitRowZCenters: zCenters,
   });
 
+  const joists = layoutFloatingJoists(design);
   const boards = layoutFloatingDecking(design);
   // Order: boards → joists → blocks. No beam layer.
   return [...boards, ...joists, ...blocks];
@@ -412,6 +709,27 @@ function validateFloatingDesign(design: DeckDesign): void {
     throw new LayoutError(
       `Invalid deck length: lengthMm=${lengthMm} is below the minimum of ${MIN_DECK_DIMENSION_MM} mm ` +
         `(${MIN_DECK_DIMENSION_MM / MM_PER_FOOT}′). Floating decks smaller than this are ` +
+        `outside the MVP layout engine's supported range.`,
+    );
+  }
+
+  // feat/block-spacing review-gate follow-up (2026-07-05) — mirror
+  // the elevated `validateDesign` MAX_DECK_DIMENSION_MM cap on the
+  // floating path. Without this the schema-side 30480 mm cap is
+  // the ONLY line of defense for floating designs entering through
+  // in-memory patch / test-fixture paths (no persistence
+  // round-trip → no Ajv). See FR-035 "defense-in-depth" clause.
+  if (widthMm > MAX_DECK_DIMENSION_MM) {
+    throw new LayoutError(
+      `Invalid deck width: widthMm=${widthMm} exceeds the maximum of ${MAX_DECK_DIMENSION_MM} mm ` +
+        `(${MAX_DECK_DIMENSION_MM / MM_PER_FOOT}′). Deck sizes above this ceiling are ` +
+        `outside the MVP layout engine's supported range.`,
+    );
+  }
+  if (lengthMm > MAX_DECK_DIMENSION_MM) {
+    throw new LayoutError(
+      `Invalid deck length: lengthMm=${lengthMm} exceeds the maximum of ${MAX_DECK_DIMENSION_MM} mm ` +
+        `(${MAX_DECK_DIMENSION_MM / MM_PER_FOOT}′). Deck sizes above this ceiling are ` +
         `outside the MVP layout engine's supported range.`,
     );
   }

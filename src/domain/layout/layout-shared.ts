@@ -62,6 +62,41 @@ import { MM_PER_FOOT, type Mm } from '../units';
 export const MIN_DECK_DIMENSION_MM: Mm = 4 * MM_PER_FOOT;
 
 /**
+ * feat/block-spacing HIGH #1 defense-in-depth — maximum viable
+ * deck dimension (both width and length must be ≤ this).
+ *
+ * ## Value rationale (30480 mm = 100 ft)
+ *
+ * 100 ft covers every residential deck geometry the MVP is
+ * designed for (largest existing golden fixture is ~6096 mm =
+ * 20 ft) with a comfortable 5× headroom for a future rear-yard
+ * mega-deck. It ALSO closes a pre-existing DoS on Method A + the
+ * elevated layout: without a footprint cap, a `.deck` file with
+ * `widthMm=1000000, lengthMm=1000000` (the `Mm` `$defs` maximum)
+ * would instance millions of layout members before any downstream
+ * cap fires. The persisted schema mirrors this bound (`docs/
+ * deck-file-schema-v2.json` `Dimensions3D`), so a hostile file is
+ * REJECTED at deserialize time.
+ *
+ * ## Interaction with the Method B block-count cap
+ *
+ * Combined with `MAX_METHOD_B_BLOCK_COUNT`, this cap makes the
+ * Method B closed-form spacing floor
+ * `sqrt(w*l / MAX_METHOD_B_BLOCK_COUNT)` bounded above by
+ * `sqrt(MAX_DECK_DIMENSION_MM^2 / MAX_METHOD_B_BLOCK_COUNT) =
+ * 30480/sqrt(400) = 1524 mm` — well within
+ * `MAX_BLOCK_SPACING_MM (2438.4 mm)`, so a legal footprint at ANY
+ * legal `blockSpacingMm` produces ≤ MAX_METHOD_B_BLOCK_COUNT
+ * blocks without further iterative shrinking.
+ *
+ * Autonomous decision — reversible by editing this constant. If
+ * the value grows, verify the closed-form spacing floor still
+ * fits under MAX_BLOCK_SPACING_MM (raise the cap in tandem to
+ * keep the block-count invariant tight-by-construction).
+ */
+export const MAX_DECK_DIMENSION_MM: Mm = 100 * MM_PER_FOOT;
+
+/**
  * `LayoutError` — thrown when a `DeckDesign` fails validation OR when
  * a downstream catalog lookup fails. Distinct from generic `Error` so
  * consumers can `catch (err) { if (err instanceof LayoutError) …}`

@@ -65,7 +65,7 @@
  * directly on blocks. Each joist's span is derived from the block
  * grid UNDER THAT JOIST: blocks with `position.x` matching the
  * joist's `position.x`, sorted by z, max adjacent-z gap. See
- * `deriveJoistSpanFromBlocks` — S26 FIX #1. Pre-fix, Method-B
+ * `deriveMethodBJoistSpanFromBlockGrid` — S26 FIX #1. Pre-fix, Method-B
  * joists silently escaped the span check.
  *
  * If the layout has fewer than 2 beams AND fewer than 2 blocks
@@ -214,6 +214,14 @@ export function spanCheck(layout: Layout, table: SpanTable): Warning[] {
 
   const joistSpanMm = deriveJoistSpanMm(beams);
   const joistSpacingMm = deriveJoistSpacingMm(joists);
+  // LOW cleanup (Opus #8, feat/block-spacing review): Method B's
+  // block-grid joist span is UNIFORM across joists (regular
+  // grid → identical unique z-values in every column). Compute
+  // it ONCE outside the loop; each joist re-uses the same span.
+  // Pre-cleanup, this was called per-joist with the unused
+  // `_joist` arg — same math per iteration, wasted work in a
+  // hot per-joist loop.
+  const methodBJoistSpanMm = deriveMethodBJoistSpanFromBlockGrid(blocks);
 
   for (const joist of joists) {
     // Joist members are ALWAYS stamped with kind='lumber' by the
@@ -236,10 +244,13 @@ export function spanCheck(layout: Layout, table: SpanTable): Warning[] {
     //     block-to-block +z gap under THIS joist, matched by shared
     //     +x with a small tolerance. Guarantees joist span-checks
     //     work for beam-less framing — FIX #1 (safety-critical).
+    //
+    // LOW cleanup (Opus #8): the block-grid span is UNIFORM across
+    // joists (regular grid → same unique z-values for every
+    // column). Compute it ONCE outside the loop and reuse — see
+    // `methodBJoistSpanMm` above the loop.
     const perJoistSpanMm =
-      joistSpanMm !== null
-        ? joistSpanMm
-        : deriveJoistSpanFromBlocks(joist, blocks);
+      joistSpanMm !== null ? joistSpanMm : methodBJoistSpanMm;
     if (perJoistSpanMm === null) continue; // no defensible span
 
     const allowableMm = table.lookupJoistMaxSpan(joist.material, joistSpacingMm);
@@ -351,46 +362,88 @@ function deriveJoistSpacingMm(joists: readonly LayoutMember[]): Mm {
 
 /**
  * S26 FIX #1 (safety-critical) — derive a Method-B joist's span from
- * the BLOCK grid under it. In Method B (`floatingFraming =
+ * the BLOCK grid. In Method B (`floatingFraming =
  * 'joists-on-blocks'`) the joists rest directly on blocks — there
  * are NO beams — and each joist's between-supports span is the max
- * adjacent-z gap of the blocks under that joist.
+ * adjacent-z gap of the blocks in the grid.
  *
- * Matching rule — blocks under a joist share the joist's +x within
- * a small tolerance (`POST_Z_TOLERANCE_MM`, reused here for the
- * same round-trip-ε rationale). Every Method-B block column is
- * placed at a joist x-center by `computeMethodB` (see
- * `floating-layout.ts`), so an EXACT `===` match would work today —
- * the tolerance defends against a future `.deck` round-trip that
- * introduces float drift.
+ * ## Derivation (feat/block-spacing rework)
+ *
+ * Method B's block grid is now REGULAR in both axes (grid pitch
+ * `blockSpacingMm` — see `floating-layout.ts` `computeMethodB`),
+ * so every column shares the same set of z-positions. The joist
+ * span is therefore the max adjacent-z gap of the UNIQUE
+ * z-values across ALL blocks. Every joist gets the same span
+ * (they all cross the same block grid).
+ *
+ * Pre-feat/block-spacing this function matched blocks by
+ * x-tolerance to the joist's x (blocks were placed one-per-joist
+ * at exact joist x-centers). After feat/block-spacing blocks form
+ * a regular grid whose x-positions no longer coincide with joist
+ * x-centers — the x-tolerance filter would return 0 matches per
+ * joist and SILENTLY SKIP every joist span check, which is the
+ * safety-critical failure the FIX #1 rework was designed to
+ * prevent in the first place. Deriving the span from the grid's
+ * unique z-values keeps the check honest under the new model.
  *
  * Returns `null` when fewer than 2 blocks match (a single-block
- * joist has no defensible span; the check falls back to the
- * existing "abstain rather than fabricate" pattern).
+ * grid has no defensible span; the check falls back to the
+ * existing "abstain rather than fabricate" pattern). A well-formed
+ * Method B design has a perimeter-two minimum → always ≥ 2 unique
+ * z-values, so this fallback is defense-in-depth.
  *
  * ## Why this fix is safety-critical
  *
- * Pre-fix, `spanCheck` derived every joist's span from the beam
- * positions — Method B emits ZERO beams → `joistSpanMm === null`
- * → the entire joist-check block was skipped. A QA probe on a
- * 12 × 40 ft Method-B deck with `blockRowsHint = 2` produced ZERO
- * warnings even though the 40-ft joist span was ~3.3× the IRC
- * allowable. The IRC span check is the app's core safety value;
- * silently skipping it is the worst possible failure mode.
+ * Pre-fix (S26), `spanCheck` derived every joist's span from the
+ * beam positions — Method B emits ZERO beams → `joistSpanMm ===
+ * null` → the entire joist-check block was skipped. A QA probe
+ * on a 12 × 40 ft Method-B deck with `blockRowsHint = 2` produced
+ * ZERO warnings even though the 40-ft joist span was ~3.3× the
+ * IRC allowable. The IRC span check is the app's core safety
+ * value; silently skipping it is the worst possible failure mode.
+ *
+ * feat/block-spacing preserves this safety-critical seam: the
+ * joist span still surfaces from the block grid, just from the
+ * grid's row pitch rather than a per-joist column match. The
+ * per-joist result is identical for every joist (regular grid)
+ * so calling this once per joist yields the same warning-per-
+ * joist behavior as pre-fix — the UI + warning-list stays stable.
  */
-function deriveJoistSpanFromBlocks(
-  joist: LayoutMember,
+/**
+ * Derive the Method-B joist support span from the block grid.
+ * The block grid is regular (edges anchored, uniform pitch), so
+ * the unique z-values are shared across every column: the span
+ * is a property of the GRID, not of any individual joist.
+ * Returns `null` when there are fewer than 2 distinct block
+ * rows (defensive — cannot infer a span from a single row).
+ *
+ * ## Rename (Opus #8, feat/block-spacing review)
+ *
+ * Pre-review: `deriveJoistSpanFromBlocks(_joist, blocks)` — the
+ * `_joist` was unused (kept per the pre-existing per-joist call
+ * signature). Review flagged the smell: no joist-specific
+ * behavior + identical result per iteration → hoist the call
+ * OUT of the joist loop AND rename to reflect that this is a
+ * property of the grid (not of any joist). See span-check.ts's
+ * hoisted call site.
+ */
+function deriveMethodBJoistSpanFromBlockGrid(
   blocks: readonly LayoutMember[],
 ): Mm | null {
-  const joistBlocks = blocks.filter(
-    (b) => Math.abs(b.position.x - joist.position.x) < POST_Z_TOLERANCE_MM,
-  );
-  if (joistBlocks.length < 2) return null;
+  if (blocks.length < 2) return null;
+  // Regular grid → unique z-values are shared across columns.
+  // Snap to a mm-resolution key to defend against float drift
+  // from `.deck` round-trips (matches the intent of the pre-fix
+  // POST_Z_TOLERANCE_MM tolerance, applied on collapse rather
+  // than match).
+  const uniqueZs = Array.from(
+    new Set(blocks.map((b) => Math.round(b.position.z * 1e3) / 1e3)),
+  ).sort((a, b) => a - b);
+  if (uniqueZs.length < 2) return null;
 
-  const zs = joistBlocks.map((b) => b.position.z).sort((a, b) => a - b);
   let maxGap = 0;
-  for (let i = 1; i < zs.length; i++) {
-    const gap = zs[i]! - zs[i - 1]!;
+  for (let i = 1; i < uniqueZs.length; i++) {
+    const gap = uniqueZs[i]! - uniqueZs[i - 1]!;
     if (gap > maxGap) maxGap = gap;
   }
   return maxGap;

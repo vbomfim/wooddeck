@@ -744,6 +744,282 @@ describe('deserialize — S25 blockRowsHint schema tightening', () => {
 });
 
 // ---------------------------------------------------------------------------
+// feat/block-spacing — foundation.blockSpacingMm schema round-trip
+// ---------------------------------------------------------------------------
+//
+// The new user-controllable Method B block-grid pitch field:
+//
+//   - `type: number` (mm) with `minimum: 300` (mirrors the runtime
+//     MIN_BLOCK_SPACING_MM density cap) and `maximum: 2438.4`
+//     (mirrors the runtime MAX_BLOCK_SPACING_MM = 8 ft practical
+//     upper bound).
+//   - Applies to `deck-blocks` AND `tuffblocks` variants
+//     (`posts-on-footings` does not carry the field).
+//   - OPTIONAL — existing files without it still load; layout
+//     applies DEFAULT_METHOD_B_BLOCK_SPACING_MM (1220 mm).
+//
+// The schema layer is the first trust boundary — a `.deck` file
+// with `blockSpacingMm: -5` or `blockSpacingMm: "10 ft"` MUST
+// be rejected here before it reaches apply-parameters or the
+// layout engine.
+
+describe('deserialize — feat/block-spacing blockSpacingMm schema round-trip', () => {
+  const OPTS = {
+    createdAt: '2026-07-04T00:00:00.000Z',
+    generatorVersion: '1.0.0',
+  } as const;
+
+  function floatingTuffWithSpacing(
+    overrides: Record<string, unknown>,
+  ): string {
+    const base = {
+      ...GOLDEN_DECK_DESIGN,
+      structure: 'floating' as const,
+      floatingFraming: 'joists-on-blocks' as const,
+      foundation: {
+        type: 'tuffblocks' as const,
+        product: { productId: 'tuffblock-12x12x4' as const },
+      },
+    };
+    const s = serialize(base, OPTS);
+    const parsed = JSON.parse(s) as DeckFileV2;
+    const patched = {
+      ...parsed,
+      design: {
+        ...parsed.design,
+        foundation: { ...parsed.design.foundation, ...overrides },
+      },
+    };
+    return JSON.stringify(patched);
+  }
+
+  it('rejects blockSpacingMm = 299 (below minimum 300 — the MIN_BLOCK_SPACING_MM density cap)', () => {
+    const rogue = floatingTuffWithSpacing({ blockSpacingMm: 299 });
+    expect(() => deserialize(rogue)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  it('rejects blockSpacingMm = 3000 (above maximum 2438.4 — the MAX_BLOCK_SPACING_MM 8-ft practical cap)', () => {
+    const rogue = floatingTuffWithSpacing({ blockSpacingMm: 3000 });
+    expect(() => deserialize(rogue)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  it('rejects blockSpacingMm = "1220" (wrong type — string)', () => {
+    const rogue = floatingTuffWithSpacing({ blockSpacingMm: '1220' });
+    expect(() => deserialize(rogue)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  it('rejects blockSpacingMm = -1 (negative)', () => {
+    const rogue = floatingTuffWithSpacing({ blockSpacingMm: -1 });
+    expect(() => deserialize(rogue)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  it('round-trip: floating + tuffblocks with blockSpacingMm = 1220 deep-equals the original', () => {
+    const withSpacing = {
+      ...GOLDEN_DECK_DESIGN,
+      structure: 'floating' as const,
+      floatingFraming: 'joists-on-blocks' as const,
+      foundation: {
+        type: 'tuffblocks' as const,
+        product: { productId: 'tuffblock-12x12x4' as const },
+        blockSpacingMm: 1220,
+      },
+    };
+    const json = serialize(withSpacing, OPTS);
+    const { design, migrated } = deserialize(json);
+    expect(migrated).toBe(false);
+    expect(design.foundation).toEqual(withSpacing.foundation);
+  });
+
+  it('round-trip: floating + deck-blocks with blockSpacingMm = 1830 (6 ft) preserved end-to-end', () => {
+    const withSpacing = {
+      ...GOLDEN_DECK_DESIGN,
+      structure: 'floating' as const,
+      floatingFraming: 'joists-on-blocks' as const,
+      foundation: {
+        type: 'deck-blocks' as const,
+        product: { productId: 'oldcastle-11x11x7' as const },
+        blockSpacingMm: 1830,
+      },
+    };
+    const json = serialize(withSpacing, OPTS);
+    const { design } = deserialize(json);
+    expect(design.foundation).toEqual(withSpacing.foundation);
+  });
+
+  it('legacy load: a v2 file WITHOUT blockSpacingMm still loads (field is OPTIONAL — backward compat)', () => {
+    // The `GOLDEN_DECK_DESIGN` fixture does not carry the field.
+    // Deserialization must succeed and the runtime layout will
+    // apply DEFAULT_METHOD_B_BLOCK_SPACING_MM (see floating-layout.ts).
+    const withoutSpacing = {
+      ...GOLDEN_DECK_DESIGN,
+      structure: 'floating' as const,
+      floatingFraming: 'joists-on-blocks' as const,
+      foundation: {
+        type: 'tuffblocks' as const,
+        product: { productId: 'tuffblock-12x12x4' as const },
+      },
+    };
+    const json = serialize(withoutSpacing, OPTS);
+    const { design } = deserialize(json);
+    expect(design.foundation).toEqual(withoutSpacing.foundation);
+    // Field absent — no undefined key crept in from a stray default.
+    expect(
+      Object.hasOwn(design.foundation as object, 'blockSpacingMm'),
+    ).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// feat/block-spacing HIGH #1 — Dimensions3D footprint MAX (defense-in-depth)
+// ---------------------------------------------------------------------------
+//
+// The generic `Mm` def permits 0..1,000,000 (1 km) — which is
+// meaningful for `heightMm` (ground clearance) but pathological
+// for `widthMm`/`lengthMm`. A hostile `.deck` file with a
+// kilometer-square footprint on ANY structure would instance
+// millions of layout members before any downstream cap fires
+// (Method A block grid, Method B block grid, joist array, decking
+// boards). `Dimensions3D` tightens those two axes to
+// MAX_DECK_DIMENSION_MM (30480 mm = 100 ft) — 5× the largest
+// existing golden and well within any residential deck.
+//
+// Round-trip tests below pin the schema-side rejection so a
+// future accidental widening (e.g. reverting the `$ref: Mm` change)
+// fails immediately at deserialize.
+
+describe('deserialize — feat/block-spacing footprint MAX (30480 mm = 100 ft)', () => {
+  const OPTS = {
+    createdAt: '2026-07-04T00:00:00.000Z',
+    generatorVersion: '1.0.0',
+  } as const;
+
+  function envelopeWithFootprint(
+    footprint: { widthMm: number; lengthMm: number; heightMm: number },
+  ): string {
+    const s = serialize(GOLDEN_DECK_DESIGN, OPTS);
+    const parsed = JSON.parse(s) as DeckFileV2;
+    const patched = {
+      ...parsed,
+      design: { ...parsed.design, footprint },
+    };
+    return JSON.stringify(patched);
+  }
+
+  it('rejects widthMm > 30480 (above MAX_DECK_DIMENSION_MM — schema DoS guard)', () => {
+    const rogue = envelopeWithFootprint({
+      widthMm: 30481,
+      lengthMm: 5000,
+      heightMm: 900,
+    });
+    expect(() => deserialize(rogue)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  it('rejects lengthMm > 30480 (above MAX_DECK_DIMENSION_MM — schema DoS guard)', () => {
+    const rogue = envelopeWithFootprint({
+      widthMm: 5000,
+      lengthMm: 30481,
+      heightMm: 900,
+    });
+    expect(() => deserialize(rogue)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  it('rejects widthMm = 1000000 (pre-fix schema ceiling from the generic `Mm` def — the pathological kilometer case)', () => {
+    const rogue = envelopeWithFootprint({
+      widthMm: 1000000,
+      lengthMm: 1000000,
+      heightMm: 900,
+    });
+    expect(() => deserialize(rogue)).toThrowError(
+      expect.objectContaining({ code: 'schema-validation-failed' }),
+    );
+  });
+
+  it('accepts widthMm = lengthMm = 30480 exactly (schema boundary, inclusive)', () => {
+    // Boundary inclusive per JSON Schema `maximum`. 100 ft × 100 ft
+    // is the ceiling — should ROUND-TRIP without a schema throw.
+    const json = envelopeWithFootprint({
+      widthMm: 30480,
+      lengthMm: 30480,
+      heightMm: 900,
+    });
+    expect(() => deserialize(json)).not.toThrow();
+  });
+
+  it('accepts a modest residential footprint 6000 × 4000 (well under the cap — pinned so a future too-tight cap fires here)', () => {
+    const json = envelopeWithFootprint({
+      widthMm: 6000,
+      lengthMm: 4000,
+      heightMm: 900,
+    });
+    expect(() => deserialize(json)).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// feat/block-spacing (review) SHOULD-FIX — schema boundary values
+// ---------------------------------------------------------------------------
+//
+// The reject-below-min / reject-above-max tests in the round-trip
+// suite above use 299 / 3000. The exact schema boundary values
+// (300 / 2438.4) are inclusive per JSON Schema `minimum`/`maximum`
+// and MUST round-trip cleanly. Pin them so a future off-by-one
+// change (e.g. `exclusiveMinimum`) fires here.
+
+describe('deserialize — feat/block-spacing (review SHOULD-FIX) blockSpacingMm exact boundaries round-trip', () => {
+  const OPTS = {
+    createdAt: '2026-07-04T00:00:00.000Z',
+    generatorVersion: '1.0.0',
+  } as const;
+
+  function envelopeWithSpacing(spacingMm: number): string {
+    const base = {
+      ...GOLDEN_DECK_DESIGN,
+      structure: 'floating' as const,
+      floatingFraming: 'joists-on-blocks' as const,
+      foundation: {
+        type: 'tuffblocks' as const,
+        product: { productId: 'tuffblock-12x12x4' as const },
+      },
+    };
+    const s = serialize(base, OPTS);
+    const parsed = JSON.parse(s) as DeckFileV2;
+    const patched = {
+      ...parsed,
+      design: {
+        ...parsed.design,
+        foundation: {
+          ...parsed.design.foundation,
+          blockSpacingMm: spacingMm,
+        },
+      },
+    };
+    return JSON.stringify(patched);
+  }
+
+  it('accepts blockSpacingMm = 300 exactly (MIN_BLOCK_SPACING_MM boundary)', () => {
+    const json = envelopeWithSpacing(300);
+    expect(() => deserialize(json)).not.toThrow();
+  });
+
+  it('accepts blockSpacingMm = 2438.4 exactly (MAX_BLOCK_SPACING_MM boundary)', () => {
+    const json = envelopeWithSpacing(2438.4);
+    expect(() => deserialize(json)).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // S26 FIX #3 (review-gate, DATA-LOSS) — pre-S26 floating decks load
 // ---------------------------------------------------------------------------
 //

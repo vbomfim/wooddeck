@@ -145,6 +145,12 @@
           "type": "integer",
           "minimum": 2,
           "maximum": 100
+        },
+        "blockSpacingMm": {
+          "description": "feat/block-spacing — OPTIONAL user-controlled distance between adjacent foundation blocks (grid PITCH, mm) for FLOATING 'joists-on-blocks' (Method B) framing; IGNORED for Method A ('beams-and-joists') and for elevated designs. Runtime layout clamps to [MIN_BLOCK_SPACING_MM (300), MAX_BLOCK_SPACING_MM (2438.4 ≈ 8 ft)] and further caps the total block count. minimum=300 mirrors the runtime density cap; maximum=2438.4 mirrors the practical DIY beam-column bound (an 8-ft block gap is at the edge of a sensible 2× lumber layout). Omit to apply the DEFAULT_METHOD_B_BLOCK_SPACING_MM (1220 mm ≈ 4 ft) at layout time.",
+          "type": "number",
+          "minimum": 300,
+          "maximum": 2438.4
         }
       }
     },
@@ -166,6 +172,12 @@
           "type": "integer",
           "minimum": 2,
           "maximum": 100
+        },
+        "blockSpacingMm": {
+          "description": "feat/block-spacing — OPTIONAL user-controlled distance between adjacent foundation blocks (grid PITCH, mm) for FLOATING 'joists-on-blocks' (Method B) framing; IGNORED for Method A ('beams-and-joists') and for elevated designs. Runtime layout clamps to [MIN_BLOCK_SPACING_MM (300), MAX_BLOCK_SPACING_MM (2438.4 ≈ 8 ft)] and further caps the total block count. See FoundationSpecDeckBlocks.blockSpacingMm for the bounds rationale. Omit to apply the DEFAULT_METHOD_B_BLOCK_SPACING_MM (1220 mm ≈ 4 ft) at layout time.",
+          "type": "number",
+          "minimum": 300,
+          "maximum": 2438.4
         }
       }
     },
@@ -192,12 +204,13 @@
       }
     },
     "Dimensions3D": {
+      "description": "3D deck footprint. `widthMm`/`lengthMm` carry a TIGHTER upper bound than the generic `Mm` def (which permits 0..1000000) — feat/block-spacing HIGH #1 defense-in-depth: an unbounded deck size on the block-carrying variants combined with a tight `blockSpacingMm` could grow the derived block grid past MAX_METHOD_B_BLOCK_COUNT before the layout's cap could clamp it. Capping the footprint at MAX_DECK_DIMENSION_MM (30480 mm = 100 ft, 5× the largest existing golden and well within any residential deck) makes the closed-form block-grid cap unreachable-by-construction for any schema-legal input, and closes a pre-existing DoS on Method A + legacy elevated layouts that would otherwise instance millions of members for a 1 km × 1 km input. `heightMm` keeps the generic `Mm` bound.",
       "type": "object",
       "additionalProperties": false,
       "required": ["widthMm", "lengthMm", "heightMm"],
       "properties": {
-        "widthMm": { "$ref": "#/$defs/Mm" },
-        "lengthMm": { "$ref": "#/$defs/Mm" },
+        "widthMm": { "type": "number", "minimum": 0, "maximum": 30480 },
+        "lengthMm": { "type": "number", "minimum": 0, "maximum": 30480 },
         "heightMm": { "$ref": "#/$defs/Mm" }
       }
     },

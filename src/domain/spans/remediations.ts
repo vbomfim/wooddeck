@@ -161,13 +161,17 @@ import type { SpanTable } from './span-table';
 // imports from `../spans/irc-2018-tables` — pulling the barrel
 // here would create a spans↔layout file cycle (dep-cruiser
 // `no-circular` blocks it). `block-grid.ts` imports zero span
-// modules, so the direct file edge is cycle-free.
-//
-// `resolveGridCount` is reused inside `deriveCurrentRows` so the
-// remediation's `currentRows` always mirrors what the actual
-// layout produces (S25 pair-fix / GPT HIGH#2 / Opus LOW#5) — no
-// duplicated clamp math to drift.
-import { MIN_BLOCK_SPACING_MM, resolveGridCount } from '../layout/floating/block-grid';
+// modules, so the direct file edge is cycle-free. Same rationale
+// for the direct file edge to `floating-layout.ts` (feat/block-
+// spacing HIGH #3 — `resolveMethodBGrid` reflects the
+// spacing-primary Method B resolver so the remediation's
+// `currentRows` mirrors what the layout actually produces).
+import {
+  blockCountForAxis,
+  MAX_BLOCK_SPACING_MM,
+  MIN_BLOCK_SPACING_MM,
+} from '../layout/floating/block-grid';
+import { resolveMethodBGrid } from '../layout/floating/floating-layout';
 
 // ==========================================================
 // Public shape (frozen — ticket §2 Interface Contract)
@@ -205,22 +209,55 @@ export type RemediationPatch =
   | { readonly kind: 'change-beam-species'; readonly newSpecies: Species }
   | {
       /**
-       * S25 (ticket #47) — add a row of foundation blocks under
-       * the beam(s) of a FLOATING deck. Semantically: bump
-       * `foundation.blockRowsHint` from `currentRows` to
-       * `proposedRows` (typically `currentRows + 1`). Applies only
-       * when `design.structure === 'floating'` and
-       * `design.foundation.type ∈ {'deck-blocks','tuffblocks'}`.
+       * S25 (ticket #47) — "add a row of support" for a FLOATING
+       * deck. Under Method B (the active source of truth
+       * post-feat/block-spacing HIGH #3), the patch REDUCES
+       * `foundation.blockSpacingMm` so a tighter grid pitch
+       * shortens the joist support span (the joist rests on
+       * block ROWS; row pitch = block pitch along +z).
        *
-       * `targetBeamId` names the beam warning that motivated the
-       * remediation — the UI can use it to highlight the affected
-       * beam in the 3D scene. `currentRows` / `proposedRows` are
-       * ROW COUNTS (dimensionless integers), NOT spacings.
+       * ## Applicability
+       *
+       * - `design.structure === 'floating'`
+       * - `design.floatingFraming === 'joists-on-blocks'` (Method B)
+       * - `design.foundation.type ∈ {'deck-blocks','tuffblocks'}`
+       *
+       * ## Payload
+       *
+       * `targetBeamId` names the warning's member (the joist)
+       * that motivated the remediation — the UI can use it to
+       * highlight the affected member in the 3D scene.
+       *
+       * `proposedSpacingMm` / `currentSpacingMm` (feat/block-spacing
+       * HIGH #3) are the ACTIVE source of truth. When these are
+       * set, `application/apply-remediation.ts` dispatches
+       * `{ foundation: { blockSpacingMm: proposedSpacingMm } }` —
+       * `blockRowsHint` is untouched. Both fields are OPTIONAL for
+       * backwards compatibility with the LEGACY path (see below)
+       * and with tests / consumers built before HIGH #3.
+       *
+       * `currentRows` / `proposedRows` are the corresponding row
+       * counts that the ACTIVE grid resolver would produce. They
+       * are kept for label fallback (the pre-HIGH#3 `(N → M)`
+       * arrow) and for the LEGACY path. Under the spacing-primary
+       * path they are DERIVED from `proposedSpacingMm` +
+       * footprint (not the source of truth).
+       *
+       * ## Legacy path
+       *
+       * When `proposedSpacingMm` is UNSET, the patch falls back to
+       * the pre-feat/block-spacing shape: dispatch
+       * `{ foundation: { blockRowsHint: proposedRows } }`. Kept
+       * alive strictly for backwards compat with older synthesized
+       * patches; new producers should always set
+       * `proposedSpacingMm` for Method B (HIGH #3 rule).
        */
       readonly kind: 'add-support-row';
       readonly targetBeamId: string;
       readonly currentRows: number;
       readonly proposedRows: number;
+      readonly currentSpacingMm?: Mm;
+      readonly proposedSpacingMm?: Mm;
     };
 
 export interface RemediationOption {
@@ -456,17 +493,37 @@ function applyPatchForVerification(
         },
       };
     case 'add-support-row': {
-      // S25 (ticket #47) — bump the block-row hint on the design's
-      // block foundation. Only meaningful for
-      // `deck-blocks`/`tuffblocks`; a `posts-on-footings` foundation
-      // is not proposed by `produceAddSupportRow`, so this branch
-      // is unreachable for that variant (guarded here too so a
-      // future caller passing a synthetic patch on a
-      // `posts-on-footings` design gets a stable no-op rather than
-      // a corrupted design).
+      // HIGH #3 (review — feat/block-spacing): the ACTIVE
+      // source of truth for Method B is `blockSpacingMm` (the
+      // resolver `resolveMethodBGrid` prefers it over the legacy
+      // `blockRowsHint`). When the producer supplied a
+      // `proposedSpacingMm`, dispatch it directly so the user's
+      // "add-support-row" action reduces spacing → tighter grid
+      // → shorter joist span. LEGACY path (proposedSpacingMm
+      // undefined) preserves the pre-HIGH#3 hint-bump behavior
+      // for backwards compat with older synthesized patches.
+      //
+      // Guard: block foundations only. `posts-on-footings` is
+      // never proposed by `produceAddSupportRow`; the branch is
+      // defensive against a synthetic patch on a
+      // `posts-on-footings` design.
       if (design.foundation.type === 'posts-on-footings') {
         return design;
       }
+      if (patch.proposedSpacingMm !== undefined) {
+        // Spacing-primary path (HIGH #3): store the proposed
+        // spacing so the resolver picks it up on the next
+        // recompute. Do NOT also touch `blockRowsHint` — the
+        // resolver ignores it when `blockSpacingMm` is set.
+        return {
+          ...design,
+          foundation: {
+            ...design.foundation,
+            blockSpacingMm: patch.proposedSpacingMm,
+          },
+        };
+      }
+      // LEGACY path — hint-based (pre-HIGH#3 producers).
       return {
         ...design,
         foundation: {
@@ -619,7 +676,15 @@ function disabledReasonForNoClear(kind: RemediationKind): string {
     case 'change-beam-species':
       return 'No structurally-rated species swap clears the over-span.';
     case 'add-support-row':
-      return 'Adding another row of blocks does not clear the over-span at the maximum block density.';
+      // HIGH #3 (review — feat/block-spacing): rare fallback for
+      // the recompute-still-warns branch. Most Method-B disabled
+      // options carry a KIND-SPECIFIC reason from
+      // `produceAddSupportRow` (either "already at minimum" or
+      // the elevated / Method-A alternative-surfacing message).
+      return (
+        'Reducing block spacing does not clear the over-span — the ' +
+        'grid is already at the minimum pitch.'
+      );
     /* c8 ignore next 5 */
     default: {
       const _exhaustive: never = kind;
@@ -1204,6 +1269,9 @@ function produceAddSupportRow(
   table: SpanTable,
   recompute: (design: DeckDesign) => readonly Warning[],
 ): RemediationOption | null {
+  // `table` retained for signature symmetry with the other
+  // produce-* helpers (used only by SpanTable-dependent ones).
+  void table;
   // FR-032 elevated clause (S25 pair-fix / Opus HIGH#1): every
   // elevated design gets a DISABLED option with a reason that
   // surfaces the alternative construction MODEL. Elevated designs
@@ -1264,28 +1332,59 @@ function produceAddSupportRow(
     return null;
   }
 
-  const { lengthMm } = design.footprint;
+  const { widthMm, lengthMm } = design.footprint;
 
-  // Derive `currentRows` — see doc-block above.
-  const currentRows = deriveCurrentRows(design, table);
-  if (currentRows === null) {
-    // We couldn't establish the current row count (SpanTable
-    // fail-safe hit for the joist SKU). Surface a disabled option
-    // — never silently omit. Placeholder rows are marked so the
-    // UI does not render a contradictory (N → M) arrow.
-    return makeDisabledAddSupportRowNoRowCount({
-      warning,
-      disabledReason:
-        'Cannot determine the current block row count for this design.',
-    });
-  }
+  // HIGH #3 (review — feat/block-spacing): the ACTIVE resolver
+  // for Method B is `resolveMethodBGrid`, which prefers
+  // `blockSpacingMm` over the legacy hints. Reflect what the
+  // ACTUAL layout produces (spacing-aware, cap-aware) — not the
+  // orthogonal legacy `resolveGridCount(blockRowsHint, ...)`
+  // (pre-HIGH#3 code path — the reviewers flagged that as a
+  // LYING label + wouldClear:false when spacing was active).
+  const currentGrid = resolveMethodBGrid(
+    widthMm,
+    lengthMm,
+    design.foundation.blockSpacingMm,
+    design.foundation.blockRowsHint,
+    design.foundation.blockColsHint,
+  );
+  const currentRows = currentGrid.rows;
 
-  const proposedRows = currentRows + 1;
+  // Effective row pitch = the max +z gap between adjacent block
+  // rows. `blockCountForAxis`'s invariant guarantees
+  // `pitch = lengthMm / (rows - 1) ≤ spacing`. Use this pitch as
+  // the "currentSpacingMm" reported by the patch — it is the
+  // spacing the user would need to type to REPRODUCE the current
+  // grid, so a legacy hint-based design surfaces its effective
+  // spacing on save.
+  const currentEffectiveSpacingMm = lengthMm / (currentRows - 1);
 
-  // Densification cap: adjacent-block gap at `proposedRows` must
-  // stay ≥ MIN_BLOCK_SPACING_MM. Gap = lengthMm / (proposedRows−1).
-  const proposedGapMm = lengthMm / (proposedRows - 1);
-  if (proposedGapMm < MIN_BLOCK_SPACING_MM) {
+  // Propose the LARGEST spacing ≤ current effective that yields
+  // row pitch ≤ warning.allowableMm. Since
+  // `blockCountForAxis(len, s)` guarantees pitch ≤ s, setting
+  // spacing ≤ allowable is SUFFICIENT — no iteration needed.
+  //
+  // Clamp to `[MIN_BLOCK_SPACING_MM, MAX_BLOCK_SPACING_MM]` so
+  // the dispatched value is always schema-valid (HIGH #2's
+  // input-boundary rule applies to synthesized values too).
+  const desiredSpacingMm = Math.min(
+    currentEffectiveSpacingMm,
+    warning.allowableMm,
+  );
+  const clampedProposedSpacingMm = Math.max(
+    MIN_BLOCK_SPACING_MM,
+    Math.min(MAX_BLOCK_SPACING_MM, desiredSpacingMm),
+  );
+
+  // Special case: the effective spacing is already at or below
+  // MIN and the design still over-spans. Adding a row would
+  // require sub-MIN spacing — refuse and surface the real
+  // alternative (heavier joist / shorter deck).
+  if (
+    currentEffectiveSpacingMm <= MIN_BLOCK_SPACING_MM + 1e-6 &&
+    warning.allowableMm < currentEffectiveSpacingMm
+  ) {
+    const disabledRows = blockCountForAxis(lengthMm, MIN_BLOCK_SPACING_MM);
     return {
       kind: 'add-support-row',
       memberId: warning.memberId,
@@ -1293,25 +1392,41 @@ function produceAddSupportRow(
         kind: 'add-support-row',
         targetBeamId: warning.memberId,
         currentRows,
-        proposedRows,
+        proposedRows: disabledRows,
+        currentSpacingMm: currentEffectiveSpacingMm,
+        proposedSpacingMm: MIN_BLOCK_SPACING_MM,
       },
-      summary: 'Add a row of blocks (disabled)',
+      summary: 'Reduce block spacing to add support (disabled)',
       currentAllowableMm: warning.allowableMm,
       newAllowableMm: 0,
       actualSpanMm: warning.actualMm,
       wouldClear: false,
       disabled: true,
       disabledReason:
-        `Adding another row would place blocks less than ` +
-        `${MIN_BLOCK_SPACING_MM} mm apart along the deck length.`,
+        'Block spacing is already at the minimum — reduce joist size or ' +
+        'deck length.',
     };
   }
+
+  // If the proposal doesn't actually SHRINK the spacing (equal
+  // within a mm of current), we're already at the min or below
+  // the allowable — anything smaller just wastes blocks. Guard
+  // against a degenerate "propose the same thing" case.
+  const wouldShrink =
+    clampedProposedSpacingMm < currentEffectiveSpacingMm - 1e-6;
+
+  const proposedSpacingMm = wouldShrink
+    ? clampedProposedSpacingMm
+    : MIN_BLOCK_SPACING_MM;
+  const proposedRows = blockCountForAxis(lengthMm, proposedSpacingMm);
 
   const patch: RemediationPatch = {
     kind: 'add-support-row',
     targetBeamId: warning.memberId,
     currentRows,
     proposedRows,
+    currentSpacingMm: currentEffectiveSpacingMm,
+    proposedSpacingMm,
   };
   const verify = verifyPatchClears(warning, design, patch, recompute);
 
@@ -1320,46 +1435,43 @@ function produceAddSupportRow(
       kind: 'add-support-row',
       memberId: warning.memberId,
       patch,
-      summary: 'Add a row of blocks (disabled)',
+      summary: 'Reduce block spacing to add support (disabled)',
       currentAllowableMm: warning.allowableMm,
       newAllowableMm: 0,
       actualSpanMm: warning.actualMm,
       wouldClear: false,
       disabled: true,
       disabledReason:
-        'Adding a row of blocks would produce an invalid design.',
+        'Reducing block spacing would produce an invalid design.',
     };
   }
 
   if (verify.wouldClear) {
-    // Display estimate for `newAllowableMm`: under Method B the
-    // joist-support gap post-fix equals
-    // `actualMm × (currentRows−1) / (proposedRows−1)` — same
-    // block-to-block gap ratio the elevated / Method-A beam-span
-    // math would use. Used only for the "was X → now Y" label.
-    const newBeamSpanMm =
-      (warning.actualMm * (currentRows - 1)) / (proposedRows - 1);
+    // The new adjacent-block gap along +z is bounded by the new
+    // spacing (blockCountForAxis invariant). Report the new
+    // ACTUAL span the joist has to carry; the allowable is
+    // unchanged (same joist SKU).
+    const newActualSpanMm = lengthMm / (proposedRows - 1);
     return makeOption({
       kind: 'add-support-row',
       memberId: warning.memberId,
       patch,
-      summary: `Add a row of blocks (${currentRows} → ${proposedRows})`,
+      summary: `Reduce block spacing to add support (${currentRows} → ${proposedRows})`,
       currentAllowableMm: warning.allowableMm,
-      // The allowable didn't change (same joist SKU); what changed
-      // is the ACTUAL span the joist has to carry. Report the new
-      // actual span as the "newAllowable" so the label reads
-      // sensibly (actual now = X, allowable stayed the same,
-      // wouldClear because X < allowable).
       newAllowableMm: warning.allowableMm,
-      actualSpanMm: newBeamSpanMm,
+      actualSpanMm: newActualSpanMm,
     });
   }
 
+  // Verify said still-warning. The invariant
+  // "pitch ≤ spacing ≤ allowable" makes this unreachable for a
+  // finite recompute — but if it fires, surface as disabled
+  // rather than an ENABLED-but-nonclearing option.
   return {
     kind: 'add-support-row',
     memberId: warning.memberId,
     patch,
-    summary: `Add a row of blocks (${currentRows} → ${proposedRows})`,
+    summary: `Reduce block spacing to add support (${currentRows} → ${proposedRows})`,
     currentAllowableMm: warning.allowableMm,
     newAllowableMm: verify.newAllowableMm ?? 0,
     actualSpanMm: warning.actualMm,
@@ -1369,59 +1481,22 @@ function produceAddSupportRow(
   };
 }
 
-/**
- * Derive the current block-row count for a FLOATING deck. Returns
- * `null` when the row count can't be established (SpanTable
- * fail-safe hit — unknown SKU / Composite grade).
- *
- * Mirrors `computeBlockGrid`'s row derivation by CALLING the
- * exported `resolveGridCount` from `block-grid.ts` — so a
- * `blockRowsHint` of 0, 1, negative, or above the density cap
- * produces the SAME clamped count the actual layout produces.
- * Before the S25 pair-fix (GPT HIGH#2), this function returned
- * the raw hint verbatim, causing `blockRowsHint: 0` to compute
- * `currentRows = 0 → proposed = 1` while the real layout produced
- * 2 rows — the option would mislabel or no-op the fix. Now the
- * derivation is single-source; a future change to the clamp math
- * ripples here automatically.
- *
- * When `blockRowsHint` is undefined, we fall back to the S19
- * derivation `ceil(lengthMm / joistSpanMaxMm) + 1`, computed here
- * via `resolveGridCount(undefined, lengthMm, joistSpanMaxMm)`.
- * `joistSpanMaxMm` is looked up via the SAME `SpanTable` the
- * recompute uses, so the derivation stays in sync with the layout.
- */
-function deriveCurrentRows(
-  design: DeckDesign,
-  table: SpanTable,
-): number | null {
-  // Only meaningful for floating + block foundations; caller
-  // guards this, but a stray call would be a defect — keep the
-  // check for defence-in-depth.
-  if (design.structure !== 'floating') return null;
-  if (
-    design.foundation.type !== 'deck-blocks' &&
-    design.foundation.type !== 'tuffblocks'
-  ) {
-    return null;
-  }
-  const joistSpanMaxMm = table.lookupJoistMaxSpan(
-    design.joist.material,
-    design.joist.spacingMm,
-  );
-  if (!Number.isFinite(joistSpanMaxMm) || joistSpanMaxMm <= 0) {
-    // Table fail-safe hit; without a joistSpanMaxMm the derivation
-    // fallback path (`ceil(lengthMm / joistSpanMaxMm) + 1`) would
-    // divide by zero / return Infinity. Report null so the caller
-    // surfaces a disabled option instead of guessing.
-    return null;
-  }
-  return resolveGridCount(
-    design.foundation.blockRowsHint,
-    design.footprint.lengthMm,
-    joistSpanMaxMm,
-  );
-}
+// ---------------------------------------------------------------------------
+// HIGH #3 (review — feat/block-spacing)
+//
+// The pre-HIGH#3 `deriveCurrentRows(design, table)` helper called
+// `resolveGridCount(blockRowsHint, lengthMm, joistSpanMaxMm)` — a
+// helper ORTHOGONAL to the active Method-B resolver
+// `resolveMethodBGrid`. Because the active resolver PREFERS
+// `blockSpacingMm` over the legacy `blockRowsHint`, the old helper
+// misreported row counts under the spacing-primary path (LYING
+// labels flagged by all 3 reviewers). It has been REMOVED — the
+// only consumer, `produceAddSupportRow`, now computes rows inline
+// via `resolveMethodBGrid` so the reported count always matches
+// what the layout actually produces (spacing-aware, cap-aware).
+// The `SpanTable` is no longer needed for row derivation; the
+// warning already carries `allowableMm`.
+// ---------------------------------------------------------------------------
 
 // ==========================================================
 // Public entry point

@@ -81,6 +81,37 @@ export type {
 // ---- default-design factory ------------------------------------------------
 export { DEFAULT_DESIGN_PARAMS, makeDefaultDesign } from './default-design';
 
+// ---- feat/block-spacing — Method B display defaults ------------------------
+//
+// The Method B "block spacing" UI field needs to display a sensible
+// default when the current design omits `foundation.blockSpacingMm`
+// (which is optional — legacy designs and Method A / elevated
+// designs do not carry it). The default value lives with the layout
+// engine (source of truth is `computeMethodB` — the value it uses
+// when the field is unset). Re-exporting it through the state barrel
+// gives the ui a single sanctioned source of truth so the displayed
+// default and the applied default can never drift, WITHOUT crossing
+// the `ui → domain/layout` boundary directly (S13 issue #14 §1).
+//
+// A dep-cruiser rule `ui-no-domain-layout` forbids the ui from
+// importing `domain/layout/**` directly; the state barrel is the
+// sanctioned seam for value + type re-exports (matches the LayoutError
+// pattern already in `design-store.ts`).
+//
+// `MIN_BLOCK_SPACING_MM` / `MAX_BLOCK_SPACING_MM` are ALSO re-exported
+// (HIGH #2 review response) so the `BlockSpacingField` can clamp
+// user input at the boundary — a raw value outside the schema
+// range would poison the design, be silently clamped by the LAYOUT
+// for geometry, but the STORED design would then fail
+// `deserialize` on the next open (save/reload trap).
+export {
+  DEFAULT_METHOD_B_BLOCK_SPACING_MM,
+} from '../domain/layout/floating/floating-layout';
+export {
+  MAX_BLOCK_SPACING_MM,
+  MIN_BLOCK_SPACING_MM,
+} from '../domain/layout/floating/block-grid';
+
 // ---- shared utility types --------------------------------------------------
 //
 // `DeepPartial<T>` originates in the application layer (see

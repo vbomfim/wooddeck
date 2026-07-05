@@ -169,12 +169,19 @@ const FOUNDATION_VARIANT_FIELDS: Readonly<
     // an incomplete allowlist. The fields are OPTIONAL — omitted
     // from `required` — but MUST appear in `allowed` for the
     // error-filter to recognize a legitimate presence.
-    allowed: ['type', 'product', 'blockRowsHint', 'blockColsHint'],
+    //
+    // feat/block-spacing: `blockSpacingMm` follows the same pattern
+    // — OPTIONAL user-controlled grid pitch for Method B, must be
+    // in `allowed` so a malformed value (e.g. below the schema
+    // minimum) is reported with its schema violation, not
+    // "unknown field".
+    allowed: ['type', 'product', 'blockRowsHint', 'blockColsHint', 'blockSpacingMm'],
   },
   tuffblocks: {
     required: ['type', 'product'],
     // S25 pair-fix — see `deck-blocks` above.
-    allowed: ['type', 'product', 'blockRowsHint', 'blockColsHint'],
+    // feat/block-spacing — see `deck-blocks` above.
+    allowed: ['type', 'product', 'blockRowsHint', 'blockColsHint', 'blockSpacingMm'],
   },
 };
 

@@ -75,6 +75,7 @@ import { layoutJoists } from './joist-layout';
 import { layoutPostsAndBlocks, layoutPostsAndFootings } from './post-layout';
 import {
   LayoutError,
+  MAX_DECK_DIMENSION_MM,
   MIN_DECK_DIMENSION_MM,
   validateFlushBeamDepth,
   validateJoistSpacing,
@@ -85,7 +86,7 @@ import { FOOTING_WIDTH_MM, MIN_POST_HEIGHT_MM, computeFramingStackMm } from './y
 // (`import { LayoutError, MIN_DECK_DIMENSION_MM } from './layout-engine'`)
 // remains unchanged for existing callers. See `layout-shared.ts`
 // module header for the cycle-break rationale.
-export { LayoutError, MIN_DECK_DIMENSION_MM };
+export { LayoutError, MAX_DECK_DIMENSION_MM, MIN_DECK_DIMENSION_MM };
 
 // -----------------------------------------------------------------
 // `MIN_DECK_DIMENSION_MM` and `LayoutError` were extracted to
@@ -527,6 +528,30 @@ function validateDesign(design: DeckDesign): void {
     throw new LayoutError(
       `Invalid deck length: lengthMm=${lengthMm} is below the minimum of ${MIN_DECK_DIMENSION_MM} mm ` +
         `(${MIN_DECK_DIMENSION_MM / MM_PER_FOOT}′). Freestanding decks smaller than this are ` +
+        `outside the MVP layout engine's supported range.`,
+    );
+  }
+
+  // feat/block-spacing HIGH #1 defense-in-depth — bound the
+  // upper end of the footprint. Without an upper cap, a deck
+  // sized close to the pre-cap `Mm` schema maximum (1000000 mm =
+  // 1 km) would instance millions of layout members before any
+  // downstream cap fires (Method A block grid, Method B block
+  // grid, joist array, decking boards). Mirror the schema-side
+  // cap here so a pre-persistence path (in-memory patch, test
+  // fixture) hits the same guard, with a clear error naming both
+  // the offending value and the allowable ceiling.
+  if (widthMm > MAX_DECK_DIMENSION_MM) {
+    throw new LayoutError(
+      `Invalid deck width: widthMm=${widthMm} exceeds the maximum of ${MAX_DECK_DIMENSION_MM} mm ` +
+        `(${MAX_DECK_DIMENSION_MM / MM_PER_FOOT}′). Deck sizes above this ceiling are ` +
+        `outside the MVP layout engine's supported range.`,
+    );
+  }
+  if (lengthMm > MAX_DECK_DIMENSION_MM) {
+    throw new LayoutError(
+      `Invalid deck length: lengthMm=${lengthMm} exceeds the maximum of ${MAX_DECK_DIMENSION_MM} mm ` +
+        `(${MAX_DECK_DIMENSION_MM / MM_PER_FOOT}′). Deck sizes above this ceiling are ` +
         `outside the MVP layout engine's supported range.`,
     );
   }
