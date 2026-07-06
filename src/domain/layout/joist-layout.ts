@@ -87,7 +87,7 @@ import { FOOTING_WIDTH_MM, computeYStack } from './y-stack';
  * the joist is HUNG OFF THE BEAM FACE via a joist hanger, so it
  * physically CANNOT extend past the beam — it ENDS at the beam
  * inner face. Both elevated `layoutBeams` and floating
- * `computeFloatingRimBeams` inset each beam center by
+ * `computeFloatingBeams` inset each beam center by
  * `FOOTING_WIDTH_MM / 2` from the corresponding z-end (so the
  * supporting footings/blocks stay inside the footprint), so the
  * clear span between beam INNER faces is:

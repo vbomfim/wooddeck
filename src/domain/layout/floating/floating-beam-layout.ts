@@ -8,12 +8,11 @@
  * `computeFloatingBeams(design, options?)` returns N ≥ 2 beam
  * members along the WIDTH axis, spread EVENLY between the two rim
  * insets on +z. When `options.numRows` is not supplied the function
- * falls back to `N = 2` (byte-identical to the pre-#75
- * `computeFloatingRimBeams` behavior). When `options.numRows` is 3
- * or more the layout gains `N − 2` INTERIOR beams (ids
- * `beam-mid-0`..`beam-mid-{N-3}` in emit order) between the two
- * rim beams — mid-span support for joists that would otherwise
- * over-span the deck length.
+ * falls back to `N = 2` (byte-identical to the pre-#75 rim-only
+ * behavior). When `options.numRows` is 3 or more the layout gains
+ * `N − 2` INTERIOR beams (ids `beam-mid-0`..`beam-mid-{N-3}` in
+ * emit order) between the two rim beams — mid-span support for
+ * joists that would otherwise over-span the deck length.
  *
  * The pre-S26 floating beam layout emitted ONE beam per BLOCK COLUMN
  * running along +z (deck length). That model produced NO beam at
@@ -52,13 +51,6 @@
  * unaffected. Downstream helpers that iterate all beams (e.g.
  * `spanCheck`) don't need to know the id shape — they see a beam
  * either way.
- *
- * ## Backwards-compatible alias
- *
- * `computeFloatingRimBeams(design)` is retained as a `@deprecated`
- * wrapper that calls `computeFloatingBeams(design)` (no options,
- * so `numRows` defaults to 2). Every pre-#75 call site keeps
- * working byte-identically until it migrates to the new name.
  *
  * ## Framework/DOM ban
  *
@@ -186,17 +178,4 @@ export function computeFloatingBeams(
     });
   }
   return beams;
-}
-
-/**
- * @deprecated Retained as a backwards-compatible alias for
- * `computeFloatingBeams(design)` (defaults `numRows = 2`). New code
- * MUST call `computeFloatingBeams` directly and pass `numRows`
- * from `resolveMethodABeamRows(...).totalRows` to opt in to the
- * span-safe intermediate beam rows added in issue #75.
- */
-export function computeFloatingRimBeams(
-  design: DeckDesign,
-): readonly LayoutMember[] {
-  return computeFloatingBeams(design);
 }

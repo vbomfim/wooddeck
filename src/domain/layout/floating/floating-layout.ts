@@ -30,8 +30,9 @@
  *      checks (`MIN_DECK_DIMENSION_MM`, `computeMinFloatingHeightMm`)
  *      + a caller-contract guard on structure + foundation type +
  *      FR-028 `acceptsLumber` compat.
- *   2. `computeFloatingRimBeams(design)` → 2 beams (near/far)
- *      along +x at z-ends (inset by `FOOTING_WIDTH_MM/2`).
+ *   2. `computeFloatingBeams(design, { numRows })` → N ≥ 2 beams
+ *      (near/far + interior mid-span beams) along +x at inset
+ *      z positions (rims inset by `FOOTING_WIDTH_MM/2`).
  *   3. `layoutFloatingJoists(design)` → N joists at
  *      `design.joist.spacingMm` (reuses `computeJoistXCenters`
  *      from the elevated joist layer — byte-identical spacing).
@@ -289,12 +290,28 @@ export const MIN_BEAM_ROW_GAP_MM: Mm = 1000;
  * Mirrors the intent of `MAX_METHOD_B_BLOCK_COUNT = 400` but
  * scaled to Method A's realistic footprint × row count product:
  * a 40 ft × 40 ft deck with 5 rows × 8 cols = 40 blocks (under
- * the cap); the theoretical worst case (`MAX_METHOD_A_BEAM_ROWS ×
- * ceil(30480 / BLOCK_COL_MAX_SPACING_MM) + 1`) = 20 × 14 = 280
- * is bounded but conservative — the 200 cap forces genuinely
- * pathological inputs to fail LOUD via the postcondition throw in
- * `clampMethodABeamRows` rather than silently instantiate ~300
- * meshes. Autonomous decision — reversible.
+ * the cap); the theoretical worst case at 100×100 ft × strong
+ * joist (`MAX_METHOD_A_BEAM_ROWS × ceil(30480 /
+ * BLOCK_COL_MAX_SPACING_MM) + 1`) = 20 × 14 = 280 is bounded.
+ *
+ * **Review-gate follow-up (Opus HIGH + GPT HIGH + QA GAP-B):**
+ * The cap now CLAMPS the row count at
+ * `rowsMaxByCap = max(2, floor(MAX_METHOD_A_BLOCK_COUNT / cols))`
+ * (mirroring Method B's `clampMethodBRows` — see FR-037 FR-A in
+ * the spec), rather than throwing when the requested span-safe
+ * row count would exceed it. On a schema-legal but genuinely huge
+ * deck (e.g. 100×100 ft × 2×6 Cedar @ 24″) the clamp binds → the
+ * resulting adjacent-beam-gap exceeds the joist allowable →
+ * `deriveJoistSpanMm` reports the honest over-span → FR-F's
+ * DISABLED add-support-row remediation surfaces the actionable
+ * alternative. This is the intended graceful-degradation path;
+ * throwing a developer-facing "Internal invariant violated"
+ * error on user-reachable input was a bug. The postcondition
+ * throw is RETAINED as an arithmetic-drift guard for a future
+ * regression in the clamp math itself — genuinely unreachable
+ * for any schema-legal design (hence `c8 ignore`).
+ *
+ * Autonomous decision — reversible.
  */
 export const MAX_METHOD_A_BLOCK_COUNT = 200;
 
@@ -308,10 +325,18 @@ export const MAX_METHOD_A_BLOCK_COUNT = 200;
  * Two-branch derivation:
  *
  *   1. **SpanTable + material + spacing present AND `allowableMm > 0`.**
- *      `totalRows = max(2, ceil(lengthMm / allowableMm) + 1)` —
- *      the minimum row count that keeps every adjacent beam-row
- *      gap ≤ the joist's IRC allowable. Rounded up to guarantee
- *      the row pitch is safe (never fenceposts short).
+ *      `totalRows = max(2, ceil(supportSpanMm / allowableMm) + 1)`
+ *      where `supportSpanMm = max(0, lengthMm − FOOTING_WIDTH_MM)`
+ *      — the ACTUAL between-supports joist span (the two rims are
+ *      each inset by `FOOTING_WIDTH_MM / 2`, so `farZ − nearZ =
+ *      lengthMm − FOOTING_WIDTH_MM`; this is the same span that
+ *      `deriveJoistSpanMm` in `span-check.ts` measures for the
+ *      2-beam case). Using the inset span here keeps the resolver's
+ *      geometry in lock-step with the checker's — a mismatch
+ *      would over-build (extra beam rows) AND falsely reject flush
+ *      designs that are actually span-safe with just the 2 rims
+ *      in the `(allowable, allowable + FOOTING_WIDTH_MM]` boundary
+ *      band (GPT MEDIUM #2 in the review-gate report).
  *
  *   2. **Fallback (any of table / material / spacing absent, OR
  *      `allowableMm === 0`).** Returns `totalRows = 2` —
@@ -320,8 +345,14 @@ export const MAX_METHOD_A_BLOCK_COUNT = 200;
  *      thread the `SpanTable` through stays stable.
  *
  * The returned `totalRows` is CLAMPED via `clampMethodABeamRows`
- * against the DoS + gap ceilings. `interiorRows = totalRows − 2`
- * (always ≥ 0).
+ * against the DoS + gap + block-count ceilings. When the caller
+ * passes `widthMm > 0` the block-count clamp binds (the dynamic
+ * `floor(MAX/cols)` ceiling from `clampMethodABeamRows`); when
+ * `widthMm` is absent (undefined / 0) only the row-cap +
+ * row-gap ceilings apply — `computeMethodA` re-clamps with the
+ * concrete `widthMm` at its own seam so the block-count ceiling
+ * always binds where the layout is actually built.
+ * `interiorRows = totalRows − 2` (always ≥ 0).
  *
  * Pure — same input yields byte-equal output. No side effects.
  */
@@ -330,6 +361,7 @@ export function resolveMethodABeamRows(
   spanTable?: SpanTable,
   joistMaterial?: MaterialRef,
   joistSpacingMm?: Mm,
+  widthMm?: Mm,
 ): { totalRows: number; interiorRows: number } {
   let rowsReq = 2;
   if (
@@ -342,14 +374,21 @@ export function resolveMethodABeamRows(
       joistSpacingMm,
     );
     if (allowableMm > 0) {
-      // Row pitch = lengthMm / (totalRows − 1) ≤ allowableMm
-      //   ⇒ totalRows ≥ lengthMm / allowableMm + 1.
+      // Support span = distance between the two rim beam centers
+      // (each inset by FOOTING_WIDTH_MM/2 from the ±L/2 z-ends).
+      // This equals `farZ − nearZ` in `computeMethodA` and is the
+      // same quantity `deriveJoistSpanMm` measures for the 2-beam
+      // case — the resolver MUST use the same geometry as the
+      // checker or it drifts out of lock-step (GPT MEDIUM #2).
+      const supportSpanMm = Math.max(0, lengthMm - FOOTING_WIDTH_MM);
+      // Row pitch = supportSpanMm / (totalRows − 1) ≤ allowableMm
+      //   ⇒ totalRows ≥ supportSpanMm / allowableMm + 1.
       // The `max(2, …)` floor covers the tiny-deck case where the
-      // pitch is already safe with 2 rims.
-      rowsReq = Math.max(2, Math.ceil(lengthMm / allowableMm) + 1);
+      // 2-rim pitch is already safe.
+      rowsReq = Math.max(2, Math.ceil(supportSpanMm / allowableMm) + 1);
     }
   }
-  const totalRows = clampMethodABeamRows(rowsReq, lengthMm, 0);
+  const totalRows = clampMethodABeamRows(rowsReq, lengthMm, widthMm ?? 0);
   return { totalRows, interiorRows: totalRows - 2 };
 }
 
@@ -359,35 +398,60 @@ export function resolveMethodABeamRows(
  *
  * ## Ceilings (mirror `clampMethodBRows`)
  *
- *   - `rowsMaxByCap = MAX_METHOD_A_BEAM_ROWS` — hard DoS ceiling
- *     defending against pathological span-safe derivations that
- *     could otherwise request an implausibly dense grid.
+ *   - `rowsMaxByCap` — DYNAMIC block-count ceiling.
+ *     When `widthMm > 0`, the row count is bounded so
+ *     `cols × rows ≤ MAX_METHOD_A_BLOCK_COUNT` where
+ *     `cols = ceil(widthMm / BLOCK_COL_MAX_SPACING_MM) + 1` (the
+ *     same derivation `computeMethodA` uses). This CLAMPS
+ *     gracefully on schema-legal-but-huge decks (e.g. 100×100 ft ×
+ *     2×6 Cedar @ 24″: cap binds at ~14 rows instead of the
+ *     span-safe 15+) — the too-large adjacent-beam gap surfaces
+ *     via `deriveJoistSpanMm` as an HONEST `over-span-joist`
+ *     warning, and FR-F's disabled remediation guides the user.
+ *     When `widthMm === 0` (the resolver's pre-column-derivation
+ *     call) only the constant `MAX_METHOD_A_BEAM_ROWS` ceiling
+ *     applies; the block-count clamp binds at the second call
+ *     from `computeMethodA` where `widthMm` is known. This
+ *     mirrors `clampMethodBRows`'s dynamic
+ *     `floor(MAX_METHOD_B_BLOCK_COUNT / numJoists)` seam — the
+ *     axis differs (cols vs joists) but the shape is identical.
  *   - `rowsMaxByGap = max(2, floor(lengthMm / MIN_BEAM_ROW_GAP_MM) + 1)`
  *     — practical floor on the +z gap between adjacent beam rows
  *     (denser than a joist bay is wasteful).
+ *   - `MAX_METHOD_A_BEAM_ROWS` — absolute hard ceiling defending
+ *     against pathological synthetic span-tables (e.g. a test
+ *     table with `allowableMm` near `MIN_BLOCK_SPACING_MM` that
+ *     would otherwise request 100+ rows). Always applies.
  *
- * The `widthMm` argument is accepted for API symmetry with the
- * postcondition below (which uses it via the shared block-count
- * cap derivation). Passing `0` disables the block-count
- * postcondition (used by `resolveMethodABeamRows` when the caller
- * has not yet derived the column count — the actual layout call
- * downstream will still hit the postcondition through the block
- * grid's `validateInput`).
+ * ## Postcondition (LOUD failure — genuine arithmetic-drift guard)
  *
- * ## Postcondition (LOUD failure)
- *
- * When `rows > 2`, `cols × rows ≤ MAX_METHOD_A_BLOCK_COUNT` MUST
- * hold (`cols` is derived from the same `BLOCK_COL_MAX_SPACING_MM`
- * that `computeMethodA` uses). The `rows === 2` degenerate corner
- * is exempt — perimeter-two supersedes. A future arithmetic
- * regression that violates this fails LOUD via `LayoutError`.
+ * When `widthMm > 0` and `rows > 2`, `cols × rows ≤
+ * MAX_METHOD_A_BLOCK_COUNT` MUST hold. The `rows === 2`
+ * degenerate corner is exempt — perimeter-two supersedes. This
+ * is genuinely unreachable for any schema-legal design after the
+ * dynamic `rowsMaxByCap` clamp above; retained as defense-in-depth
+ * against a future arithmetic regression in the clamp math itself.
+ * Hence `/* c8 ignore *\/`.
  */
 export function clampMethodABeamRows(
   rowsReq: number,
   lengthMm: Mm,
   widthMm: Mm,
 ): number {
-  const rowsMaxByCap = MAX_METHOD_A_BEAM_ROWS;
+  // Dynamic block-count ceiling — mirrors `clampMethodBRows`.
+  // When widthMm is 0, `cols` cannot be derived so we fall back
+  // to the constant `MAX_METHOD_A_BEAM_ROWS` ceiling only.
+  let rowsMaxByCap = MAX_METHOD_A_BEAM_ROWS;
+  if (widthMm > 0) {
+    const cols = Math.ceil(widthMm / BLOCK_COL_MAX_SPACING_MM) + 1;
+    rowsMaxByCap = Math.max(
+      2,
+      Math.min(
+        MAX_METHOD_A_BEAM_ROWS,
+        Math.floor(MAX_METHOD_A_BLOCK_COUNT / cols),
+      ),
+    );
+  }
   const rowsMaxByGap = Math.max(
     2,
     Math.floor(lengthMm / MIN_BEAM_ROW_GAP_MM) + 1,
@@ -397,10 +461,9 @@ export function clampMethodABeamRows(
     Math.min(Math.floor(rowsReq), rowsMaxByCap, rowsMaxByGap),
   );
 
-  // Postcondition — only meaningful when the caller supplied a
-  // positive `widthMm` (otherwise columns can't be derived here
-  // and the downstream block-grid `validateInput` catches the
-  // pathological case via `explicitRowZCenters` bounds).
+  // Postcondition — arithmetic-drift guard only (see docstring).
+  // Genuinely unreachable for any schema-legal input after the
+  // dynamic clamp above; retained for defense-in-depth.
   if (widthMm > 0 && rows > 2) {
     const cols = Math.ceil(widthMm / BLOCK_COL_MAX_SPACING_MM) + 1;
     /* c8 ignore next 8 */
@@ -795,22 +858,19 @@ function computeMethodA(
 
   // Issue #75 — resolve N ≥ 2 beam rows. Fallback (no table /
   // uncatalogued material) yields `totalRows = 2` (byte-identical
-  // to pre-#75). Extract the postcondition-friendly clamp on the
-  // widthMm side so the block-count invariant fails LOUD if a
-  // future span-table addition would explode the grid.
-  const { totalRows } = resolveMethodABeamRows(
+  // to pre-#75). Passing `widthMm` here lets the block-count clamp
+  // in `clampMethodABeamRows` bind gracefully on schema-legal-but-
+  // huge decks (100×100 ft × weak-joist etc.) — the too-large
+  // adjacent-beam gap then surfaces via `deriveJoistSpanMm` as an
+  // HONEST `over-span-joist` warning and FR-F's disabled
+  // remediation guides the user. Post-review-gate fix (Opus HIGH +
+  // GPT HIGH + QA GAP-B): previously threw a developer-facing
+  // "Internal invariant violated" error on user-reachable inputs.
+  const { totalRows: totalRowsClamped } = resolveMethodABeamRows(
     design.footprint.lengthMm,
     spanTable,
     design.joist.material,
     design.joist.spacingMm,
-  );
-  // Re-clamp with the concrete widthMm so the block-count
-  // postcondition in `clampMethodABeamRows` gets a chance to fire
-  // (the `resolveMethodABeamRows` call above passes `widthMm = 0`
-  // because the caller has not yet derived the column count).
-  const totalRowsClamped = clampMethodABeamRows(
-    totalRows,
-    design.footprint.lengthMm,
     design.footprint.widthMm,
   );
   // Row z-centers: outer rows at ±(lengthMm/2 - beamInset), interior
@@ -1195,6 +1255,7 @@ function validateFloatingDesign(
         spanTable,
         design.joist.material,
         design.joist.spacingMm,
+        design.footprint.widthMm,
       );
       if (interiorRows > 0) {
         throw new LayoutError(

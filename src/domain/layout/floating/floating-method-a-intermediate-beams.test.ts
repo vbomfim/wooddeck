@@ -36,6 +36,7 @@ import { LayoutError } from '../layout-shared';
 import { FOOTING_WIDTH_MM } from '../y-stack';
 
 import {
+  BLOCK_COL_MAX_SPACING_MM,
   MAX_METHOD_A_BEAM_ROWS,
   MIN_BEAM_ROW_GAP_MM,
   clampMethodABeamRows,
@@ -705,9 +706,14 @@ describe('AC15 — property: resolveMethodABeamRows satisfies span-safety invari
         // material AND totalRows > 2 (i.e., the SpanTable path
         // actually drove the count), then the row pitch must be
         // ≤ allowable (or the cap prevented reaching it).
+        // Post PR #76 MEDIUM #2: the resolver uses `supportSpanMm =
+        // lengthMm − FOOTING_WIDTH_MM` (the INSET rim-to-rim
+        // distance the joist actually spans), so the row pitch is
+        // measured on the same quantity — mirrors `deriveJoistSpanMm`.
         const allowable = IRC.lookupJoistMaxSpan(j, sp);
         if (allowable > 0 && totalRows > 2 && totalRows < MAX_METHOD_A_BEAM_ROWS) {
-          const pitch = len / (totalRows - 1);
+          const supportSpan = Math.max(0, len - FOOTING_WIDTH_MM);
+          const pitch = supportSpan / (totalRows - 1);
           expect(pitch).toBeLessThanOrEqual(allowable);
         }
       }),
@@ -739,5 +745,147 @@ describe('AC12 layout-side — interior beams share SKU + length with rim beams'
       expect(b.size.x).toBeCloseTo(design.footprint.widthMm, 6);
       expect(b.material).toEqual({ kind: 'lumber', ...design.beam.material });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PR #76 review-gate — HIGH #1 regression: block-count cap must CLAMP,
+// not THROW, on schema-legal decks. Opus HIGH + GPT HIGH + QA GAP-B.
+// ---------------------------------------------------------------------------
+//
+// Before the fix, `clampMethodABeamRows` used a STATIC
+// `rowsMaxByCap = MAX_METHOD_A_BEAM_ROWS` and relied on the postcondition
+// throw to reject `cols × rows > MAX_METHOD_A_BLOCK_COUNT`. That fired
+// a developer-facing "Internal invariant violated" LayoutError on a
+// SCHEMA-LEGAL user input — reproduced live at 100×100 ft × 2×6 Cedar/PT
+// @ 24″ o.c. DROP (cols=14, rows=15–16 → 210–224 > 200). The cap now
+// derives `cols` from `widthMm` and computes
+// `rowsMaxByCap = max(2, min(MAX_METHOD_A_BEAM_ROWS,
+//                            floor(MAX_METHOD_A_BLOCK_COUNT / cols)))`
+// (mirrors `clampMethodBRows`). The clamp binds gracefully; the
+// resulting adjacent-beam gap surfaces via `deriveJoistSpanMm` as an
+// HONEST `over-span-joist` warning and FR-F's disabled remediation
+// guides the user.
+// ---------------------------------------------------------------------------
+
+describe('PR #76 HIGH #1 regression — block-count cap clamps (no throw) on schema-legal decks', () => {
+  const IRC = new IrcSpanTable();
+
+  it('100×100 ft × 2×6 PT @ 610 mm DROP → NO throw; renders with clamped rows + honest over-span-joist', () => {
+    const design = makeMethodA({
+      widthFt: 100,
+      lengthFt: 100,
+      joist: PT_2X6,
+      spacingMm: 610,
+      foundation: OLDCASTLE_FOUNDATION,
+    });
+    // MUST NOT throw a "Internal invariant violated" LayoutError —
+    // the previous behavior; now the cap CLAMPS gracefully.
+    const layout = computeFloatingLayout(design, { spanTable: IRC });
+    const beams = layout.members.filter((m) => m.kind === 'beam');
+    const blocks = layout.members.filter((m) => m.kind === 'block');
+    const cols =
+      Math.ceil(design.footprint.widthMm / BLOCK_COL_MAX_SPACING_MM) + 1;
+    // Clamped rows × cols MUST fit within the cap (the postcondition
+    // is now genuinely unreachable for schema-legal designs).
+    expect(beams.length * cols).toBeLessThanOrEqual(200);
+    // One block row under each beam row.
+    expect(blocks.length).toBe(beams.length * cols);
+    // Honest over-span-joist fires because the clamped row count
+    // is BELOW the span-safe count — FR-F's disabled remediation
+    // surfaces the actionable alternative to the user.
+    const overSpan = spanCheck(layout, IRC).filter(
+      (w) => w.kind === 'over-span-joist',
+    );
+    expect(overSpan.length).toBeGreaterThan(0);
+  });
+
+  it('realistic ≤ 40×40 ft decks are unaffected by the dynamic cap (still returns the span-safe row count)', () => {
+    // The dynamic cap only binds on huge decks (100×100 ft with a
+    // weak joist). Realistic user inputs must be UNCHANGED — the
+    // AC1 regression matrix is the primary proof; this test pins
+    // the exact totalRows for a mid-size deck as an integration
+    // regression against a future off-by-one in the clamp.
+    const design = makeMethodA({
+      widthFt: 20,
+      lengthFt: 24,
+      joist: PT_2X8,
+      spacingMm: 406,
+    });
+    const layout = computeFloatingLayout(design, { spanTable: IRC });
+    const beams = layout.members.filter((m) => m.kind === 'beam');
+    const { totalRows } = resolveMethodABeamRows(
+      design.footprint.lengthMm,
+      IRC,
+      PT_2X8,
+      406,
+      design.footprint.widthMm,
+    );
+    expect(beams.length).toBe(totalRows);
+    // 20×24 ft × 2×8 PT @ 406 mm: cols = ceil(6096/2438.4)+1 = 4;
+    // rowsMaxByCap = floor(200/4) = 50 → global cap wins.
+    // No cap binding at all — the resolver returned the pure
+    // span-safe count.
+    expect(beams.length).toBeGreaterThanOrEqual(3);
+    expect(beams.length).toBeLessThanOrEqual(MAX_METHOD_A_BEAM_ROWS);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PR #76 review-gate — MEDIUM #2 regression: row count uses INSET
+// supportSpan, not full deck length. GPT MEDIUM.
+// ---------------------------------------------------------------------------
+//
+// Before the fix, the resolver computed `rowsReq = ceil(lengthMm /
+// allowableMm) + 1`, but the actual joist support span is
+// `farZ − nearZ = lengthMm − FOOTING_WIDTH_MM` (each rim inset by
+// FOOTING_WIDTH_MM/2). This mismatch OVER-BUILT (extra rows) AND
+// FALSELY REJECTED flush designs in the boundary band
+// `(allowable, allowable + FOOTING_WIDTH_MM]`. The fix uses
+// `supportSpanMm = max(0, lengthMm − FOOTING_WIDTH_MM)` so the resolver
+// and `deriveJoistSpanMm` measure the same quantity.
+// ---------------------------------------------------------------------------
+
+describe('PR #76 MEDIUM #2 regression — resolver uses INSET supportSpanMm (not full lengthMm)', () => {
+  const IRC = new IrcSpanTable();
+
+  it('boundary band: allowable < lengthMm ≤ allowable + FOOTING_WIDTH_MM → totalRows = 2 (not 3)', () => {
+    // PT 2×8 @ 406 mm o.c. → IRC allowable ~3556 mm.
+    // 12 ft = 3658 mm > 3556 mm (fails full-length check).
+    // supportSpan = 3658 - 300 = 3358 mm ≤ 3556 mm (passes inset check).
+    // The 2-beam span is genuinely safe; the resolver must return 2.
+    const lengthMm = 12 * MM_PER_FOOT;
+    const allowable = IRC.lookupJoistMaxSpan(PT_2X8, 406);
+    expect(allowable).toBeGreaterThan(0);
+    expect(lengthMm).toBeGreaterThan(allowable); // full-length would fail
+    const supportSpan = lengthMm - FOOTING_WIDTH_MM;
+    expect(supportSpan).toBeLessThanOrEqual(allowable); // inset passes
+    const { totalRows } = resolveMethodABeamRows(
+      lengthMm,
+      IRC,
+      PT_2X8,
+      406,
+    );
+    // Post-fix: 2 beams (the 2-rim span IS safe). Pre-fix would
+    // have returned 3 (unnecessary interior beam).
+    expect(totalRows).toBe(2);
+  });
+
+  it('boundary band + flush → validation ACCEPTS (was falsely rejected pre-fix)', () => {
+    // Same PT 2×8 @ 406 mm at 12 ft. Flush framing pre-fix wrongly
+    // threw FR-E because the resolver over-counted rows. Post-fix
+    // the resolver returns 2, so interiorRows = 0, and FR-E does
+    // NOT trip.
+    const design = makeMethodA({
+      widthFt: 12,
+      lengthFt: 12,
+      joist: PT_2X8,
+      spacingMm: 406,
+    });
+    const flushDesign: DeckDesign = { ...design, beamConnection: 'flush' };
+    // MUST NOT throw — flush is safe when the 2-rim span is safe.
+    expect(() =>
+      computeFloatingLayout(flushDesign, { spanTable: IRC }),
+    ).not.toThrow();
   });
 });

@@ -1397,15 +1397,21 @@ describe('computeRemediations — S25 add-support-row (ticket #47)', () => {
     expect(idxAdd).toBeLessThan(idxReduce);
   });
 
-  it('over-span JOIST warning under Method A → DISABLED add-support-row with cap-reached reason (issue #75 FR-F)', () => {
+  it('over-span JOIST warning under Method A → DISABLED add-support-row naming the three remediations (issue #75 FR-F)', () => {
     // Issue #75 (FR-F) — Method A NOW auto-adds INTERMEDIATE
     // beam rows to keep joists span-safe. If the joist STILL
-    // warns after that, the row budget is exhausted — the
-    // remaining remediation is model-swap. Emit a DISABLED
-    // add-support-row option so the UI can surface the real
-    // alternative (no "lying UI"). Message must name the three
-    // remediations (reduce length / heavier joist / joists on
-    // blocks).
+    // warns after that, one of two things happened:
+    //   (a) resolver fallback (no SpanTable / uncatalogued
+    //       material) added ZERO interior rows;
+    //   (b) the dynamic block-count cap bound BELOW the
+    //       span-safe row count on a huge deck.
+    // In both cases the remediation is the same — model-swap,
+    // not another row. The DISABLED reason MUST be true in
+    // BOTH paths and MUST name the three remediations (reduce
+    // length / heavier joist / joists on blocks). Post-review
+    // fix (Opus MEDIUM #3) reworded the reason from "already
+    // added the maximum" (false in path a) to a generic
+    // "cannot add more interior beam rows" wording.
     const design = makeFloating({
       widthFt: 12,
       lengthFt: 12,
@@ -1420,12 +1426,15 @@ describe('computeRemediations — S25 add-support-row (ticket #47)', () => {
     expect(addRow.disabled).toBe(true);
     expect(addRow.disabledReason).toBeDefined();
     const reason = String(addRow.disabledReason);
-    // Cap-reached remediation MUST name all three fixes so the
-    // user has actionable options (mirrors the FR-E validator
-    // message).
+    // Reason MUST name all three fixes so the user has
+    // actionable options (mirrors the FR-E validator message).
     expect(reason).toMatch(/reduce deck length/i);
     expect(reason).toMatch(/heavier joist/i);
     expect(reason).toMatch(/joists on blocks/i);
+    // Post-review Opus MEDIUM #3: the wording MUST NOT falsely
+    // claim rows were "already added" (the fallback path adds
+    // ZERO interior rows).
+    expect(reason).not.toMatch(/already added/i);
   });
 
   // -------------------------------------------------------------------

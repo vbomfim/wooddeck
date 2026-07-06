@@ -1298,18 +1298,26 @@ function produceAddSupportRow(
   // Issue #75 (FR-F) — Method A now auto-adds INTERMEDIATE beam
   // rows (up to `MAX_METHOD_A_BEAM_ROWS × cols` block-count cap)
   // to keep joists span-safe. If the joist STILL warns after all
-  // that, the resolver has already exhausted the row budget — the
-  // remaining remediation is model-swap, not another row. Emit a
-  // DISABLED option so `useDesignStatus().lastError` surfaces the
-  // real alternative (no "lying UI").
+  // that, one of two things happened: (a) the caller didn't
+  // thread a `SpanTable` / the joist material is uncatalogued
+  // (the resolver fell back to 2 rims), or (b) the dynamic
+  // block-count cap bound BELOW the span-safe row count on a
+  // huge deck. In both cases the remaining remediation is the
+  // same — model-swap, not another row — so the DISABLED
+  // reason is worded to be TRUE regardless of which path fired
+  // (post-review-gate Opus MEDIUM #3: the previous "already
+  // added the maximum" wording was false in the fallback path
+  // where ZERO interior rows were added). Emit a DISABLED option
+  // so `useDesignStatus().lastError` surfaces the real
+  // alternative (no "lying UI").
   if (design.floatingFraming === 'beams-and-joists') {
     if (warning.kind === 'over-span-joist') {
       return makeDisabledAddSupportRowNoRowCount({
         warning,
         disabledReason:
-          "The layout already added the maximum interior beam rows the " +
-          "block-count cap allows. Reduce deck length, use a heavier joist, " +
-          "or switch to 'Joists on blocks' framing.",
+          "Method A cannot add more interior beam rows for this design. " +
+          "Reduce deck length, use a heavier joist, or switch to " +
+          "'Joists on blocks' framing.",
       });
     }
     if (warning.kind !== 'over-span-beam') return null;
