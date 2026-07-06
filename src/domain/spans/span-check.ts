@@ -41,15 +41,20 @@
  * ### Joist span
  *
  * In the ELEVATED and Method-A floating layouts, a joist's span is
- * the center-to-center distance between the two beams that support
- * it. In the MVP layout there are exactly two beams (`beam-near`
- * at −z, `beam-far` at +z — see `beam-layout.ts` for elevated,
- * `floating-beam-layout.ts` for the S26 rim beams). The joist
- * span is therefore:
+ * the center-to-center distance between the two adjacent beams
+ * that support it. The elevated MVP has exactly two beams
+ * (`beam-near` at −z, `beam-far` at +z — see `beam-layout.ts`);
+ * Method A #75 adds N ≥ 2 rows (`beam-mid-K` in between). The
+ * joist span is therefore:
  *
- *     joistSpanMm = max(beam.z) − min(beam.z)
+ *     joistSpanMm = max adjacent-z gap between beam centers
  *
- * which, for the MVP layout, equals:
+ * For exactly two beams this equals `max(z) − min(z)`, i.e.
+ * BYTE-IDENTICAL to the pre-#75 derivation. For N ≥ 3 the max
+ * adjacent gap is the (fail-safe) span the joist has to survive —
+ * IRC span limits are per-span, not average.
+ *
+ * In the two-beam case this also equals:
  *
  *     joistSpanMm = footprint.lengthMm − FOOTING_WIDTH_MM
  *                                       ^^^^^^^^^^^^^^^^^^^^
@@ -333,18 +338,43 @@ export function spanCheck(layout: Layout, table: SpanTable): Warning[] {
 // ==========================================================
 
 /**
- * Beam-to-beam center distance = max(beam.z) − min(beam.z). Returns
- * `null` if there are fewer than 2 beams (no defensible span).
+ * Joist span = **max adjacent-z gap** between beams (issue #75).
+ *
+ * ## Derivation
+ *
+ * Sort beams by z-center; the joist's between-supports span is the
+ * largest consecutive-pair gap. Returns `null` if there are fewer
+ * than 2 beams (no defensible span).
+ *
+ *   - **N = 2 beams** (the pre-#75 shape): `max−min` == the single
+ *     adjacent gap, so this is BYTE-IDENTICAL to the previous
+ *     `max(z) − min(z)` derivation. All existing goldens and
+ *     span-check fixtures are unaffected.
+ *   - **N ≥ 3 beams** (Method A #75, intermediate beams): joists
+ *     rest on top of (drop) all beam rows, so the actual span is
+ *     the LARGEST between-supports gap, not the full deck length.
+ *     The joist span check now correctly reflects that adding
+ *     interior beams tightens the span. Mirrors
+ *     `deriveMethodBJoistSpanFromBlockGrid` (which does the same
+ *     computation on block-z centers for Method B).
+ *
+ * ## Why max-adjacent, not min-adjacent?
+ *
+ * IRC span limits are per-span (worst-case), not average. A joist
+ * that spans 3 m in one bay and 2 m in another needs to survive
+ * the 3 m bay. Reporting the MAX adjacent gap is the SAFE
+ * derivation (fail-safe if the interior beams aren't perfectly
+ * evenly spaced due to rounding).
  */
 function deriveJoistSpanMm(beams: readonly LayoutMember[]): Mm | null {
   if (beams.length < 2) return null;
-  let minZ = Infinity;
-  let maxZ = -Infinity;
-  for (const beam of beams) {
-    if (beam.position.z < minZ) minZ = beam.position.z;
-    if (beam.position.z > maxZ) maxZ = beam.position.z;
+  const zs = beams.map((b) => b.position.z).sort((a, b) => a - b);
+  let maxGap = 0;
+  for (let i = 1; i < zs.length; i++) {
+    const gap = zs[i]! - zs[i - 1]!;
+    if (gap > maxGap) maxGap = gap;
   }
-  return maxZ - minZ;
+  return maxGap;
 }
 
 /**

@@ -45,12 +45,18 @@ export type { BlocksUnderPostsInput } from './foundation/blocks-under-posts';
 export {
   BEAM_TO_BEAM_MAX_SPACING_MM,
   BLOCK_ROW_MAX_SPACING_MM,
+  MAX_METHOD_A_BEAM_ROWS,
+  MAX_METHOD_A_BLOCK_COUNT,
+  MIN_BEAM_ROW_GAP_MM,
+  clampMethodABeamRows,
   computeFloatingLayout,
+  resolveMethodABeamRows,
 } from './floating/floating-layout';
 export type { ComputeFloatingLayoutOptions } from './floating/floating-layout';
 export { computeBlockGrid, MIN_BLOCK_SPACING_MM } from './floating/block-grid';
 export type { BlockGridInput } from './floating/block-grid';
-export { computeFloatingRimBeams } from './floating/floating-beam-layout';
+export { computeFloatingBeams } from './floating/floating-beam-layout';
+export type { ComputeFloatingBeamsOptions } from './floating/floating-beam-layout';
 export { layoutFloatingJoists } from './floating/floating-joist-layout';
 export { layoutFloatingDecking } from './floating/floating-decking';
 export {

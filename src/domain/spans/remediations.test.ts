@@ -1397,11 +1397,21 @@ describe('computeRemediations — S25 add-support-row (ticket #47)', () => {
     expect(idxAdd).toBeLessThan(idxReduce);
   });
 
-  it('over-span JOIST warning under Method A → NO add-support-row (row-densification does not fix a beam-carried joist span)', () => {
-    // S26 FIX #4 (review-gate) — under Method A, joists rest on
-    // rim beams (not on blocks); adding a block row does not
-    // change the joist support. `produceAddSupportRow` returns
-    // null for joist warnings under Method A.
+  it('over-span JOIST warning under Method A → DISABLED add-support-row naming the three remediations (issue #75 FR-F)', () => {
+    // Issue #75 (FR-F) — Method A NOW auto-adds INTERMEDIATE
+    // beam rows to keep joists span-safe. If the joist STILL
+    // warns after that, one of two things happened:
+    //   (a) resolver fallback (no SpanTable / uncatalogued
+    //       material) added ZERO interior rows;
+    //   (b) the dynamic block-count cap bound BELOW the
+    //       span-safe row count on a huge deck.
+    // In both cases the remediation is the same — model-swap,
+    // not another row. The DISABLED reason MUST be true in
+    // BOTH paths and MUST name the three remediations (reduce
+    // length / heavier joist / joists on blocks). Post-review
+    // fix (Opus MEDIUM #3) reworded the reason from "already
+    // added the maximum" (false in path a) to a generic
+    // "cannot add more interior beam rows" wording.
     const design = makeFloating({
       widthFt: 12,
       lengthFt: 12,
@@ -1410,9 +1420,21 @@ describe('computeRemediations — S25 add-support-row (ticket #47)', () => {
     });
     const joistWarning = makeJoistWarning();
     const options = computeRemediations(joistWarning, design, IRC, RECOMPUTE);
-    for (const opt of options) {
-      expect(opt.kind).not.toBe('add-support-row');
-    }
+    const addRow = options.find((o) => o.kind === 'add-support-row');
+    expect(addRow).toBeDefined();
+    if (!addRow) return;
+    expect(addRow.disabled).toBe(true);
+    expect(addRow.disabledReason).toBeDefined();
+    const reason = String(addRow.disabledReason);
+    // Reason MUST name all three fixes so the user has
+    // actionable options (mirrors the FR-E validator message).
+    expect(reason).toMatch(/reduce deck length/i);
+    expect(reason).toMatch(/heavier joist/i);
+    expect(reason).toMatch(/joists on blocks/i);
+    // Post-review Opus MEDIUM #3: the wording MUST NOT falsely
+    // claim rows were "already added" (the fallback path adds
+    // ZERO interior rows).
+    expect(reason).not.toMatch(/already added/i);
   });
 
   // -------------------------------------------------------------------
