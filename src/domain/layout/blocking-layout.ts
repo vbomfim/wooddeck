@@ -318,3 +318,139 @@ export function layoutBlockingBetweenJoists(
 
   return out;
 }
+
+/**
+ * Bay descriptor for {@link layoutBlockingBetweenJoistsPerBay} — one
+ * per bay between two adjacent BEAM z-centers under flush framing.
+ * The producer in `floating-joist-layout.ts::computeBayClearGapsMm`
+ * emits values with the SAME shape; keeping them structurally
+ * compatible means the orchestrator can pass the resolver output
+ * through unchanged.
+ */
+export interface BlockingBayInput {
+  /** Bay midpoint on +z (the row center inside this bay). */
+  readonly midZ: Mm;
+  /**
+   * CLEAR span between the two enclosing beam FACES on +z.
+   * Row count for this bay uses this value (per IRC R502.7.1) so
+   * blocking rows sit ONLY inside the bay (never on the beam
+   * itself — an interior beam under flush shares the joist
+   * plane and would AABB-clash with a whole-deck-length row).
+   */
+  readonly clearSpanMm: Mm;
+}
+
+/**
+ * Pure input contract for {@link layoutBlockingBetweenJoistsPerBay}
+ * (issue #77 §2 C6). Mirrors {@link BlockingLayoutInput} but scoped
+ * to a LIST of bays instead of a single deck-length row rule.
+ *
+ * See the module header §6 (issue #77) for the rationale: under
+ * `flush + interior`, the joist plane and the beam plane overlap in
+ * y (`beamDepthMm ≥ joistDepthMm` per `validateFlushBeamDepth`), so
+ * a whole-deck-length blocking row at a z that coincides with an
+ * interior beam would AABB-clash with the beam. Per-bay placement
+ * guarantees blocking always sits STRICTLY inside a bay, between
+ * two beam faces.
+ */
+export interface BlockingLayoutPerBayInput {
+  readonly joistXCenters: readonly number[];
+  readonly joistCenterY: Mm;
+  readonly joistThicknessMm: Mm;
+  readonly joistDepthMm: Mm;
+  /**
+   * The bays to place blocking within, in +z-ascending order.
+   * Produced by `computeBayClearGapsMm(beamZCentersSorted,
+   * beamThicknessMm)` in `floating-joist-layout.ts`.
+   */
+  readonly bays: readonly BlockingBayInput[];
+  readonly material: LumberMemberMaterial;
+}
+
+/**
+ * Issue #77 — per-BAY blocking layout for flush + interior beams.
+ *
+ * For each bay `k`, applies the SAME IRC R502.7.1 row rule
+ * `N_k = max(1, ceil(bayClearSpan / MAX_BLOCKING_SPACING_MM) − 1)`
+ * that `layoutBlockingBetweenJoists` uses on the whole deck
+ * length, but SCOPED to the bay's `clearSpanMm`. Rows sit at
+ * `midZ + k' × (clearSpanMm / (N_k + 1))` for `k' = 1..N_k`,
+ * i.e. evenly spread INSIDE the bay — never on a beam.
+ *
+ * Per-member geometry is IDENTICAL to the whole-deck emitter
+ * (x-clear-gap × joist-depth × joist-thickness at the bay's mid-z-
+ * row-station). Deterministic ids `blocking-bay-{bay}-r{row}-b{joistBay}`
+ * — the `bay-` prefix disambiguates from the whole-deck-length ids
+ * (`blocking-r{row}-b{col}`) so a mixed layout (unlikely, but
+ * defensive) cannot collide.
+ *
+ * Byte-identity note: DROP and flush-2-beam paths do NOT call this
+ * helper — they continue to use `layoutBlockingBetweenJoists` with
+ * the whole-deck-length row rule (byte-identical to pre-#77).
+ *
+ * The degenerate-bay guard (`CLEAR_GAP_EPS_MM`) applies here too —
+ * a bay whose clear gap between joists is ≤ EPS is SKIPPED. Fail-
+ * safe. The row loop continues so any OPEN bay in the same
+ * (bay, row) combination still emits blocking normally.
+ *
+ * @param input see {@link BlockingLayoutPerBayInput}.
+ * @returns array of `LayoutMember` with `kind === 'blocking'`.
+ *   Empty when `joistXCenters.length < 2` OR `bays.length === 0`.
+ */
+export function layoutBlockingBetweenJoistsPerBay(
+  input: BlockingLayoutPerBayInput,
+): readonly LayoutMember[] {
+  const {
+    joistXCenters,
+    joistCenterY,
+    joistThicknessMm,
+    joistDepthMm,
+    bays,
+    material,
+  } = input;
+
+  const joistBays = joistXCenters.length - 1;
+  if (joistBays < 1) return [];
+  if (bays.length === 0) return [];
+
+  const out: LayoutMember[] = [];
+  for (let bayIdx = 0; bayIdx < bays.length; bayIdx++) {
+    const bay = bays[bayIdx]!;
+    // Defensive — a non-positive clear span cannot host any
+    // blocking rows. Under the pipeline this is guaranteed by
+    // `MIN_BEAM_ROW_GAP_MM > FOOTING_WIDTH_MM`, but a direct
+    // caller with a degenerate bay should get an empty response
+    // instead of a NaN row count.
+    /* c8 ignore next */
+    if (bay.clearSpanMm <= 0) continue;
+    // IRC R502.7.1 row count scoped to THIS bay's span.
+    const rows = Math.max(
+      1,
+      Math.ceil(bay.clearSpanMm / MAX_BLOCKING_SPACING_MM) - 1,
+    );
+    const rowStep = bay.clearSpanMm / (rows + 1);
+    // Row stations sit inside the bay's z-extent:
+    // `midZ − clearSpan/2` is the front face; rows are `k' × step`
+    // in from there for `k' = 1..rows`.
+    const bayFront = bay.midZ - bay.clearSpanMm / 2;
+    for (let rowIdx = 0; rowIdx < rows; rowIdx++) {
+      const z = bayFront + (rowIdx + 1) * rowStep;
+      for (let joistBay = 0; joistBay < joistBays; joistBay++) {
+        const leftCenter = joistXCenters[joistBay]!;
+        const rightCenter = joistXCenters[joistBay + 1]!;
+        const midX = (leftCenter + rightCenter) / 2;
+        const clearGap = rightCenter - leftCenter - joistThicknessMm;
+        if (clearGap <= CLEAR_GAP_EPS_MM) continue;
+        out.push({
+          id: `blocking-bay-${String(bayIdx)}-r${String(rowIdx)}-b${String(joistBay)}`,
+          kind: 'blocking',
+          material,
+          position: { x: midX, y: joistCenterY, z },
+          size: { x: clearGap, y: joistDepthMm, z: joistThicknessMm },
+          rotation: { x: 0, y: 0, z: 0 },
+        });
+      }
+    }
+  }
+  return out;
+}

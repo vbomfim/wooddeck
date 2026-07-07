@@ -76,13 +76,13 @@
  * Pure `src/domain/**` module. Imports only sibling domain modules.
  */
 
-import type { DeckDesign, Layout, LayoutMember, MaterialRef } from '../../model';
+import type { DeckDesign, Layout, LayoutMember, LumberMemberMaterial, MaterialRef } from '../../model';
 import { lookupFoundationProduct } from '../../foundation-catalog';
 import { lookupMaterial } from '../../materials-catalog';
 import type { SpanTable } from '../../spans/span-table';
 import { MM_PER_FOOT, type Mm } from '../../units';
 import { assertNever } from '../../assert-never';
-import { layoutBlockingBetweenJoists } from '../blocking-layout';
+import { layoutBlockingBetweenJoists, layoutBlockingBetweenJoistsPerBay } from '../blocking-layout';
 import { computeJoistXCenters } from '../joist-layout';
 import {
   LayoutError,
@@ -96,7 +96,7 @@ import { FOOTING_WIDTH_MM } from '../y-stack';
 import { computeAxisCenters, blockCountForAxis, clampBlockSpacingMm, computeBlockGrid, MIN_BLOCK_SPACING_MM } from './block-grid';
 import { computeFloatingBeams } from './floating-beam-layout';
 import { layoutFloatingDecking } from './floating-decking';
-import { layoutFloatingJoists } from './floating-joist-layout';
+import { computeBayClearGapsMm, layoutFloatingJoists } from './floating-joist-layout';
 import { computeMinFloatingHeightMm, computeYStackFloating } from './y-stack-floating';
 
 /**
@@ -832,13 +832,18 @@ export function computeFloatingLayout(
  * count — a user's `blockColsHint` still applies exactly as it did
  * pre-S26 (the S25 UI seam is unchanged).
  *
- * ## FR-E — flush + intermediate rejection
+ * ## Issue #77 — flush + intermediate is now SEGMENTED (supersedes FR-E)
  *
- * When `beamConnection === 'flush' && interiorRows > 0`
- * `validateFloatingDesign` throws BEFORE dispatch. The MVP does
- * NOT support hanging joists off multiple interior beams (each
- * joist would need to be split into per-bay members); the
- * remediation-oriented error surfaces via `useDesignStatus().lastError`.
+ * Pre-#77 `validateFloatingDesign` THREW `LayoutError` for
+ * `beamConnection === 'flush' && interiorRows > 0` (FR-037 FR-E).
+ * Issue #77 removes the throw and implements segmentation: each
+ * joist column becomes `totalRows − 1` bay SEGMENT members (one
+ * per bay), hung off two beam faces via hangers. This orchestrator
+ * threads the beam z-centers + beam thickness into
+ * `layoutFloatingJoists(design, options)` so the segmentation
+ * dispatch (in `./floating-joist-layout.ts`) stays in lock-step
+ * with the beam layout. DROP and flush-2-beam paths are
+ * BYTE-IDENTICAL to pre-#77.
  */
 function computeMethodA(
   design: DeckDesign,
@@ -901,17 +906,35 @@ function computeMethodA(
   });
 
   const beams = computeFloatingBeams(design, { numRows: totalRowsClamped });
-  const joists = layoutFloatingJoists(design);
+  // Issue #77 — thread the beam z-centers + beam thickness into
+  // the joist layer so `layoutFloatingJoists` can dispatch on
+  // `flush + interior` and emit segmented joists (one per bay).
+  // DROP and flush-2-beam ignore the options and emit continuous
+  // joists (byte-identical to pre-#77).
+  const beamMat = lookupMaterial(
+    design.beam.material.nominal,
+    design.beam.material.species,
+    design.beam.material.grade,
+  );
+  const beamThicknessMm = beamMat.actual.widthMm; // small dressed dim → +z
+  const joists = layoutFloatingJoists(design, {
+    beamZCentersSorted: rowZCenters,
+    beamThicknessMm,
+  });
   const boards = layoutFloatingDecking(design);
   // Issue #72 — solid blocking between joists per IRC R502.7.1.
-  // Same shared helper the elevated pipeline uses; the floating
-  // y-anchor comes from `computeYStackFloating.joistCenterY`
-  // (co-planar with joists on the beam-top plane for Method A).
-  // Blocking sits in the joist plane; intermediate beams sit in the
-  // beam plane (a joist depth below) — different y-planes, so #75's
-  // interior beams cannot collide with blocking (FR-036 interop —
-  // §17 Q5 in issue #75).
-  const blocking = computeFloatingBlockingFromDesign(design);
+  // Issue #77 — under `flush + interior`, use the PER-BAY variant so
+  // blocking sits STRICTLY inside each bay (never on an interior
+  // beam AABB — the flush joist plane overlaps the beam plane, so
+  // a whole-deck-length row at a z that coincides with an interior
+  // beam would AABB-clash with the beam). For DROP and flush-2-beam
+  // the whole-deck-length variant is BYTE-IDENTICAL to pre-#77
+  // (beams sit a joist depth below the joist plane under drop; a
+  // flush 2-beam layout has no interior beams to collide with).
+  const blocking = computeFloatingBlockingFromDesign(design, {
+    beamZCentersSorted: rowZCenters,
+    beamThicknessMm,
+  });
 
   // Top-down order (mirrors the y-stack): boards on top, blocks
   // on bottom. Blocking sits at the joist plane (interleaved with
@@ -1071,12 +1094,29 @@ function computeMethodB(
  * dispatches on `design.floatingFraming`: Method A joists sit on
  * beam-top, Method B joists sit on block-top. Blocking follows.
  *
+ * ## Issue #77 — per-bay blocking under flush + interior
+ *
+ * When `beamConnection === 'flush' && interiorRows > 0` the joist
+ * plane and the beam plane overlap in y (`beamDepthMm ≥ joistDepthMm`
+ * per `validateFlushBeamDepth`), so a whole-deck-length blocking
+ * row at a z that coincides with an interior beam would AABB-clash
+ * with the beam. The `opts.beamZCentersSorted` / `opts.beamThicknessMm`
+ * bag triggers `layoutBlockingBetweenJoistsPerBay` (per-bay
+ * variant): blocking sits STRICTLY inside each bay between two
+ * beam faces. DROP and flush-2-beam paths call this helper without
+ * the bag OR with `interiorRows === 0` — the whole-deck-length
+ * variant is preserved and is BYTE-IDENTICAL to pre-#77.
+ *
  * @throws {Error} from `lookupMaterial` when the joist material
  *   triple is not in the catalog. `computeFloatingLayout` wraps
  *   this as `LayoutError`.
  */
 function computeFloatingBlockingFromDesign(
   design: DeckDesign,
+  opts?: {
+    readonly beamZCentersSorted?: readonly number[];
+    readonly beamThicknessMm?: Mm;
+  },
 ): readonly LayoutMember[] {
   const joistMat = lookupMaterial(
     design.joist.material.nominal,
@@ -1089,6 +1129,34 @@ function computeFloatingBlockingFromDesign(
   const spacingMm = design.joist.spacingMm;
   const joistXCenters = computeJoistXCenters(widthMm, spacingMm, joistThicknessMm);
   const joistCenterY = computeYStackFloating(design).joistCenterY;
+  const material: LumberMemberMaterial = {
+    kind: 'lumber',
+    ...design.joist.material,
+  };
+
+  // Issue #77 — dispatch to per-bay variant when flush + interior.
+  // The gate is TIGHTER than "flush" alone: 2-beam flush has no
+  // interior beam to collide with, so it stays byte-identical.
+  const beamZ = opts?.beamZCentersSorted;
+  const beamThicknessMm = opts?.beamThicknessMm;
+  const shouldDispatchPerBay =
+    design.floatingFraming === 'beams-and-joists' &&
+    design.beamConnection === 'flush' &&
+    beamZ !== undefined &&
+    beamZ.length >= 3 &&
+    beamThicknessMm !== undefined &&
+    beamThicknessMm > 0;
+  if (shouldDispatchPerBay) {
+    const bays = computeBayClearGapsMm(beamZ, beamThicknessMm);
+    return layoutBlockingBetweenJoistsPerBay({
+      joistXCenters,
+      joistCenterY,
+      joistThicknessMm,
+      joistDepthMm,
+      bays,
+      material,
+    });
+  }
 
   return layoutBlockingBetweenJoists({
     joistXCenters,
@@ -1096,7 +1164,7 @@ function computeFloatingBlockingFromDesign(
     joistThicknessMm,
     joistDepthMm,
     lengthMm: design.footprint.lengthMm,
-    material: { kind: 'lumber', ...design.joist.material },
+    material,
   });
 }
 
@@ -1163,7 +1231,7 @@ function computeFloatingBoundsFromMembers(
  */
 function validateFloatingDesign(
   design: DeckDesign,
-  spanTable?: SpanTable,
+  _spanTable?: SpanTable,
 ): void {
   if (design.structure !== 'floating') {
     throw new LayoutError(
@@ -1239,39 +1307,20 @@ function validateFloatingDesign(
   // remediation instead of the generic height message.
   if (design.floatingFraming === 'beams-and-joists') {
     validateFlushBeamDepth(design);
-    // Issue #75 (FR-E) — flush + intermediate beam rows are
-    // REJECTED at validation. Method A #75 places intermediate
-    // beam rows between the two rims to keep joists span-safe;
-    // FLUSH framing hangs joists off the beam face via hangers,
-    // so a joist can only span between TWO beam faces (its two
-    // ends). Interior beams under flush would require SEGMENTED
-    // joists (per-bay members) — a large geometric + BOM change
-    // deferred to a follow-up story (§16 in issue #75). The
-    // rejection is surfaced via `useDesignStatus().lastError`
-    // — three actionable remediations named below.
-    if (design.beamConnection === 'flush') {
-      const { interiorRows } = resolveMethodABeamRows(
-        design.footprint.lengthMm,
-        spanTable,
-        design.joist.material,
-        design.joist.spacingMm,
-        design.footprint.widthMm,
-      );
-      if (interiorRows > 0) {
-        throw new LayoutError(
-          `Flush beam connection combined with intermediate beam ` +
-            `rows (${interiorRows} interior row${interiorRows === 1 ? '' : 's'}) is not ` +
-            `supported in the MVP. Method A auto-adds interior beam rows to keep ` +
-            `joists span-safe on this deck length, but flush framing hangs each ` +
-            `joist off two beam faces — segmenting joists across interior beams ` +
-            `is deferred to a follow-up story (see issue #75). Choose one of the ` +
-            `three remediations: switch to "drop" beam connection (joists rest on ` +
-            `top and run continuously over every beam row), reduce deck length ` +
-            `until only the two rim beams are required, or switch to the "joists ` +
-            `on blocks" framing method (no beam layer at all).`,
-        );
-      }
-    }
+    // Issue #77 supersedes FR-037 FR-E (formerly REJECTED
+    // flush + interior at this seam). Flush + interior now
+    // renders: `computeMethodA` threads the resolved beam
+    // z-centers + beam thickness into `layoutFloatingJoists`
+    // (which segments joists per bay — one member per bay) and
+    // into `computeFloatingBlockingFromDesign` (per-bay blocking
+    // that sits STRICTLY inside each bay between two beam faces,
+    // never on an interior beam). Hangers = 2 × segments in the
+    // BOM. See `./floating-joist-layout.ts::computeBayClearGapsMm`
+    // for the beam-face-to-beam-face clear-gap derivation and
+    // `../blocking-layout.ts::layoutBlockingBetweenJoistsPerBay`
+    // for the per-bay row-count rule (IRC R502.7.1 scoped per bay).
+    // `validateFlushBeamDepth` above still fires (a flush beam
+    // shallower than the joist would poke below the joist plane).
   }
 
   let minHeightMm: Mm;

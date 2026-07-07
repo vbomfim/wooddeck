@@ -404,24 +404,30 @@ export function deriveBom(layout: Layout, options: DeriveBomOptions = {}): BomRe
 
   // ---- Build hardware sections (S27: joist hangers for flush) ---------
   //
-  // Rule: for `beamConnection: 'flush'`, EACH joist end that frames
-  // into a beam needs a joist hanger. Elevated + floating Method A
-  // both frame joists into EXACTLY 2 beams (near + far rim beams —
-  // enforced by the MVP invariant in `post-layout.ts` "each beam is
-  // one of BEAM_IDS.near / BEAM_IDS.far; intermediate beams are v2+").
+  // Rule: for `beamConnection: 'flush'`, EACH joist SEGMENT end
+  // that frames into a beam needs a joist hanger. Elevated +
+  // floating Method A both frame joists into EXACTLY 2 beams
+  // per segment (a segment spans a single bay between two adjacent
+  // beam faces).
+  //
+  // Issue #77 — after segmentation each `kind: 'joist'` MEMBER is
+  // one segment (continuous joist under DROP + flush-2-beam, or
+  // one bay segment under flush-with-interior). So `joistCount`
+  // here IS the segment count, and the hanger formula
+  // `segments × 2` collapses to `joistCount × 2` — byte-identical
+  // to pre-#77 when there are no interior beams (flush-2-beam:
+  // `numJoists × 2`), and grows to `numJoists × (totalRows − 1) × 2`
+  // under flush + interior (2 ends per bay segment).
   //
   // Hangers formula (S27 review-response Security INFO #1 —
-  // `joistCount * 2`):
+  // `joistCount * 2`; issue #77 renamed the constant to make it
+  // clear it's per SEGMENT end):
   //
-  //   - "2" is a CONSTANT: it means "two ends per joist" — every
-  //     joist has one near end and one far end, and each end needs
-  //     one hanger. The count is independent of the beam count and
-  //     stays correct even in a hypothetical future rework that
-  //     added intermediate beams (an intermediate beam would carry
-  //     joists on top of it in drop mode; for flush, the joist runs
-  //     would be split at that beam, giving THREE hanger ends per
-  //     joist end-segment which is a separate model — see the v2+
-  //     "intermediate beams" spec placeholder).
+  //   - "2" is a CONSTANT: it means "two ends per joist SEGMENT" —
+  //     every segment has one near end and one far end, and each
+  //     end needs one hanger. Post-#77 a "joist" in the layout is a
+  //     segment (pre-#77 there was only ever one segment per
+  //     column), so this constant is stable across the story.
   //   - Multiplying by the CURRENT `beamCount` (pre-review code) was
   //     mathematically equivalent to `× 2` under the MVP invariant
   //     but coupled the hardware count to a layout-emission detail
@@ -432,7 +438,7 @@ export function deriveBom(layout: Layout, options: DeriveBomOptions = {}): BomRe
   //     somehow leaks through — flush is meaningless without beams.
   //
   // For `'drop'` there are no hangers (joists rest on beam tops).
-  const HANGER_ENDS_PER_JOIST = 2;
+  const HANGER_ENDS_PER_JOIST_SEGMENT = 2;
   const hardware: BomSection_Hardware[] = [];
   if (beamConnection === 'flush' && joistCount > 0 && beamCount > 0) {
     // Group hangers by joist nominal. When mixed joist sizes are
@@ -442,7 +448,7 @@ export function deriveBom(layout: Layout, options: DeriveBomOptions = {}): BomRe
       hardware.push(
         Object.freeze({
           sku: formatHangerSku(nominal),
-          count: count * HANGER_ENDS_PER_JOIST,
+          count: count * HANGER_ENDS_PER_JOIST_SEGMENT,
         }),
       );
     }

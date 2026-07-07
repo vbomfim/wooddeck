@@ -380,14 +380,37 @@ function deriveJoistSpanMm(beams: readonly LayoutMember[]): Mm | null {
 /**
  * Joist on-center spacing = adjacent-joist center-to-center distance.
  * Layout produces evenly-spaced joists (`joist-layout.ts`), so any
- * adjacent pair gives the same value. Returns `0` for fewer than 2
- * joists — the `SpanTable` lookup will fail-safe (0 falls outside
- * every tabulated row's tolerance window).
+ * adjacent pair of DISTINCT x-centers gives the same value.
+ * Returns `0` for fewer than 2 distinct x-centers — the `SpanTable`
+ * lookup will fail-safe (0 falls outside every tabulated row's
+ * tolerance window).
+ *
+ * ## Issue #77 — segment-aware
+ *
+ * Under Method A + flush + interior beams, `layoutFloatingJoists`
+ * emits multiple SEGMENTS per joist column (one per bay), and
+ * every segment in the same column shares the SAME x-center. The
+ * pre-#77 `xs[1] - xs[0]` sort would return `0` for a segmented
+ * layout because the first two entries in the sorted array would
+ * be two segments of the same column. Uniqueing the x-values
+ * FIRST keeps this derivation stable across the segmentation
+ * dispatch (byte-identical result for un-segmented layouts).
  */
 function deriveJoistSpacingMm(joists: readonly LayoutMember[]): Mm {
   if (joists.length < 2) return 0;
+  // Distinct x-centers only — segments in the same column share
+  // one x. A small epsilon guards against float noise (positions
+  // are integer-mm in practice, but be defensive).
+  const EPS = 1e-6;
   const xs = joists.map((j) => j.position.x).sort((a, b) => a - b);
-  return xs[1]! - xs[0]!;
+  const uniqueXs: number[] = [xs[0]!];
+  for (let i = 1; i < xs.length; i++) {
+    if (xs[i]! - uniqueXs[uniqueXs.length - 1]! > EPS) {
+      uniqueXs.push(xs[i]!);
+    }
+  }
+  if (uniqueXs.length < 2) return 0;
+  return uniqueXs[1]! - uniqueXs[0]!;
 }
 
 /**

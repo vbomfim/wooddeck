@@ -57,7 +57,11 @@ export { computeBlockGrid, MIN_BLOCK_SPACING_MM } from './floating/block-grid';
 export type { BlockGridInput } from './floating/block-grid';
 export { computeFloatingBeams } from './floating/floating-beam-layout';
 export type { ComputeFloatingBeamsOptions } from './floating/floating-beam-layout';
-export { layoutFloatingJoists } from './floating/floating-joist-layout';
+export { computeBayClearGapsMm, layoutFloatingJoists } from './floating/floating-joist-layout';
+export type {
+  BayGap,
+  LayoutFloatingJoistsOptions,
+} from './floating/floating-joist-layout';
 export { layoutFloatingDecking } from './floating/floating-decking';
 export {
   computeMinFloatingHeightMm,
@@ -79,5 +83,10 @@ export type { FloatingYStack } from './floating/y-stack-floating';
 export {
   MAX_BLOCKING_SPACING_MM,
   layoutBlockingBetweenJoists,
+  layoutBlockingBetweenJoistsPerBay,
 } from './blocking-layout';
-export type { BlockingLayoutInput } from './blocking-layout';
+export type {
+  BlockingBayInput,
+  BlockingLayoutInput,
+  BlockingLayoutPerBayInput,
+} from './blocking-layout';

@@ -32,7 +32,6 @@ import { MM_PER_FOOT, type Mm } from '../../units';
 import { spanCheck } from '../../spans/span-check';
 import { IrcSpanTable } from '../../spans/irc-2018-tables';
 import type { SpanTable } from '../../spans/span-table';
-import { LayoutError } from '../layout-shared';
 import { FOOTING_WIDTH_MM } from '../y-stack';
 
 import {
@@ -527,52 +526,41 @@ describe('AC3 — uncatalogued joist material → totalRows = 2 fallback', () =>
 });
 
 // ---------------------------------------------------------------------------
-// AC7 (FR-E) — flush + interiorRows>0 → LayoutError with 3 remediations
+// AC7 (FR-E — SUPERSEDED by issue #77) — flush + interiorRows>0 now
+// RENDERS with segmented joists. The pre-#77 tests here asserted the
+// FR-E throw + 3 remediations; those assertions are REPLACED with
+// checks that the design renders (no throw). Full segmented-geometry
+// coverage lives in `./floating-method-a-flush-segmented.test.ts`.
 // ---------------------------------------------------------------------------
 
-describe('AC7 (FR-E) — flush + intermediate beam rows are REJECTED at validation', () => {
+describe('AC7 (issue #77 — segments; supersedes FR-E) — flush + intermediate beam rows now RENDER', () => {
   const IRC = new IrcSpanTable();
 
-  it('16×16 flush Method A (which would need interior beams) → throws LayoutError', () => {
+  it('16×16 flush Method A (which needs interior beams) → renders without throw', () => {
     const design = makeMethodA({
       widthFt: 16,
       lengthFt: 16,
       joist: PT_2X8,
-      beam: PT_2X8, // equal depth → flush guard passes
+      beam: PT_2X8, // equal depth → flush-beam-depth guard passes
       beamConnection: 'flush',
     });
     expect(() =>
       computeFloatingLayout(design, { spanTable: IRC }),
-    ).toThrowError(LayoutError);
+    ).not.toThrow();
+    const layout = computeFloatingLayout(design, { spanTable: IRC });
+    // 3 beams (totalRows=3) and 2 joist segments per joist column.
+    const beams = layout.members.filter((m) => m.kind === 'beam');
+    const joists = layout.members.filter((m) => m.kind === 'joist');
+    expect(beams.length).toBeGreaterThanOrEqual(3);
+    // Joist count is a multiple of (totalRows-1) — every joist
+    // gets `totalRows-1` bays.
+    expect(joists.length % (beams.length - 1)).toBe(0);
   });
 
-  it('the thrown message names flush + intermediate beam + all three remediations', () => {
-    const design = makeMethodA({
-      widthFt: 16,
-      lengthFt: 16,
-      joist: PT_2X8,
-      beam: PT_2X8,
-      beamConnection: 'flush',
-    });
-    let caught: unknown = null;
-    try {
-      computeFloatingLayout(design, { spanTable: IRC });
-    } catch (e) {
-      caught = e;
-    }
-    expect(caught).toBeInstanceOf(LayoutError);
-    const msg = (caught as LayoutError).message.toLowerCase();
-    expect(msg).toContain('flush');
-    expect(msg).toContain('intermediate beam');
-    // 3 remediations: drop, reduce deck length, joists on blocks
-    expect(msg).toContain('drop');
-    expect(msg).toContain('reduce deck length');
-    expect(msg).toContain('joists on blocks');
-  });
-
-  it('flush design that does NOT need interior beams (small deck) is ACCEPTED', () => {
-    // 8×8 ft → totalRows = 2 (no interior) → flush guard does
-    // NOT fire (unchanged behavior).
+  it('flush design that does NOT need interior beams (small deck) is still ACCEPTED', () => {
+    // 8×8 ft → totalRows = 2 (no interior) → segmentation dispatch
+    // does not fire; single-joist-per-column emitted (byte-identical
+    // to pre-#77 flush-2-beam).
     const design = makeMethodA({
       widthFt: 8,
       lengthFt: 8,
@@ -585,7 +573,7 @@ describe('AC7 (FR-E) — flush + intermediate beam rows are REJECTED at validati
     ).not.toThrow();
   });
 
-  it('DROP design of the same size passes (flush is the only rejected combo)', () => {
+  it('DROP design of the same size still passes (unchanged by #77)', () => {
     const design = makeMethodA({
       widthFt: 16,
       lengthFt: 16,
