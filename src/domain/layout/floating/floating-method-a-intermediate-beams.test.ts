@@ -32,7 +32,10 @@ import { MM_PER_FOOT, type Mm } from '../../units';
 import { spanCheck } from '../../spans/span-check';
 import { IrcSpanTable } from '../../spans/irc-2018-tables';
 import type { SpanTable } from '../../spans/span-table';
-import { LayoutError } from '../layout-shared';
+// `LayoutError` was imported pre-#77 for AC7 throw assertions; removed
+// after #77 stopgap rewrote AC7 from throw → render (flush now always
+// renders with 2 rim beams; over-span surfaces as `over-span-joist`
+// warning via `spanCheck` — see AC7 below).
 import { FOOTING_WIDTH_MM } from '../y-stack';
 
 import {
@@ -527,13 +530,20 @@ describe('AC3 — uncatalogued joist material → totalRows = 2 fallback', () =>
 });
 
 // ---------------------------------------------------------------------------
-// AC7 (FR-E) — flush + interiorRows>0 → LayoutError with 3 remediations
+// AC7 (issue #77 stopgap) — flush + interior beams NO LONGER throws.
+// Pre-#77 the FR-037 FR-E throw wall blocked flush from rendering on any
+// deck long enough for the resolver to want interior beams. #77 stopgap
+// deletes the throw and forces `totalRows = 2` for flush at the resolver
+// seam: the deck RENDERS with 2 rim beams, and if joists over-span the
+// rim-to-rim gap the honest `over-span-joist` warning fires via `spanCheck`.
+// The full segmented-flush follow-up story restores interior beams via
+// per-bay joist segments hung on hangers.
 // ---------------------------------------------------------------------------
 
-describe('AC7 (FR-E) — flush + intermediate beam rows are REJECTED at validation', () => {
+describe('AC7 (issue #77 stopgap) — flush renders with 2 rim beams; over-span surfaces as HONEST warning (no error wall)', () => {
   const IRC = new IrcSpanTable();
 
-  it('16×16 flush Method A (which would need interior beams) → throws LayoutError', () => {
+  it('16×16 flush Method A no longer throws — deck RENDERS', () => {
     const design = makeMethodA({
       widthFt: 16,
       lengthFt: 16,
@@ -541,12 +551,15 @@ describe('AC7 (FR-E) — flush + intermediate beam rows are REJECTED at validati
       beam: PT_2X8, // equal depth → flush guard passes
       beamConnection: 'flush',
     });
+    // Pre-#77 this threw `LayoutError` (FR-E). Post-#77 stopgap it
+    // renders with 2 rim beams (interior beams disabled for flush
+    // until segmented-flush lands).
     expect(() =>
       computeFloatingLayout(design, { spanTable: IRC }),
-    ).toThrowError(LayoutError);
+    ).not.toThrow();
   });
 
-  it('the thrown message names flush + intermediate beam + all three remediations', () => {
+  it('16×16 flush emits EXACTLY 2 rim beams (beam-near + beam-far; no beam-mid-*)', () => {
     const design = makeMethodA({
       widthFt: 16,
       lengthFt: 16,
@@ -554,25 +567,39 @@ describe('AC7 (FR-E) — flush + intermediate beam rows are REJECTED at validati
       beam: PT_2X8,
       beamConnection: 'flush',
     });
-    let caught: unknown = null;
-    try {
-      computeFloatingLayout(design, { spanTable: IRC });
-    } catch (e) {
-      caught = e;
-    }
-    expect(caught).toBeInstanceOf(LayoutError);
-    const msg = (caught as LayoutError).message.toLowerCase();
-    expect(msg).toContain('flush');
-    expect(msg).toContain('intermediate beam');
-    // 3 remediations: drop, reduce deck length, joists on blocks
-    expect(msg).toContain('drop');
-    expect(msg).toContain('reduce deck length');
-    expect(msg).toContain('joists on blocks');
+    const layout = computeFloatingLayout(design, { spanTable: IRC });
+    const beams = layout.members.filter((m) => m.kind === 'beam');
+    // 2 rims — no interior beams under flush (stopgap: interior
+    // beams would need segmented joists, deferred to follow-up).
+    expect(beams.length).toBe(2);
+    const beamIds = beams.map((b) => b.id).sort();
+    expect(beamIds).toEqual(['beam-far', 'beam-near']);
+    // Explicit anti-assertion: no `beam-mid-*` under flush.
+    expect(beams.some((b) => /^beam-mid-\d+/.test(b.id))).toBe(false);
   });
 
-  it('flush design that does NOT need interior beams (small deck) is ACCEPTED', () => {
-    // 8×8 ft → totalRows = 2 (no interior) → flush guard does
-    // NOT fire (unchanged behavior).
+  it('16×16 flush over-span surfaces as HONEST over-span-joist warning (no LayoutError, no lying UI)', () => {
+    const design = makeMethodA({
+      widthFt: 16,
+      lengthFt: 16,
+      joist: PT_2X8,
+      beam: PT_2X8,
+      beamConnection: 'flush',
+    });
+    const layout = computeFloatingLayout(design, { spanTable: IRC });
+    const warnings = spanCheck(layout, IRC);
+    // Rim-to-rim gap on a 16 ft deck with PT 2×8 joists exceeds the
+    // IRC allowable → over-span-joist warning MUST fire. This is
+    // the honest channel every other over-span uses.
+    const overSpanJoist = warnings.filter(
+      (w) => w.kind === 'over-span-joist',
+    );
+    expect(overSpanJoist.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('flush design that does NOT need interior beams (small deck) is ACCEPTED (byte-identical to pre-#77)', () => {
+    // 8×8 ft → totalRows = 2 (no interior) → flush guard did NOT
+    // fire pre-#77 and the stopgap changes nothing for this path.
     const design = makeMethodA({
       widthFt: 8,
       lengthFt: 8,
@@ -585,7 +612,7 @@ describe('AC7 (FR-E) — flush + intermediate beam rows are REJECTED at validati
     ).not.toThrow();
   });
 
-  it('DROP design of the same size passes (flush is the only rejected combo)', () => {
+  it('DROP design of the same size passes with span-safe INTERIOR beams (flush stopgap does not affect drop)', () => {
     const design = makeMethodA({
       widthFt: 16,
       lengthFt: 16,
@@ -596,6 +623,12 @@ describe('AC7 (FR-E) — flush + intermediate beam rows are REJECTED at validati
     expect(() =>
       computeFloatingLayout(design, { spanTable: IRC }),
     ).not.toThrow();
+    const layout = computeFloatingLayout(design, { spanTable: IRC });
+    const beams = layout.members.filter((m) => m.kind === 'beam');
+    // DROP KEEPS its span-safe intermediate beams — the stopgap
+    // only bounds flush; drop behavior is unchanged from #75.
+    expect(beams.length).toBeGreaterThan(2);
+    expect(beams.some((b) => /^beam-mid-\d+/.test(b.id))).toBe(true);
   });
 });
 

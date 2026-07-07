@@ -832,13 +832,21 @@ export function computeFloatingLayout(
  * count — a user's `blockColsHint` still applies exactly as it did
  * pre-S26 (the S25 UI seam is unchanged).
  *
- * ## FR-E — flush + intermediate rejection
+ * ## Issue #77 stopgap — flush renders with 2 rim beams only
  *
- * When `beamConnection === 'flush' && interiorRows > 0`
- * `validateFloatingDesign` throws BEFORE dispatch. The MVP does
- * NOT support hanging joists off multiple interior beams (each
- * joist would need to be split into per-bay members); the
- * remediation-oriented error surfaces via `useDesignStatus().lastError`.
+ * Pre-#77 `validateFloatingDesign` THREW `LayoutError` for
+ * `beamConnection === 'flush' && interiorRows > 0` (FR-037 FR-E).
+ * The throw was USER-HOSTILE: any flush deck long enough for the
+ * resolver to want interior beams hit an error wall in the
+ * ParameterPanel, even though the deck had rendered fine before
+ * intermediate beams existed. Issue #77 removes the throw and
+ * forces `totalRows = 2` for flush at this seam — flush renders
+ * with 2 rim beams; if joists over-span the rim-to-rim gap, the
+ * honest `over-span-joist` warning fires via `spanCheck`. DROP
+ * keeps its span-safe intermediate beams (unchanged). A follow-up
+ * story adds segmented joists so flush can gain span-safe mid-
+ * support via real interior beams — until then this stopgap
+ * unblocks the render.
  */
 function computeMethodA(
   design: DeckDesign,
@@ -866,13 +874,34 @@ function computeMethodA(
   // remediation guides the user. Post-review-gate fix (Opus HIGH +
   // GPT HIGH + QA GAP-B): previously threw a developer-facing
   // "Internal invariant violated" error on user-reachable inputs.
-  const { totalRows: totalRowsClamped } = resolveMethodABeamRows(
+  const { totalRows: totalRowsResolved } = resolveMethodABeamRows(
     design.footprint.lengthMm,
     spanTable,
     design.joist.material,
     design.joist.spacingMm,
     design.footprint.widthMm,
   );
+  // Issue #77 stopgap — flush framing renders with 2 RIM beams only.
+  //
+  // Under Method A + flush, hanging joists off an interior beam
+  // face would require SEGMENTED joists (one per bay); until that
+  // segmentation lands (deferred to the segmented-flush story on
+  // top of this PR), we FORCE `totalRows = 2` for flush so the
+  // deck RENDERS instead of throwing. If the joist over-spans the
+  // rim-to-rim gap, `spanCheck` surfaces the honest
+  // `over-span-joist` warning (same channel every other over-span
+  // uses — no error wall, no "lying UI"). DROP is unchanged:
+  // drop joists rest on top and run continuously over every beam
+  // row, so `computeMethodA` keeps the span-safe interior beams
+  // for drop.
+  //
+  // Regression pin: pre-#75 flush 2-beam layouts stay byte-
+  // identical (both paths already produced `[nearZ, farZ]` when
+  // the resolver returned 2). This override only takes effect
+  // when the resolver would have added interior rows — the very
+  // case the pre-#77 FR-E throw guarded against.
+  const totalRowsClamped =
+    design.beamConnection === 'flush' ? 2 : totalRowsResolved;
   // Row z-centers: outer rows at ±(lengthMm/2 - beamInset), interior
   // rows evenly interpolated. For N=2 this is `[nearZ, farZ]`
   // — byte-identical to the pre-#75 layout.
@@ -1163,7 +1192,7 @@ function computeFloatingBoundsFromMembers(
  */
 function validateFloatingDesign(
   design: DeckDesign,
-  spanTable?: SpanTable,
+  _spanTable?: SpanTable,
 ): void {
   if (design.structure !== 'floating') {
     throw new LayoutError(
@@ -1239,39 +1268,20 @@ function validateFloatingDesign(
   // remediation instead of the generic height message.
   if (design.floatingFraming === 'beams-and-joists') {
     validateFlushBeamDepth(design);
-    // Issue #75 (FR-E) — flush + intermediate beam rows are
-    // REJECTED at validation. Method A #75 places intermediate
-    // beam rows between the two rims to keep joists span-safe;
-    // FLUSH framing hangs joists off the beam face via hangers,
-    // so a joist can only span between TWO beam faces (its two
-    // ends). Interior beams under flush would require SEGMENTED
-    // joists (per-bay members) — a large geometric + BOM change
-    // deferred to a follow-up story (§16 in issue #75). The
-    // rejection is surfaced via `useDesignStatus().lastError`
-    // — three actionable remediations named below.
-    if (design.beamConnection === 'flush') {
-      const { interiorRows } = resolveMethodABeamRows(
-        design.footprint.lengthMm,
-        spanTable,
-        design.joist.material,
-        design.joist.spacingMm,
-        design.footprint.widthMm,
-      );
-      if (interiorRows > 0) {
-        throw new LayoutError(
-          `Flush beam connection combined with intermediate beam ` +
-            `rows (${interiorRows} interior row${interiorRows === 1 ? '' : 's'}) is not ` +
-            `supported in the MVP. Method A auto-adds interior beam rows to keep ` +
-            `joists span-safe on this deck length, but flush framing hangs each ` +
-            `joist off two beam faces — segmenting joists across interior beams ` +
-            `is deferred to a follow-up story (see issue #75). Choose one of the ` +
-            `three remediations: switch to "drop" beam connection (joists rest on ` +
-            `top and run continuously over every beam row), reduce deck length ` +
-            `until only the two rim beams are required, or switch to the "joists ` +
-            `on blocks" framing method (no beam layer at all).`,
-        );
-      }
-    }
+    // Issue #77 stopgap — the pre-#77 FR-037 FR-E hard rejection
+    // of `flush + interiorRows > 0` was USER-HOSTILE: it turned
+    // the ParameterPanel into an error wall on any flush deck long
+    // enough for the resolver to want interior beams, even though
+    // the deck had rendered fine before intermediate beams
+    // existed. That throw is DELETED here. `computeMethodA` now
+    // FORCES `totalRows = 2` for flush (2 rim beams only, joists
+    // continuous between them); if the joist over-spans the rim-
+    // to-rim gap, the honest `over-span-joist` warning fires via
+    // `spanCheck` on the standard channel — no error wall, no
+    // "lying UI". This is a STOPGAP; the follow-up story adds
+    // segmented joists so flush can gain span-safe mid-support via
+    // real interior beams (the geometry FR-E was blocking on).
+    // DROP keeps its span-safe intermediate beams (unchanged).
   }
 
   let minHeightMm: Mm;

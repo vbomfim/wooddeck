@@ -34,7 +34,8 @@ import { MM_PER_FOOT, type Mm } from '../../units';
 import { spanCheck } from '../../spans/span-check';
 import { IrcSpanTable } from '../../spans/irc-2018-tables';
 import type { SpanTable } from '../../spans/span-table';
-import { LayoutError } from '../layout-shared';
+// `LayoutError` was imported pre-#77 for GAP G throw assertions; removed
+// after issue #77 stopgap rewrote GAP G from throw → render.
 import { FOOTING_WIDTH_MM } from '../y-stack';
 
 import {
@@ -416,32 +417,46 @@ describe('[COVERAGE] GAP E — blocking still emitted with interior beams presen
 });
 
 // ===========================================================================
-// GAP G — flush→drop transition on a deck that NEEDS interior beams. [COVERAGE]
+// GAP G — issue #77 stopgap: flush→drop transition on a deck that would need
+// interior beams. [COVERAGE]
 // ===========================================================================
 //
-// The dev's apply-parameters test was deliberately SHRUNK to 8 ft so
-// `interiorRows === 0` and FR-E never fires — which means the actual
-// UAT scenario (16×16 flush needs interior beams → rejected → switch to
-// drop → beams render) is NOT covered anywhere. This test pins that
-// exact transition on ONE design where only `beamConnection` differs.
+// Pre-#77: the UAT scenario (16×16 flush → resolver wants interior beams →
+// FR-E threw `LayoutError` → user had to switch to drop) was covered here.
+// Post-#77 stopgap: FR-E is DELETED and flush is capped at `totalRows = 2`,
+// so flush 16×16 now RENDERS (2 rim beams) — with an honest
+// `over-span-joist` warning when the rim-to-rim gap exceeds allowable.
+// DROP is unchanged (span-safe interior beams; over-span-joist === []).
 // ---------------------------------------------------------------------------
 
-describe('[COVERAGE] GAP G — the UAT flush→drop transition on a deck that needs interior beams', () => {
+describe('[COVERAGE] GAP G — flush→drop transition on a deck that would need interior beams (post-#77 stopgap)', () => {
   const base = makeMethodA({ widthFt: 16, lengthFt: 16, joist: PT_2X8 });
 
-  it('FLUSH on a deck needing interior beams → rejected (FR-E)', () => {
+  it('FLUSH on a deck that would need interior beams → RENDERS with 2 rim beams (no throw)', () => {
     const flush: DeckDesign = { ...base, beamConnection: 'flush' };
-    expect(() => computeFloatingLayout(flush, { spanTable: IRC })).toThrowError(
-      LayoutError,
+    // Pre-#77 threw FR-E `LayoutError`. Post-#77 stopgap: flush is
+    // capped at `totalRows = 2`, deck renders.
+    expect(() =>
+      computeFloatingLayout(flush, { spanTable: IRC }),
+    ).not.toThrow();
+    const layout = computeFloatingLayout(flush, { spanTable: IRC });
+    const beams = layout.members.filter((m) => m.kind === 'beam');
+    expect(beams.length).toBe(2);
+    // Honest over-span warning fires when joists over-span the
+    // rim-to-rim gap (PT 2×8 on ~16 ft rim-to-rim exceeds IRC
+    // allowable). Same channel every other over-span uses — no
+    // error wall, no "lying UI".
+    const overSpan = spanCheck(layout, IRC).filter(
+      (w) => w.kind === 'over-span-joist',
     );
+    expect(overSpan.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('DROP on the same deck → renders ≥3 beams (the one-click fix)', () => {
+  it('DROP on the same deck → renders ≥3 beams AND is span-safe (unchanged from pre-#77)', () => {
     const drop: DeckDesign = { ...base, beamConnection: 'drop' };
     const layout = computeFloatingLayout(drop, { spanTable: IRC });
     const beams = layout.members.filter((m) => m.kind === 'beam');
     expect(beams.length).toBeGreaterThanOrEqual(3);
-    // And it is span-safe (the whole point of the fix).
     const overSpan = spanCheck(layout, IRC).filter(
       (w) => w.kind === 'over-span-joist',
     );
