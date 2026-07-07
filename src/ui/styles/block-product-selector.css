@@ -1,0 +1,32 @@
+/*
+ * `src/ui/styles/block-product-selector.css` — S23 issue #45 AC3.
+ *
+ * Labelled `<select>` — same visual weight as the S23
+ * FoundationTypeSelector so the two paint as siblings in the
+ * ParameterPanel foundation section.
+ */
+.wd-block-product-selector {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: var(--wd-space-2) var(--wd-space-3);
+  align-items: center;
+}
+
+.wd-block-product-selector__label {
+  font-weight: 600;
+  color: var(--wd-color-text);
+}
+
+.wd-block-product-selector__select {
+  padding: var(--wd-space-1) var(--wd-space-2);
+  border: 1px solid var(--wd-color-border);
+  border-radius: 4px;
+  background: var(--wd-color-surface);
+  color: var(--wd-color-text);
+  font: inherit;
+}
+
+.wd-block-product-selector__select:focus-visible {
+  outline: var(--wd-focus-outline-width) solid var(--wd-focus-outline-color);
+  outline-offset: 2px;
+}

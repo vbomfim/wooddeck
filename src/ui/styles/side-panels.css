@@ -1,0 +1,488 @@
+/*
+ * `src/ui/styles/side-panels.css` — S14 issue #15.
+ *
+ * ## Layout
+ *
+ * `<SidePanels>` is a vertical stack of four `<section>`s (Layer
+ * toggles + camera presets, Warnings, BOM, Save & export). Each
+ * section carries its own `<h2>` to satisfy the AppShell
+ * rightPanel landmark invariant.
+ *
+ * Small screens (< 640 px) collapse to a single-column stack
+ * with reduced spacing. The AppShell parent handles overall
+ * width; this file only styles the internal composition.
+ *
+ * ## Accessibility
+ *
+ *   - Every interactive element inherits the global
+ *     :focus-visible ring from tokens.css.
+ *   - No transitions are applied unless the user opted into
+ *     motion (@media prefers-reduced-motion: no-preference).
+ *   - The BOM table uses a caption-based accessible name.
+ *
+ * ## Tokens
+ *
+ * Uses the design tokens from `tokens.css` — same palette as
+ * ParameterPanel + AppShell.
+ */
+
+@import './tokens.css';
+
+/* --------------------------------------------------------------
+ * Wrapper — vertical stack
+ * -------------------------------------------------------------- */
+.wd-side-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 1rem;
+  font-family: var(--wd-font-family, system-ui, sans-serif);
+}
+
+.wd-side-panels > section > h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--wd-color-text, #1a1a1a);
+}
+
+/* --------------------------------------------------------------
+ * LayerTogglePanel
+ * -------------------------------------------------------------- */
+.wd-layer-toggle-panel__checks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.25rem 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.wd-layer-toggle-panel__check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.wd-layer-toggle-panel__check input[type='checkbox'] {
+  min-width: 1rem;
+  min-height: 1rem;
+  cursor: pointer;
+}
+
+.wd-layer-toggle-panel__bulk {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.wd-layer-toggle-panel__bulk-btn {
+  flex: 1;
+  padding: 0.375rem 0.5rem;
+  font-size: 0.8125rem;
+  background: var(--wd-color-bg-secondary, #f5f5f5);
+  border: 1px solid var(--wd-color-border, #ccc);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--wd-color-text, #1a1a1a);
+}
+
+.wd-layer-toggle-panel__bulk-btn:hover {
+  background: var(--wd-color-bg-hover, #e8e8e8);
+}
+
+.wd-layer-toggle-panel__presets {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+
+.wd-layer-toggle-panel__preset-btn {
+  padding: 0.375rem 0.25rem;
+  font-size: 0.75rem;
+  background: var(--wd-color-bg-secondary, #f5f5f5);
+  border: 1px solid var(--wd-color-border, #ccc);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--wd-color-text, #1a1a1a);
+}
+
+.wd-layer-toggle-panel__preset-btn:hover {
+  background: var(--wd-color-bg-hover, #e8e8e8);
+}
+
+.wd-layer-toggle-panel__preset-btn[aria-pressed='true'] {
+  background: var(--wd-color-primary, #2b6cb0);
+  color: var(--wd-color-primary-text, #fff);
+  border-color: var(--wd-color-primary, #2b6cb0);
+}
+
+/* --------------------------------------------------------------
+ * WarningsPanel
+ * -------------------------------------------------------------- */
+.wd-warnings-panel__badge {
+  color: var(--wd-color-warning, #b7791f);
+  font-weight: 600;
+}
+
+.wd-warnings-panel__empty {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  background: var(--wd-color-success-bg, #f0fff4);
+  color: var(--wd-color-success-text, #22543d);
+  border-left: 3px solid var(--wd-color-success, #38a169);
+  border-radius: 4px;
+  font-size: 0.8125rem;
+}
+
+.wd-warnings-panel__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.wd-warnings-panel__item {
+  padding: 0.5rem 0.75rem;
+  background: var(--wd-color-warning-bg, #fffaf0);
+  border-left: 3px solid var(--wd-color-warning, #b7791f);
+  border-radius: 4px;
+  font-size: 0.8125rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.wd-warnings-panel__message {
+  color: var(--wd-color-text, #1a1a1a);
+}
+
+.wd-warnings-panel__citation {
+  color: var(--wd-color-text-muted, #666);
+  font-size: 0.75rem;
+}
+
+/* --------------------------------------------------------------
+ * RemediationControls (S16 issue #38)
+ *
+ * Nested inside each WarningsPanel <li>. Fieldset gets a subdued
+ * inner border so it visually attaches to the parent warning
+ * without introducing a heavy second card.
+ * -------------------------------------------------------------- */
+.wd-remediation-controls {
+  margin: 0.5rem 0 0 0;
+  padding: 0.5rem 0.625rem;
+  border: 1px solid var(--wd-color-border, #dcdcdc);
+  border-radius: 4px;
+  background: var(--wd-color-bg, #fff);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+}
+
+.wd-remediation-controls__legend {
+  padding: 0 0.25rem;
+  color: var(--wd-color-text, #1a1a1a);
+  font-weight: 600;
+  font-size: 0.75rem;
+}
+
+.wd-remediation-controls__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.wd-remediation-controls__item {
+  display: block;
+}
+
+/*
+ * S16 pair-fix (Opus #2, AC17): the pre-fix rule applied
+ * `opacity: 0.55` to the WHOLE item, which dropped the
+ * disabled-reason text (`#666` on a light background) below the
+ * WCAG 2.5.5 4.5:1 contrast threshold. The fix: keep the radio
+ * + headline at reduced opacity to convey "disabled", but leave
+ * the reason (`__detail`) at full contrast so the user can
+ * actually READ why it's disabled. The reason color uses a
+ * dedicated token (`--wd-color-disabled-reason`) whose 4.5:1
+ * contrast against the page background is locked by
+ * `tokens.contrast.test.ts`.
+ */
+.wd-remediation-controls__item--disabled .wd-remediation-controls__label > input,
+.wd-remediation-controls__item--disabled .wd-remediation-controls__headline {
+  opacity: 0.55;
+}
+
+.wd-remediation-controls__label {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.25rem 0.5rem;
+  align-items: baseline;
+  cursor: pointer;
+}
+
+.wd-remediation-controls__item--disabled .wd-remediation-controls__label {
+  cursor: not-allowed;
+}
+
+.wd-remediation-controls__headline {
+  color: var(--wd-color-text, #1a1a1a);
+}
+
+.wd-remediation-controls__detail {
+  grid-column: 2 / 3;
+  color: var(--wd-color-text-muted, #666);
+  font-size: 0.7rem;
+}
+
+.wd-remediation-controls__item--disabled .wd-remediation-controls__detail {
+  /*
+   * Disabled reason: full contrast (opacity: 1) + a slightly
+   * darker token so contrast is guaranteed regardless of what
+   * `--wd-color-text-muted` resolves to. Colour locked at
+   * 4.5:1 minimum vs #ffffff in `tokens.contrast.test.ts`.
+   */
+  color: var(--wd-color-disabled-reason, #595959);
+  opacity: 1;
+}
+
+.wd-remediation-controls__apply {
+  align-self: flex-start;
+  padding: 0.25rem 0.625rem;
+  background: var(--wd-color-primary, #2b6cb0);
+  color: var(--wd-color-primary-text, #fff);
+  border: 1px solid var(--wd-color-primary, #2b6cb0);
+  border-radius: 4px;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.wd-remediation-controls__apply:disabled {
+  background: var(--wd-color-bg-secondary, #f5f5f5);
+  color: var(--wd-color-text-muted, #666);
+  border-color: var(--wd-color-border, #dcdcdc);
+  cursor: not-allowed;
+}
+
+.wd-remediation-controls__announcement {
+  min-height: 1em;
+  color: var(--wd-color-text-muted, #666);
+  font-size: 0.7rem;
+  font-style: italic;
+}
+
+/*
+ * S16 pair-fix (Opus #7, AC14): sr-only spacer that varies each
+ * apply so assistive tech re-announces the region even when the
+ * user selects the same option twice. Screen-reader-only pattern
+ * from https://webaim.org/techniques/css/invisiblecontent/.
+ */
+.wd-remediation-controls__announcement-tick {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.wd-remediation-controls__empty-text {
+  margin: 0;
+  color: var(--wd-color-text-muted, #666);
+  font-size: 0.75rem;
+}
+
+/* --------------------------------------------------------------
+ * BomPanel
+ * -------------------------------------------------------------- */
+.wd-bom-panel__empty {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  background: var(--wd-color-bg-secondary, #f5f5f5);
+  color: var(--wd-color-text-muted, #666);
+  border-radius: 4px;
+  font-size: 0.8125rem;
+}
+
+.wd-bom-panel__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.wd-bom-panel__caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+.wd-bom-panel__table th,
+.wd-bom-panel__table td {
+  padding: 0.375rem 0.5rem;
+  text-align: left;
+  border-bottom: 1px solid var(--wd-color-border-subtle, #eee);
+}
+
+.wd-bom-panel__table thead th {
+  font-weight: 600;
+  color: var(--wd-color-text, #1a1a1a);
+  background: var(--wd-color-bg-secondary, #f5f5f5);
+  border-bottom: 2px solid var(--wd-color-border, #ccc);
+}
+
+.wd-bom-panel__table tbody th[scope='row'] {
+  font-weight: 500;
+}
+
+/* --------------------------------------------------------------
+ * BomPanel — S24 cut-list disclosure rows
+ * --------------------------------------------------------------
+ * Each SKU is a <details> containing a <summary> and a
+ * <CutPlanTable>. The list is a <ul> with reset padding (no
+ * bullets — the summary line already reads as a list item).
+ */
+.wd-bom-panel__lumber-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.wd-bom-panel__lumber-list-item {
+  margin: 0.25rem 0;
+}
+
+.wd-bom-panel__lumber-row {
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--wd-color-border-subtle, #eee);
+}
+
+.wd-bom-panel__lumber-row-summary {
+  font-size: 0.8125rem;
+  padding: 0.25rem 0.25rem;
+  cursor: pointer;
+  /* Reset the default focus outline colour — the browser default
+   * is fine but a tokenised value keeps the focus ring on-brand.
+   * SC 2.4.7 (Focus Visible) is satisfied by the UA outline. */
+}
+
+.wd-bom-panel__lumber-row-summary:focus-visible {
+  outline: 2px solid var(--wd-color-accent, #005fcc);
+  outline-offset: 2px;
+}
+
+.wd-bom-panel__cut-plan {
+  /* Slight left-inset so the plan visually nests under the
+   * disclosure triangle. */
+  margin-left: 1rem;
+  margin-top: 0.25rem;
+}
+
+/* --------------------------------------------------------------
+ * ExportMenu
+ * -------------------------------------------------------------- */
+.wd-export-menu__error {
+  margin-bottom: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--wd-color-danger-bg, #fff5f5);
+  color: var(--wd-color-danger-text, #742a2a);
+  border-left: 3px solid var(--wd-color-danger, #e53e3e);
+  border-radius: 4px;
+  font-size: 0.8125rem;
+}
+
+.wd-export-menu__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.wd-export-menu__btn {
+  display: inline-block;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8125rem;
+  text-align: center;
+  background: var(--wd-color-bg-secondary, #f5f5f5);
+  border: 1px solid var(--wd-color-border, #ccc);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--wd-color-text, #1a1a1a);
+}
+
+.wd-export-menu__btn:hover {
+  background: var(--wd-color-bg-hover, #e8e8e8);
+}
+
+.wd-export-menu__btn--danger {
+  background: var(--wd-color-danger-bg, #fff5f5);
+  border-color: var(--wd-color-danger, #e53e3e);
+  color: var(--wd-color-danger-text, #742a2a);
+}
+
+.wd-export-menu__btn--danger:hover {
+  background: var(--wd-color-danger, #e53e3e);
+  color: var(--wd-color-primary-text, #fff);
+}
+
+/*
+ * Disabled Export PNG button (S14 UAT pair-fix — FIX A). Fades
+ * the control + removes the pointer cursor so the disabled state
+ * is visually obvious. The inline note below the button explains
+ * why (context-loss).
+ */
+.wd-export-menu__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: var(--wd-color-bg-hover, #e8e8e8);
+}
+
+.wd-export-menu__png-note {
+  font-size: 0.85em;
+  color: var(--wd-color-text-muted, #666);
+  margin: 0.25rem 0 0;
+}
+
+/*
+ * The hidden file input — visually hidden AND removed from
+ * tab-order (`tabIndex={-1}` in the JSX). The visible Open .deck…
+ * button now programmatically clicks this input. The
+ * `visually-hidden` pattern keeps the input alive in the DOM so
+ * form-input value clearing still works.
+ */
+.wd-export-menu__file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --------------------------------------------------------------
+ * Small-screen responsive tweaks
+ * -------------------------------------------------------------- */
+@media (max-width: 640px) {
+  .wd-side-panels {
+    gap: 1rem;
+    padding: 0.75rem;
+  }
+
+  .wd-layer-toggle-panel__checks {
+    grid-template-columns: 1fr;
+  }
+}

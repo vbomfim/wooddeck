@@ -1,0 +1,145 @@
+/**
+ * `src/ui/WarningsPanel.tsx` — S14 issue #15 AC4 + AC5.
+ *
+ * ## Responsibility (single)
+ *
+ * Render `useWarnings()` (the span-check warnings from the design
+ * store) as a labelled section:
+ *
+ *   - Empty → a passive "no warnings — spans within IRC-2018
+ *     limits" message.
+ *   - Non-empty → an `<h2>` with an inline count badge (e.g.
+ *     "Warnings (3)") + a `<ul>` where each `<li>` shows
+ *     `warning.message` and the `warning.tableReference`
+ *     citation on a secondary line PLUS a nested
+ *     `<RemediationControls warning={w} />` for actionable fixes
+ *     (S16 issue #38).
+ *
+ * ## textContent-only rendering (§6 security)
+ *
+ * Warnings are produced by `src/domain/spans/span-check.ts`; the
+ * `message` and `tableReference` strings are composed from
+ * constants + numeric mm values (never user-supplied text). Even
+ * so, this component renders them as CHILDREN of `<li>` /
+ * `<span>` — React default is `textContent`, NEVER
+ * `dangerouslySetInnerHTML`. This mirrors the constraint
+ * `DisclaimerBanner` and `StorageBanner` both honour and matches
+ * the inherited S6 rule.
+ *
+ * ## Accessibility (§10)
+ *
+ *   - The section carries `role="region"` (default for
+ *     `<section aria-labelledby>` in a landmark parent) so screen
+ *     readers announce "Warnings region" — the `aria-labelledby`
+ *     wires to the `<h2>`.
+ *   - The count badge is a plain `<span>` inside the `<h2>` —
+ *     screen readers read "Warnings 3" as one heading.
+ *   - The empty-state message uses `role="status"` (implicit
+ *     `aria-live="polite"`) so a transition from N warnings → 0
+ *     announces "no warnings" once, without interrupting.
+ *   - Each `<li>` uses semantic `<strong>` + normal text for the
+ *     message; the citation is inside a `<small>` for visual
+ *     hierarchy without changing the reading order.
+ *   - Each `<li>` nests a `<RemediationControls>` fieldset which
+ *     carries its OWN a11y contract (see that module header).
+ *
+ * ## Boundary
+ *
+ *   - `../state`              — useWarnings.
+ *   - `./warnings/…`          — RemediationControls (co-located).
+ *   - `react` (JSX)           — types.
+ *   - NO domain / application — the store hands us the shape.
+ *   - NO scene / persistence  — hard rule.
+ */
+import type { JSX } from 'react';
+
+import { useWarnings } from '../state';
+
+import { RemediationControls } from './warnings/RemediationControls';
+
+// ---------------------------------------------------------------------------
+// Copy constants
+// ---------------------------------------------------------------------------
+
+/**
+ * The empty-state text. Exported so tests grep-import the exact
+ * string rather than duplicate a fuzzy regex.
+ */
+export const NO_WARNINGS_TEXT =
+  'No warnings — spans within IRC-2018 limits.';
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+/**
+ * The warnings panel. See module header for the empty / non-empty
+ * behaviour and a11y contract.
+ */
+export function WarningsPanel(): JSX.Element {
+  const warnings = useWarnings();
+  const count = warnings.length;
+
+  return (
+    <section
+      aria-labelledby="wd-warnings-panel__title"
+      className="wd-warnings-panel"
+    >
+      <h2 id="wd-warnings-panel__title">
+        Warnings
+        {count > 0 && (
+          <>
+            {' '}
+            {/*
+             * S14 UAT pair-fix — Opus I1. The visible (N) badge
+             * is aria-hidden so the h2's accessible name reads
+             * as just "Warnings" (not "Warnings 3 warnings").
+             * The screen-reader count is still conveyed via the
+             * <ul>'s "List, 3 items" announcement below, so
+             * hiding this decorative badge doesn't drop info.
+             */}
+            <span
+              className="wd-warnings-panel__badge"
+              aria-hidden="true"
+            >
+              ({count})
+            </span>
+          </>
+        )}
+      </h2>
+
+      {count === 0 ? (
+        <p
+          className="wd-warnings-panel__empty"
+          role="status"
+          aria-live="polite"
+        >
+          {NO_WARNINGS_TEXT}
+        </p>
+      ) : (
+        <ul className="wd-warnings-panel__list">
+          {warnings.map((w) => (
+            <li key={w.memberId} className="wd-warnings-panel__item">
+              {/*
+               * Message on the primary line. Rendered as textContent
+               * (React default) — see module header § textContent-
+               * only rendering.
+               */}
+              <span className="wd-warnings-panel__message">{w.message}</span>
+              <small className="wd-warnings-panel__citation">{w.tableReference}</small>
+              {/*
+               * S16 issue #38 — per-warning remediation controls.
+               * The compute is memoized inside
+               * `useRemediationsForWarning` so this nested
+               * component adds ONE compute per unique
+               * `(memberId, design)` pair, regardless of how many
+               * warnings share the same memberId.
+               */}
+              <RemediationControls warning={w} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}

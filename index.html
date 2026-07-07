@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      Favicon (S12 pair-fix iter 1 — Fix J).
+
+      The live browser UAT flagged a `favicon.ico` 404 that noised
+      every page load. Rather than shipping a binary asset (which
+      would need Vite copy-config), we inline an SVG data-URI: it
+      renders as a stack of deck boards in wooddeck's brown-on-
+      cream palette and adds zero HTTP requests. Colors match the
+      disclaimer palette so the browser tab reads as "wooddeck".
+    -->
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%23fff4d1'/%3E%3Crect x='4' y='6' width='24' height='4' rx='1' fill='%237a4a00'/%3E%3Crect x='4' y='14' width='24' height='4' rx='1' fill='%237a4a00'/%3E%3Crect x='4' y='22' width='24' height='4' rx='1' fill='%237a4a00'/%3E%3C/svg%3E"
+    />
+    <title>wooddeck — DIY deck designer</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

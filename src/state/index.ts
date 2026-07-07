@@ -1,0 +1,140 @@
+/**
+ * `src/state/index.ts` — the SINGLE public entry point for the
+ * state layer.
+ *
+ * Downstream layers (`src/scene/` — S9–S11, `src/ui/` — S12–S15)
+ * MUST import from this barrel, never from a private submodule.
+ * Enforcement:
+ *
+ *   - `.dependency-cruiser.cjs` limits `scene/` and `ui/` to
+ *     `state/` (plus their own tree + domain/ + application/) —
+ *     a direct `import '../state/design-store'` from a consumer is
+ *     technically legal to dep-cruiser but the codebase convention
+ *     is to route through this barrel so a submodule rename /
+ *     split does not break downstream imports.
+ *
+ * ## Public surface (frozen — issue #9 §2)
+ *
+ *   store   useDesignStore, useUiStore
+ *   hooks   useDesign, useLayout, useLayoutBounds, useWarnings,
+ *           useDesignStatus, useUiUnits, useCameraPreset,
+ *           useLayerVisibility, useStorageBanner
+ *   types   DesignStoreState, DesignStoreActions,
+ *           UiStoreState, UiStoreActions,
+ *           CameraPreset, LayerVisibility, StorageBanner
+ *   default DEFAULT_DESIGN_PARAMS, makeDefaultDesign
+ *   constants AUTOSAVE_DEBOUNCE_MS
+ *
+ * ## Excluded surface
+ *
+ *   - `resetDesignStoreForTests` — test-only surface, kept out of
+ *     the barrel so a component that reaches for it is a red flag.
+ *     Import it directly from `./design-store` in a `.test.ts` file.
+ *   - `flushAutosaveForTests` — same rationale.
+ */
+
+// ---- stores ----------------------------------------------------------------
+export { useDesignStore, AUTOSAVE_DEBOUNCE_MS } from './design-store';
+export type { DesignStoreState, DesignStoreActions, DesignStoreShape } from './design-store';
+
+export { useUiStore } from './ui-store';
+export type {
+  CameraPreset,
+  LayerVisibility,
+  StorageBanner,
+  UiStoreActions,
+  UiStoreState,
+} from './ui-store';
+
+// ---- hooks -----------------------------------------------------------------
+export {
+  useCameraPreset,
+  useDesign,
+  useDesignStatus,
+  useDismissedMigrationEventId,
+  useLayerVisibility,
+  useLayout,
+  useLayoutBounds,
+  useMigrationEventId,
+  useRemediationsForWarning,
+  useStorageBanner,
+  useUiUnits,
+  useWarnings,
+  useWebglContextLost,
+} from './hooks';
+
+// ---- S16 issue #38 — remediation option types ------------------------------
+//
+// UI consumes these types via the state barrel so `ui-no-domain-spans`
+// (in `.dependency-cruiser.cjs`) can forbid direct imports from
+// `domain/spans/*` without cutting off type access. `RemediationOption`
+// / `RemediationKind` / `RemediationPatch` originate in
+// `domain/spans/remediations.ts`; state re-exports the value-free
+// type shapes. The `applyRemediation` action reads a concrete
+// `RemediationOption` — see `DesignStoreActions` above.
+export type {
+  RemediationKind,
+  RemediationOption,
+  RemediationPatch,
+} from '../domain/spans';
+
+// ---- default-design factory ------------------------------------------------
+export { DEFAULT_DESIGN_PARAMS, makeDefaultDesign } from './default-design';
+
+// ---- feat/block-spacing — Method B display defaults ------------------------
+//
+// The Method B "block spacing" UI field needs to display a sensible
+// default when the current design omits `foundation.blockSpacingMm`
+// (which is optional — legacy designs and Method A / elevated
+// designs do not carry it). The default value lives with the layout
+// engine (source of truth is `computeMethodB` — the value it uses
+// when the field is unset). Re-exporting it through the state barrel
+// gives the ui a single sanctioned source of truth so the displayed
+// default and the applied default can never drift, WITHOUT crossing
+// the `ui → domain/layout` boundary directly (S13 issue #14 §1).
+//
+// A dep-cruiser rule `ui-no-domain-layout` forbids the ui from
+// importing `domain/layout/**` directly; the state barrel is the
+// sanctioned seam for value + type re-exports (matches the LayoutError
+// pattern already in `design-store.ts`).
+//
+// `MIN_BLOCK_SPACING_MM` / `MAX_BLOCK_SPACING_MM` are ALSO re-exported
+// so back-compat consumers (legacy tests, remediation label code)
+// can still read the schema bounds. `blockSpacingMm` is superseded
+// by `blockRowsHint` for the primary Method-B control (see below)
+// but remains in the model for save/reload compat.
+//
+// ---- feat/block-count-per-joist — Method B primary control ----------------
+//
+// `blockRowsHint` (integer, `[MIN_BLOCK_ROWS_HINT, MAX_BLOCK_ROWS_HINT]`)
+// is the NEW primary control for Method B: the user picks HOW MANY
+// blocks sit under each joist, and the layout spreads them evenly
+// end-to-end. `MAX_METHOD_B_BLOCK_COUNT` is also re-exported so
+// the UI can compute an EFFECTIVE per-design maximum when the joist
+// count is known (`floor(MAX / numJoists)`).
+export {
+  DEFAULT_METHOD_B_BLOCK_SPACING_MM,
+  MAX_METHOD_B_BLOCK_COUNT,
+  MAX_BLOCK_ROWS_HINT,
+  MIN_BLOCK_ROWS_HINT,
+  clampMethodBRows,
+} from '../domain/layout/floating/floating-layout';
+export {
+  MAX_BLOCK_SPACING_MM,
+  MIN_BLOCK_SPACING_MM,
+} from '../domain/layout/floating/block-grid';
+
+// ---- shared utility types --------------------------------------------------
+//
+// `DeepPartial<T>` originates in the application layer (see
+// `src/application/types.ts`) — it is the exact type
+// `applyParameters(patch: DeepPartial<DeckDesign>)` consumes. The ui
+// layer needs the same type but the ui→application boundary rule
+// forbids a direct import (S13 issue #14 Boundary Resolution §2:
+// the panel talks to the store, not to application). Re-exporting
+// through the state barrel gives ui a single sanctioned source of
+// truth so a future refactor of `DeepPartial` (e.g. tightening to
+// omit arrays) does not require touching both layers, and — more
+// importantly — the type at the store call site and the type at
+// the ui call site can never drift.
+export type { DeepPartial } from '../application';

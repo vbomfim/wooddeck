@@ -1,0 +1,29 @@
+/*
+ * `src/ui/styles/panel-error-boundary.css` — S24 UAT pair-fix
+ * FIX 0(b).
+ *
+ * The fallback fills the side-panel's content slot when a panel
+ * derive function throws. Kept minimal and unobtrusive: a small
+ * bordered card with muted color — the user's other panels are
+ * still functional, so this is a soft "one panel gave up"
+ * signal, not a page-level alarm.
+ */
+.wd-panel-error {
+  padding: var(--wd-space-3);
+  margin: var(--wd-space-2) 0;
+  background: var(--wd-color-scene-error-bg);
+  color: var(--wd-color-scene-error-text);
+  border: 1px solid var(--wd-color-scene-error-border);
+  border-radius: 4px;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.wd-panel-error__title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.wd-panel-error__body {
+  margin: var(--wd-space-1) 0 0;
+}

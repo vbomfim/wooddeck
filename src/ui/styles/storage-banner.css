@@ -1,0 +1,59 @@
+/*
+ * `src/ui/styles/storage-banner.css` — the AC4/AC6/AC9 persistence
+ * event banner.
+ *
+ * Per-discriminator background/border colours are chosen from the
+ * tokens.css palette. The reset-to-default button uses the neutral
+ * text colour on a white surface so the button stays readable
+ * against every banner background.
+ */
+.wd-storage-banner {
+  z-index: var(--wd-z-banner);
+  padding: var(--wd-space-3) var(--wd-space-4);
+  border-bottom-width: 1px;
+  border-bottom-style: solid;
+  font-size: 0.875rem;
+  line-height: 1.4;
+  display: flex;
+  gap: var(--wd-space-3);
+  align-items: center;
+  justify-content: center;
+}
+
+.wd-storage-banner__message {
+  flex: 0 1 auto;
+}
+
+.wd-storage-banner__reset {
+  flex: 0 0 auto;
+  padding: var(--wd-space-1) var(--wd-space-3);
+  background: var(--wd-color-surface);
+  color: var(--wd-color-text);
+  border: 1px solid var(--wd-color-border);
+  border-radius: 4px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.wd-storage-banner__reset:hover {
+  background: var(--wd-color-surface-alt);
+}
+
+/* Per-discriminator colours. */
+.wd-storage-banner--storage-full {
+  background: var(--wd-color-banner-full-bg);
+  color: var(--wd-color-banner-full-text);
+  border-bottom-color: var(--wd-color-banner-full-border);
+}
+
+.wd-storage-banner--storage-blocked {
+  background: var(--wd-color-banner-blocked-bg);
+  color: var(--wd-color-banner-blocked-text);
+  border-bottom-color: var(--wd-color-banner-blocked-border);
+}
+
+.wd-storage-banner--load-recompute-failed {
+  background: var(--wd-color-banner-recompute-bg);
+  color: var(--wd-color-banner-recompute-text);
+  border-bottom-color: var(--wd-color-banner-recompute-border);
+}

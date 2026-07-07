@@ -1,0 +1,25 @@
+/*
+ * `src/ui/styles/disclaimer-banner.css` — non-dismissable disclaimer.
+ *
+ * Sticky at the top of the viewport so the legal warning is visible
+ * even after scrolling. Amber background with high-contrast text
+ * (5.85:1 — see tokens.css). No hover/active states — this is an
+ * informational banner, not an interactive element.
+ */
+.wd-disclaimer-banner {
+  position: sticky;
+  top: 0;
+  z-index: var(--wd-z-disclaimer);
+  padding: var(--wd-space-2) var(--wd-space-4);
+  background: var(--wd-color-disclaimer-bg);
+  color: var(--wd-color-disclaimer-text);
+  border-bottom: 1px solid var(--wd-color-disclaimer-border);
+  font-size: 0.875rem;
+  line-height: 1.4;
+  font-weight: 500;
+  text-align: center;
+  min-height: var(--wd-disclaimer-height);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
