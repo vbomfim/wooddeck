@@ -34,7 +34,6 @@ import { MM_PER_FOOT, type Mm } from '../../units';
 import { spanCheck } from '../../spans/span-check';
 import { IrcSpanTable } from '../../spans/irc-2018-tables';
 import type { SpanTable } from '../../spans/span-table';
-import { LayoutError } from '../layout-shared';
 import { FOOTING_WIDTH_MM } from '../y-stack';
 
 import {
@@ -417,31 +416,44 @@ describe('[COVERAGE] GAP E — blocking still emitted with interior beams presen
 
 // ===========================================================================
 // GAP G — flush→drop transition on a deck that NEEDS interior beams. [COVERAGE]
+// (Post-#77 rewrite: FR-E no longer throws — flush now RENDERS segmented
+// joists across interior beams. The UAT scenario becomes: 16×16 flush →
+// renders with segments, AND drop → still renders continuously — both
+// are valid choices for the user.)
 // ===========================================================================
-//
-// The dev's apply-parameters test was deliberately SHRUNK to 8 ft so
-// `interiorRows === 0` and FR-E never fires — which means the actual
-// UAT scenario (16×16 flush needs interior beams → rejected → switch to
-// drop → beams render) is NOT covered anywhere. This test pins that
-// exact transition on ONE design where only `beamConnection` differs.
-// ---------------------------------------------------------------------------
 
-describe('[COVERAGE] GAP G — the UAT flush→drop transition on a deck that needs interior beams', () => {
+describe('[COVERAGE] GAP G — flush AND drop both render on a deck needing interior beams', () => {
   const base = makeMethodA({ widthFt: 16, lengthFt: 16, joist: PT_2X8 });
 
-  it('FLUSH on a deck needing interior beams → rejected (FR-E)', () => {
+  it('FLUSH on a deck needing interior beams → renders segmented joists (post-#77)', () => {
     const flush: DeckDesign = { ...base, beamConnection: 'flush' };
-    expect(() => computeFloatingLayout(flush, { spanTable: IRC })).toThrowError(
-      LayoutError,
+    expect(() => computeFloatingLayout(flush, { spanTable: IRC })).not.toThrow();
+    const layout = computeFloatingLayout(flush, { spanTable: IRC });
+    const beams = layout.members.filter((m) => m.kind === 'beam');
+    const joists = layout.members.filter((m) => m.kind === 'joist');
+    // 3 beams (rim + interior) and every joist is segmented into
+    // `beams.length − 1` bays.
+    expect(beams.length).toBeGreaterThanOrEqual(3);
+    // Sanity: segmented ids follow the `joist-{i}-bay-{k}` shape.
+    expect(joists.every((j) => /^joist-\d+-bay-\d+$/.test(j.id))).toBe(true);
+    // Every segment stays span-safe (the SpanTable-driven totalRows
+    // guarantees the max adjacent-beam-z gap is ≤ allowable, so
+    // each segment's z-extent is also ≤ allowable).
+    const overSpan = spanCheck(layout, IRC).filter(
+      (w) => w.kind === 'over-span-joist',
     );
+    expect(overSpan).toEqual([]);
   });
 
-  it('DROP on the same deck → renders ≥3 beams (the one-click fix)', () => {
+  it('DROP on the same deck → renders ≥3 beams with continuous joists', () => {
     const drop: DeckDesign = { ...base, beamConnection: 'drop' };
     const layout = computeFloatingLayout(drop, { spanTable: IRC });
     const beams = layout.members.filter((m) => m.kind === 'beam');
     expect(beams.length).toBeGreaterThanOrEqual(3);
-    // And it is span-safe (the whole point of the fix).
+    // DROP joist ids are unchanged from pre-#77: `joist-{i}` (no bay suffix).
+    const joists = layout.members.filter((m) => m.kind === 'joist');
+    expect(joists.every((j) => /^joist-\d+$/.test(j.id))).toBe(true);
+    // And it is span-safe.
     const overSpan = spanCheck(layout, IRC).filter(
       (w) => w.kind === 'over-span-joist',
     );
