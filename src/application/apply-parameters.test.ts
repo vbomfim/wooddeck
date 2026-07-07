@@ -1400,14 +1400,16 @@ describe('applyParameters — beamConnection (S27)', () => {
     // materials). The floating validator will enforce the
     // beam-depth invariant — the FIXTURE's beam is 2×10 and joist
     // is 2×10 (equal), so the flush combo is legal.
-    // NOTE (issue #75): also shrink the footprint's LENGTH so
-    // Method A does NOT auto-add interior beam rows — flush +
-    // interior is now rejected by FR-E (see
-    // `floating-method-a-intermediate-beams.test.ts`). This test's
+    // NOTE (issue #77): pre-#77 the footprint was SHRUNK to 8 ft
+    // to keep `interiorRows === 0` because FR-E rejected flush +
+    // interior with a `LayoutError`. Post-#77 stopgap that throw
+    // is DELETED and flush is capped at `totalRows = 2` — flush
+    // renders in ALL cases, so the 8 ft shrink is no longer
+    // strictly necessary. It is kept here because this test's
     // intent is that `beamConnection` PERSISTS across structure +
-    // framing switches; using a small-enough deck keeps
-    // `interiorRows === 0` so FR-E doesn't fire and the beam-
-    // connection persistence invariant is what's under test.
+    // framing switches; keeping the deck small avoids exercising
+    // the (now stopgapped) intermediate-beam path and keeps this
+    // test focused on the persistence invariant.
     const toFloating = applyParameters(
       flushed.design,
       {
